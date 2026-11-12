@@ -69,15 +69,16 @@ type TrajectoryContext struct {
 }
 
 type TrajectoryRequest struct {
-	Id            string `json:"id"`
-	Model         string `json:"model"`
-	At            int64  `json:"at"`
-	ContextTokens int64  `json:"contextTokens"`
-	Input         int64  `json:"input"`
-	Output        int64  `json:"output"`
-	CacheRead     int64  `json:"cacheRead"`
-	CacheWrite    int64  `json:"cacheWrite"`
-	DurationMs    int64  `json:"durationMs"`
+	Id            string                 `json:"id"`
+	Composition   *TrajectoryComposition `json:"composition,omitempty"`
+	Model         string                 `json:"model"`
+	At            int64                  `json:"at"`
+	ContextTokens int64                  `json:"contextTokens"`
+	Input         int64                  `json:"input"`
+	Output        int64                  `json:"output"`
+	CacheRead     int64                  `json:"cacheRead"`
+	CacheWrite    int64                  `json:"cacheWrite"`
+	DurationMs    int64                  `json:"durationMs"`
 }
 
 type TrajectoryEvent struct {
@@ -100,6 +101,16 @@ type TrajectoryComposition struct {
 	ToolCalls       int64 `json:"toolCalls"`
 	Injected        int64 `json:"injected"`
 	Reasoning       int64 `json:"reasoning"`
+}
+
+type TrajectoryAgent struct {
+	NodeId   string  `json:"nodeId"`
+	Role     string  `json:"role"`
+	Instance string  `json:"instance"`
+	Model    string  `json:"model"`
+	Requests int     `json:"requests"`
+	Tokens   int64   `json:"tokens"`
+	Cost     float64 `json:"cost"`
 }
 
 type TrajectoryFiles struct {
@@ -141,6 +152,7 @@ type ConversationTrajectory struct {
 	Events         []TrajectoryEvent     `json:"events"`
 	Totals         TrajectoryTotals      `json:"totals"`
 	Composition    TrajectoryComposition `json:"composition"`
+	Agents         []TrajectoryAgent     `json:"agents"`
 }
 
 type trajectoryMessage struct {
@@ -155,6 +167,7 @@ type trajectoryMessage struct {
 type trajectoryInvocation struct {
 	TrajectoryInvocation
 	OperationId string
+	Composition *TrajectoryComposition
 }
 
 func BuildConversationTrajectory(store *TaskStore, conversationId string) *ConversationTrajectory {
@@ -281,6 +294,11 @@ func BuildConversationTrajectory(store *TaskStore, conversationId string) *Conve
 	trajectory.Totals.Commands = trajectoryCommands(store, conversationId)
 	trajectory.Totals.Files = trajectoryFiles(store, trajectory.TaskId)
 	trajectory.Composition = trajectoryComposition(store, conversationId, trajectory.TaskId)
+	if len(trajectory.Requests) > 0 && trajectory.Requests[len(trajectory.Requests)-1].Composition == nil {
+		composition := trajectory.Composition
+		trajectory.Requests[len(trajectory.Requests)-1].Composition = &composition
+	}
+	trajectory.Agents = trajectoryAgents(store, trajectory.TaskId)
 	return trajectory
 }
 

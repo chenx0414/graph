@@ -94,7 +94,8 @@ type trajectoryTotals struct {
 }
 
 type trajectoryRequest struct {
-	Id            string `json:"id"`
+	Id            string                 `json:"id"`
+	Composition   *trajectoryComposition `json:"composition,omitempty"`
 	Model         string `json:"model"`
 	At            int64  `json:"at"`
 	ContextTokens int64  `json:"contextTokens"`
@@ -124,6 +125,16 @@ type trajectoryFiles struct {
 	Image  int `json:"image"`
 }
 
+type trajectoryAgent struct {
+	NodeId   string  `json:"nodeId"`
+	Role     string  `json:"role"`
+	Instance string  `json:"instance"`
+	Model    string  `json:"model"`
+	Requests int     `json:"requests"`
+	Tokens   int64   `json:"tokens"`
+	Cost     float64 `json:"cost"`
+}
+
 type trajectoryComposition struct {
 	SystemPrompt    int64 `json:"systemPrompt"`
 	ToolDefinitions int64 `json:"toolDefinitions"`
@@ -142,6 +153,7 @@ type conversationTrajectory struct {
 	Events         []trajectoryEvent     `json:"events"`
 	Totals         trajectoryTotals      `json:"totals"`
 	Composition    trajectoryComposition `json:"composition"`
+	Agents         []trajectoryAgent     `json:"agents"`
 }
 
 type trajectoryState struct {

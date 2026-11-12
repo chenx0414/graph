@@ -132,6 +132,16 @@ func boardPanelTitle(kind string) string {
 		return "Token 组成"
 	case "trajectory-requests":
 		return "请求浏览"
+	case "trajectory-agents":
+		return "Agent 网络"
+	case "insights":
+		return "洞察概览"
+	case "insights-kpi":
+		return "洞察概览"
+	case "insights-days":
+		return "用量趋势"
+	case "insights-sessions":
+		return "会话排行"
 	case "tasks":
 		return "任务清单"
 	case "graph":
@@ -287,11 +297,25 @@ func (s *shellState) openModule(kind string) {
 		},
 		Layout: boardNode{Kind: "panel", PanelID: kind},
 	}
+	if kind == "insights" {
+		page.Panels = []boardPanel{
+			{ID: "insights-kpi", Kind: "insights-kpi"},
+			{ID: "insights-days", Kind: "insights-days"},
+			{ID: "insights-sessions", Kind: "insights-sessions"},
+		}
+		page.Layout = boardNode{Kind: "split", Axis: "column", Children: []boardSlot{
+			{Weight: 1, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
+				{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "insights-kpi"}},
+				{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "insights-days"}},
+			}}},
+			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "insights-sessions"}},
+		}}
+	}
 	if kind == "trajectory" {
 		s.boardScrollTop = true
 		kinds := []string{"trajectory-summary", "trajectory-tokens", "trajectory-timing", "trajectory-context",
 			"trajectory-trend", "trajectory-events", "trajectory-commands", "trajectory-files",
-			"trajectory-composition", "trajectory-requests"}
+			"trajectory-composition", "trajectory-requests", "trajectory-agents"}
 		panels := make([]boardPanel, 0, len(kinds))
 		for _, panelKind := range kinds {
 			panels = append(panels, boardPanel{ID: panelKind, Kind: panelKind})
@@ -382,6 +406,8 @@ func (s *shellState) ensureBoardPageData() {
 		s.ensureGraph()
 	case "trajectory":
 		s.ensureTrajectory()
+	case "insights":
+		s.ensureInsights()
 	}
 }
 

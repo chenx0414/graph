@@ -24,7 +24,7 @@ func trajectoryMessages(store *TaskStore, conversationId string) []trajectoryMes
 }
 
 func trajectoryInvocations(store *TaskStore, taskId string) []trajectoryInvocation {
-	rows := kernelRows(store.Db, `SELECT i.id,i.operation_id,i.model,i.purpose,i.usage,i.cost,
+	rows := kernelRows(store.Db, `SELECT i.id,i.operation_id,i.model,i.purpose,i.usage,i.cost,i.composition,
 		COALESCE(i.dispatched_at,0) AS dispatched_at,COALESCE(i.settled_at,0) AS settled_at
 		FROM invocations i JOIN operations o ON o.id=i.operation_id
 		WHERE o.task_id=? ORDER BY i.rowid`, taskId)
@@ -48,6 +48,12 @@ func trajectoryInvocations(store *TaskStore, taskId string) []trajectoryInvocati
 			var usage TokenUsage
 			if json.Unmarshal([]byte(recorded), &usage) == nil {
 				invocation.Usage = trajectoryUsage(usage)
+			}
+		}
+		if recorded, ok := row["composition"].(string); ok && recorded != "" {
+			var composition TrajectoryComposition
+			if json.Unmarshal([]byte(recorded), &composition) == nil {
+				invocation.Composition = &composition
 			}
 		}
 		invocations = append(invocations, invocation)
@@ -76,6 +82,7 @@ func trajectoryRequests(invocations []trajectoryInvocation) []TrajectoryRequest 
 			Id:            invocation.Id,
 			Model:         invocation.Model,
 			At:            invocation.Dispatched,
+			Composition:   invocation.Composition,
 			ContextTokens: invocation.Usage.ContextTokens,
 			Input:         invocation.Usage.Input,
 			Output:        invocation.Usage.Output,
@@ -201,6 +208,40 @@ func trajectoryComposition(store *TaskStore, conversationId, taskId string) Traj
 		}
 	}
 	return composition
+}
+
+func trajectoryAgents(store *TaskStore, taskId string) []TrajectoryAgent {
+	rows := kernelRows(store.Db, `SELECT o.node_id,o.instance_id,i.model,i.usage,i.cost,
+		COALESCE(json_extract(n.spec,'$.role'),'') AS role
+		FROM invocations i JOIN operations o ON o.id=i.operation_id
+		LEFT JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id
+		WHERE o.task_id=? ORDER BY i.rowid`, taskId)
+	index := map[string]int{}
+	agents := []TrajectoryAgent{}
+	for _, row := range rows {
+		nodeID := kernelString(row["node_id"])
+		instance := kernelString(row["instance_id"])
+		model := kernelString(row["model"])
+		key := nodeID + "\x00" + instance
+		position, ok := index[key]
+		if !ok {
+			index[key] = len(agents)
+			agents = append(agents, TrajectoryAgent{NodeId: nodeID, Instance: instance, Model: model, Role: kernelString(row["role"])})
+			position = len(agents) - 1
+		}
+		agents[position].Requests++
+		tokens := int64(0)
+		if recorded, ok := row["usage"].(string); ok && recorded != "" {
+			var usage TokenUsage
+			if json.Unmarshal([]byte(recorded), &usage) == nil {
+				tokens = trajectoryUsage(usage).Total
+			}
+		}
+		agents[position].Tokens += tokens
+		agents[position].Cost += trajectoryCost(row["cost"])
+	}
+	sort.SliceStable(agents, func(first, second int) bool { return agents[first].Tokens > agents[second].Tokens })
+	return agents
 }
 
 func trajectoryFiles(store *TaskStore, taskId string) TrajectoryFiles {

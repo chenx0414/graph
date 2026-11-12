@@ -146,6 +146,14 @@ func appAttachmentBytes(value any) []byte {
 	return nil
 }
 
+func (app *GraphApp) serveTrajectoryInsights(w http.ResponseWriter, r *http.Request) {
+	days := 7
+	if value, ok := appQueryNumber(r, "days"); ok {
+		days = int(value)
+	}
+	writeJSON(w, http.StatusOK, BuildTrajectoryInsights(app.runtime.store, days))
+}
+
 func (app *GraphApp) serveConversationTrajectory(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().Trajectory(conversationID))

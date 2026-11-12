@@ -20,6 +20,7 @@ type shellState struct {
 	usage          *usageState
 	resources      *resourceState
 	trajectory     trajectoryState
+	insights       insightsState
 	conversations  []conversationSummary
 	supervisorID   string
 	broken         bool

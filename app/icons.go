@@ -17,6 +17,7 @@ var (
 	iconFit       = svgIcon(`<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>`)
 	iconClose     = svgIcon(`<path d="M18 6 6 18"/><path d="m6 6 12 12"/>`)
 	iconDown      = svgIcon(`<path d="M12 4v13"/><path d="m6 12 6 6 6-6"/><path d="M5 21h14"/>`)
+	iconTrend     = svgIcon(`<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>`)
 	iconDatabase  = svgIcon(`<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/>`)
 	iconActivity  = svgIcon(`<path d="M3 12h4l3-8 4 16 3-8h4"/>`)
 	iconSend      = svgIcon(`<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>`)

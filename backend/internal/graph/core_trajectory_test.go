@@ -103,10 +103,52 @@ func TestConversationTrajectoryGroupsTurnsAndMetrics(t *testing.T) {
 	if composition.UserMessages != 4 || composition.AssistantReply != 4 || composition.ToolCalls != 0 {
 		t.Fatalf("composition messages %+v", composition)
 	}
+	if len(trajectory.Agents) != 1 || trajectory.Agents[0].NodeId != "n1" || trajectory.Agents[0].Requests != 2 || trajectory.Agents[0].Tokens != 340 {
+		t.Fatalf("agents %+v", trajectory.Agents)
+	}
 
 	SaveConversationTrajectory(store, "c1")
 	row := kernelRow(store.DB, "SELECT conversation_id,task_id,payload FROM trajectories WHERE conversation_id='c1'")
 	if row == nil || kernelString(row["task_id"]) != "t1" || kernelString(row["payload"]) == "" {
 		t.Fatalf("stored trajectory %+v", row)
+	}
+}
+
+func TestTrajectoryInsightsGroupDaysAndSessions(t *testing.T) {
+	store := openTaskStore(t, filepath.Join(t.TempDir(), "insights.sqlite"))
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := store.DB.Exec(query, args...); err != nil {
+			t.Fatalf("exec: %v", err)
+		}
+	}
+	exec(`INSERT INTO projects(id,root,grants) VALUES('p1','/tmp','[]')`)
+	exec(`INSERT INTO tasks(id,project_id,request,created_seq,conversation_id) VALUES('t1','p1','hi',1,'c1')`)
+	exec(`INSERT INTO conversations(id,project_id,workspace_project_id,anchor_task_id,title,created_seq,created_at)
+	      VALUES('c1',NULL,'p1','t1','会话甲',1,0)`)
+	exec(`INSERT INTO nodes(task_id,id,spec) VALUES('t1','n1','{}')`)
+	exec(`INSERT INTO operations(id,task_id,node_id,generation,spec,state,reserved,worker_active,dispatched_at,settled_at)
+	      VALUES('op1','t1','n1',1,'{}','succeeded',0,0,0,0)`)
+	now := NowMillis()
+	exec(`INSERT INTO invocations(id,operation_id,instance_id,model,usage,cost,purpose,dispatched_at,settled_at)
+	      VALUES('v1','op1','i1','deepseek','{"input":100,"output":50,"cacheRead":80,"cacheWrite":0}','{"total":0.02}','completion',?,?)`, now-86400000, now)
+	exec(`INSERT INTO invocations(id,operation_id,instance_id,model,usage,cost,purpose,dispatched_at,settled_at)
+	      VALUES('v2','op1','i1','deepseek','{"input":40,"output":10,"cacheRead":10,"cacheWrite":0}','{"total":0.01}','completion',?,?)`, now-2*86400000, now)
+	insights := BuildTrajectoryInsights(store, 7)
+	if len(insights.Days) != 7 {
+		t.Fatalf("days %d", len(insights.Days))
+	}
+	if insights.Totals.Requests != 2 || insights.Totals.Tokens != 290 || insights.Totals.Cost < 0.0299 || insights.Totals.Cost > 0.0301 {
+		t.Fatalf("totals %+v", insights.Totals)
+	}
+	if len(insights.Sessions) != 1 || insights.Sessions[0].Title != "会话甲" || insights.Sessions[0].Requests != 2 {
+		t.Fatalf("sessions %+v", insights.Sessions)
+	}
+	dayRequests := 0
+	for _, day := range insights.Days {
+		dayRequests += day.Requests
+	}
+	if dayRequests != 2 {
+		t.Fatalf("day requests %d", dayRequests)
 	}
 }

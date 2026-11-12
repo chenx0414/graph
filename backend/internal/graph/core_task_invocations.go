@@ -43,6 +43,47 @@ func (s *TaskStore) OpenInvocation(id, operationID, instanceID, model, purpose s
 		id, operationID, instanceID, model, purpose, NowMillis()); err != nil {
 		panic(err)
 	}
+	if composition := invocationComposition(s, operationID); composition != "" {
+		if _, err := s.DB.Exec("UPDATE invocations SET composition=? WHERE id=?", composition, id); err != nil {
+			panic(err)
+		}
+	}
+}
+
+func invocationComposition(store *TaskStore, operationID string) string {
+	operation := kernelRow(store.Db, `SELECT task_id,COALESCE(system_prompt,'') AS system_prompt,
+		COALESCE(tool_declarations,'') AS tool_declarations FROM operations WHERE id=?`, operationID)
+	if operation == nil {
+		return ""
+	}
+	composition := TrajectoryComposition{
+		SystemPrompt:    estimateTrajectoryTokens(kernelString(operation["system_prompt"])),
+		ToolDefinitions: estimateTrajectoryTokens(kernelString(operation["tool_declarations"])),
+	}
+	if conversation := ConversationForTask(store, kernelString(operation["task_id"])); conversation != nil {
+		rows := kernelRows(store.Db, `SELECT role,kind,SUM(LENGTH(text)) AS chars,
+			SUM(LENGTH(CAST(text AS BLOB))) AS bytes FROM messages WHERE conversation_id=? GROUP BY role,kind`, conversation.Id)
+		for _, row := range rows {
+			chars := kernelInt(row["chars"])
+			wide := (kernelInt(row["bytes"]) - chars) / 2
+			tokens := wide + (chars-wide+3)/4
+			switch role, kind := kernelString(row["role"]), kernelString(row["kind"]); {
+			case role == "user" && kind == "chat":
+				composition.UserMessages += tokens
+			case role == "assistant" && kind == "chat":
+				composition.AssistantReply += tokens
+			case role == "tool" && kind == "tool":
+				composition.ToolCalls += tokens
+			case role == "system" && kind != "rsi" && kind != "activity":
+				composition.Injected += tokens
+			}
+		}
+	}
+	payload, err := json.Marshal(composition)
+	if err != nil {
+		return ""
+	}
+	return string(payload)
 }
 
 func (s *TaskStore) InvocationUsage(id string) (*string, bool) {

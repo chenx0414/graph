@@ -247,8 +247,14 @@ func (s *shellState) trajectoryRequestsCard(ctx *ui.Context) {
 		row := ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center)
 		row.Children(func() {
 			kit.Text(ctx, formatTrajectoryClock(request.At), t.Text.Xs).TextColor(t.Muted).Width(th.Space(11))
-			bar := ui.Row(ctx).Grow(1).Height(th.Space(1)).Radius(t.Radius.Full).Background(t.Hover)
+			bar := ui.Row(ctx).Grow(1).Height(th.Space(1.5)).Radius(t.Radius.Full).Background(t.Hover)
 			bar.Children(func() {
+				if composition := request.Composition; composition != nil {
+					for _, segment := range trajectoryCompositionSegments(*composition) {
+						ui.Box(ctx).Grow(segment.share).FillHeight().Background(segment.color)
+					}
+					return
+				}
 				ui.Box(ctx).Grow(ratio).FillHeight().Radius(t.Radius.Full).Background(palette.Blue500.Color())
 				if ratio < 1 {
 					ui.Box(ctx).Grow(1 - ratio).FillHeight()
@@ -258,4 +264,68 @@ func (s *shellState) trajectoryRequestsCard(ctx *ui.Context) {
 			kit.Text(ctx, formatTrajectoryTokens(request.Output)+" out", t.Text.Xs).TextColor(t.Muted).Width(th.Space(9))
 		})
 	}
+}
+
+func (s *shellState) trajectoryAgentsCard(ctx *ui.Context) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	data := s.trajectoryData(ctx)
+	if data == nil {
+		return
+	}
+	agents := data.Agents
+	if len(agents) > 6 {
+		agents = agents[:6]
+	}
+	trajectoryCardHeader(ctx, iconShare, strconv.Itoa(len(data.Agents))+" 个 Agent")
+	if len(agents) == 0 {
+		kit.Text(ctx, "还没有 Agent 归属数据。", t.Text.Sm).TextColor(t.Muted)
+		return
+	}
+	for _, agent := range agents {
+		name := agent.Role
+		if name == "" {
+			name = agent.NodeId
+		}
+		row := ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center)
+		row.Children(func() {
+			kit.Text(ctx, name, t.Text.Xs).FontWeight(500).Grow(1).SingleLine().Ellipsis("…")
+			kit.Text(ctx, strconv.Itoa(agent.Requests)+" 次", t.Text.Xs).TextColor(t.Muted)
+			kit.Text(ctx, formatTrajectoryTokens(agent.Tokens), t.Text.Xs).TextColor(t.Muted)
+			kit.Text(ctx, formatTrajectoryCost(agent.Cost), t.Text.Xs).TextColor(t.Muted)
+		})
+	}
+}
+
+type trajectoryCompositionSegment struct {
+	share float32
+	color ui.Color
+}
+
+func trajectoryCompositionSegments(composition trajectoryComposition) []trajectoryCompositionSegment {
+	values := []struct {
+		value int64
+		color ui.Color
+	}{
+		{composition.SystemPrompt, palette.Blue500.Color()},
+		{composition.ToolDefinitions, palette.Violet500.Color()},
+		{composition.UserMessages, palette.Green500.Color()},
+		{composition.AssistantReply, palette.Teal500.Color()},
+		{composition.ToolCalls, palette.Amber500.Color()},
+		{composition.Injected, palette.Pink500.Color()},
+	}
+	total := int64(0)
+	for _, entry := range values {
+		total += entry.value
+	}
+	if total <= 0 {
+		return nil
+	}
+	segments := make([]trajectoryCompositionSegment, 0, len(values))
+	for _, entry := range values {
+		if entry.value <= 0 {
+			continue
+		}
+		segments = append(segments, trajectoryCompositionSegment{share: float32(entry.value) / float32(total), color: entry.color})
+	}
+	return segments
 }

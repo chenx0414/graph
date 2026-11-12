@@ -19,6 +19,7 @@ func TestTrajectoryModuleQuantifiesTheLatestConversation(t *testing.T) {
 	"requests":[{"id":"v1","model":"deepseek-v4","at":0,"contextTokens":42000,"input":100,"output":50,"cacheRead":80,"cacheWrite":20,"durationMs":1200}],
 	"events":[{"at":1700000000000,"type":"session.compacted","text":"auto","tokens":42000}],
 	"composition":{"systemPrompt":1000,"toolDefinitions":500,"userMessages":300,"assistantReply":200,"toolCalls":150,"injected":50,"reasoning":0},
+	"agents":[{"nodeId":"n1","role":"master","instance":"i1","model":"deepseek-v4","requests":2,"tokens":250,"cost":0.02}],
 	"totals":{"turns":1,"requests":2,"modelReplies":1,"userMessages":1,"toolMessages":2,"compactions":1,
 	 "toolCalls":1,"toolErrors":0,"input":100,"output":50,"cacheRead":80,"cacheWrite":20,
 	 "totalTokens":250,"cost":0.02,"durationMs":7000,"cacheHitRate":0.4444,
@@ -49,15 +50,15 @@ func TestTrajectoryModuleQuantifiesTheLatestConversation(t *testing.T) {
 	shell.openModule("trajectory")
 	tester := frames(ui.NewTester(shell.view, 1440, 900))
 	for _, wanted := range []string{"上下文统计窗口", "Token 统计窗口", "耗时统计窗口", "当前上下文窗口",
-		"上下文趋势窗口", "上下文事件窗口", "命令执行窗口", "文件活动窗口", "Token 组成窗口", "请求浏览窗口",
+		"上下文趋势窗口", "上下文事件窗口", "命令执行窗口", "文件活动窗口", "Token 组成窗口", "请求浏览窗口", "Agent 网络窗口",
 		"轮次", "步数", "工具调用", "缓存命中", "44.4%", "bash", "未缓存输入", "首 token 等待", "峰值", "最近一次请求",
-		"git", "读取", "上下文压缩", "次请求", "系统提示词", "按字符估算", "估算 tokens"} {
+		"git", "读取", "上下文压缩", "次请求", "系统提示词", "按字符估算", "估算 tokens", "master"} {
 		if !tester.HasText(wanted) {
 			t.Fatalf("the trajectory dashboard shows %q, texts %q", wanted, tester.Texts())
 		}
 	}
 	page := shell.boardPage()
-	if page.Kind != "trajectory" || len(page.Panels) != 10 {
+	if page.Kind != "trajectory" || len(page.Panels) != 11 {
 		t.Fatalf("the trajectory tab opens four cards, page %+v", page)
 	}
 }

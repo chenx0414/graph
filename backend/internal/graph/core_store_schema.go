@@ -57,3 +57,5 @@ const schemaV55 = "\n        ALTER TABLE conversation_goals ADD COLUMN acceptanc
 const schemaV57 = "\n        ALTER TABLE invocations ADD COLUMN dispatched_at INTEGER NOT NULL DEFAULT 0;\n        ALTER TABLE invocations ADD COLUMN settled_at INTEGER NOT NULL DEFAULT 0;\n        PRAGMA user_version=57;"
 
 const schemaV58 = "\n        CREATE TABLE IF NOT EXISTS trajectories(\n          conversation_id TEXT PRIMARY KEY,\n          task_id TEXT NOT NULL,\n          updated_at INTEGER NOT NULL,\n          payload TEXT NOT NULL);\n        CREATE INDEX IF NOT EXISTS trajectories_task ON trajectories(task_id, updated_at);\n        PRAGMA user_version=58;"
+
+const schemaV59 = "\n        ALTER TABLE invocations ADD COLUMN composition TEXT;\n        PRAGMA user_version=59;"
