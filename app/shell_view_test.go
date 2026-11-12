@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"image"
 	"net/http"
 	"net/http/httptest"
@@ -459,4 +460,37 @@ func countColor(img *image.RGBA, want ui.Color) int {
 		}
 	}
 	return count
+}
+
+func TestTheRailNoLongerOffersHistoryOrConversationPages(t *testing.T) {
+	for _, item := range railItems {
+		if item.kind == "history" || item.kind == "conversation" {
+			t.Fatalf("the rail still offers %q", item.kind)
+		}
+	}
+}
+
+func TestLoadingTheBoardDropsTheRemovedPages(t *testing.T) {
+	state := fourPaneShell(t)
+	dir := t.TempDir()
+	payload, err := json.Marshal(boardFile{
+		Version: boardLayoutVersion,
+		Pages: []boardPage{
+			{ID: "board", Title: boardDefaultTitle, Panels: defaultBoardPanels(), Layout: defaultBoardLayout()},
+			{ID: "tab-history", Title: "历史记录", Kind: "history", Panels: []boardPanel{{ID: "history", Kind: "history"}}, Layout: boardNode{Kind: "panel", PanelID: "history"}},
+			{ID: "tab-conversation", Title: "对话信息", Kind: "conversation", Panels: []boardPanel{{ID: "conversation", Kind: "conversation"}}, Layout: boardNode{Kind: "panel", PanelID: "conversation"}},
+		},
+		Active: 2,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "whiteboard.json"), payload, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	state.loadBoard(dir)
+	if len(state.board.pages) != 1 || state.board.pages[0].Kind != "" {
+		t.Fatalf("removed pages survived, pages %+v", state.board.pages)
+	}
+	frames(ui.NewTester(state.view, 1440, 900))
 }

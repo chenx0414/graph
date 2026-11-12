@@ -16,8 +16,6 @@ type railItem struct {
 
 var railItems = []railItem{
 	{"overview", "概览", iconHome},
-	{"conversation", "对话", iconChat},
-	{"history", "历史", iconClock},
 	{"trajectory", "轨迹", iconActivity},
 	{"insights", "洞察", iconTrend},
 	{"tasks", "任务", iconDoc},

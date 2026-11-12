@@ -174,9 +174,18 @@ func (s *shellState) loadBoard(stateDir string) {
 	if json.Unmarshal(payload, &file) != nil {
 		return
 	}
+	kept := make([]boardPage, 0, len(file.Pages))
+	for _, page := range file.Pages {
+		if page.Kind == "history" || page.Kind == "conversation" {
+			continue
+		}
+		kept = append(kept, page)
+	}
 	switch {
+	case len(kept) > 0:
+		s.board.pages = kept
 	case len(file.Pages) > 0:
-		s.board.pages = file.Pages
+		s.board.pages = defaultBoardPages()
 	case len(file.Panels) > 0:
 		s.board.pages = []boardPage{{ID: "board", Title: boardDefaultTitle, Panels: file.Panels}}
 	}
