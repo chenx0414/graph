@@ -53,7 +53,7 @@ func (s *shellState) titleBand(ctx *ui.Context) {
 			kit.Text(ctx, title, gwtheme.Of(ctx).Text.Base).FontWeight(600).SingleLine().Ellipsis("…").Grow(1)
 		})
 		ui.Box(ctx).Width(gwtheme.Stroke)
-		ui.Row(ctx).Grow(1.35).FillHeight().Background(gwtheme.Of(ctx).Sidebar).Children(func() {
+		ui.Row(ctx).Grow(1.35).FillHeight().Children(func() {
 			s.boardTabBar(ctx)
 		})
 	})

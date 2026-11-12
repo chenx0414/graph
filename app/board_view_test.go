@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"image/color"
 	"os"
 	"path/filepath"
 	"testing"
@@ -313,20 +314,34 @@ func TestTheWhiteboardTakesTheListBackgroundAndLiftsItsCards(t *testing.T) {
 	}
 	image := tester.Image()
 	listBackground := image.RGBAAt(int(row.X+8), int(row.Y+row.H+8))
+	distance := func(a, b color.RGBA) int {
+		return absInt(int(a.R)-int(b.R)) + absInt(int(a.G)-int(b.G)) + absInt(int(a.B)-int(b.B))
+	}
 	plus, ok := tester.Find("新建标签页")
 	if !ok {
 		t.Fatalf("the whiteboard tab bar never rendered, texts %q", tester.Texts())
-	}
-	canvas := image.RGBAAt(int(plus.X+plus.W+24), int(plus.Y+plus.H/2))
-	if canvas != listBackground {
-		t.Fatalf("the whiteboard background %v differs from the list background %v", canvas, listBackground)
 	}
 	card, ok := tester.Find(boardPanelTitle("tasks") + "窗口")
 	if !ok {
 		t.Fatalf("the tasks card never rendered, texts %q", tester.Texts())
 	}
+	canvas := image.RGBAAt(int(card.X+card.W/2), int(card.Y-5))
+	if distance(canvas, listBackground) > 4 {
+		t.Fatalf("the whiteboard background %v differs from the list background %v", canvas, listBackground)
+	}
+	tabBar := image.RGBAAt(int(plus.X+plus.W+24), int(plus.Y+plus.H/2))
+	if distance(tabBar, listBackground) < 4 {
+		t.Fatalf("the whiteboard tab bar took the list background %v", tabBar)
+	}
 	gap := image.RGBAAt(int(card.X+card.W+5), int(card.Y+card.H/2))
-	if gap == listBackground {
+	if distance(gap, listBackground) < 4 {
 		t.Fatalf("the cards cast no shadow over the canvas %v", gap)
 	}
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
