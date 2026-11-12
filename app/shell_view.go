@@ -13,9 +13,8 @@ func (s *shellState) view(ctx *ui.Context) {
 	shell.Children(func() {
 		s.rail(ctx)
 		ui.Column(ctx).Grow(1).FillHeight().Children(func() {
-			s.titleBand(ctx)
 			ui.Row(ctx).Grow(1).FillWidth().Padding(cardGap, cardGap, cardGap, cardGap).Children(func() {
-				card := ui.Row(ctx).Grow(1).FillHeight().Background(t.Background).
+				card := ui.Row(ctx).Grow(1).FillHeight().Padding(titleBandHeight(ctx), 0, 0, 0).Background(t.Background).
 					Radius(t.Radius.Xl).Border(gwtheme.Hairline, t.Border).Clip().Label("主区域卡片")
 				kit.Elevate(ctx, card, shellShadow)
 				card.Children(func() {
@@ -27,6 +26,13 @@ func (s *shellState) view(ctx *ui.Context) {
 				})
 			})
 		})
+		s.titleBandOverlay(ctx)
+	})
+}
+
+func (s *shellState) titleBandOverlay(ctx *ui.Context) {
+	ui.Box(ctx).Absolute().Left(railWidth).Top(0).Right(0).Height(titleBandHeight(ctx)).Children(func() {
+		s.titleBand(ctx)
 	})
 }
 

@@ -458,10 +458,9 @@ func TestTheTitleBandLinesUpWithTheTrafficLightsAndPadsTheCardEvenly(t *testing.
 	if !ok {
 		t.Fatalf("the card never rendered, texts %q", tester.Texts())
 	}
-	top := card.Y - 42
 	bottom := 900 - (card.Y + card.H)
-	if delta := top - bottom; delta < -1 || delta > 1 {
-		t.Fatalf("the card leaves %v above and %v below", top, bottom)
+	if delta := card.Y - bottom; delta < -1 || delta > 1 {
+		t.Fatalf("the card leaves %v above and %v below", card.Y, bottom)
 	}
 }
 
