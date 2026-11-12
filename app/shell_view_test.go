@@ -9,6 +9,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	gwtheme "graph/app/gwui/theme"
+	"graph/app/gwui/palette"
 )
 
 func fourPaneShell(t *testing.T) *shellState {
@@ -79,6 +80,23 @@ func TestTheWindowShowsFourPanesLeftToRight(t *testing.T) {
 	}
 	if tester.HasText("旧聊天") {
 		t.Fatalf("a legacy chat must stay out of the project conversation list, texts %q", tester.Texts())
+	}
+}
+
+func TestTheMainAgentRowStandsOutFromTheProjects(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	if !tester.HasText("main agent") || !tester.HasText("主控") {
+		t.Fatalf("the main agent row must read as the resident agent, texts %q", tester.Texts())
+	}
+	if tile := countColor(tester.Image(), palette.Violet100.Color()); tile < 200 {
+		t.Fatalf("the main agent must carry its own octopus tile, %d tile pixels", tile)
+	}
+	if ink := countColor(tester.Image(), palette.Violet700.Color()); ink < 10 {
+		t.Fatalf("the octopus must be drawn in its own ink, %d ink pixels", ink)
+	}
+	if dot := countColor(tester.Image(), gwtheme.Light().Success); dot != 0 {
+		t.Fatalf("the main agent row carries no status dot, %d green pixels", dot)
 	}
 }
 

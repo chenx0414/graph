@@ -71,22 +71,33 @@ func (s *shellState) conversationPane(ctx *ui.Context) {
 func (s *shellState) mainAgentCard(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	selected := s.supervisorID != "" && s.activeID == s.supervisorID
-	row := kit.SidebarItem(ctx, kit.SidebarItemOpts{
-		Selected: selected,
-		OnClick: func() {
-			if s.supervisorID != "" {
-				s.selectConversation(s.supervisorID)
-			}
-		},
+	row := ui.Row(ctx).FillWidth().Height(th.Space(11)).Padding(0, th.Space(1.5), 0, th.Space(2)).
+		Gap(th.Space(2)).AlignItems(ui.Center).Radius(t.Radius.Lg).
+		Border(gwtheme.Hairline, t.Border).Background(t.HoverTint).Focusable().Label("main agent")
+	row.OnClick(func() {
+		if s.supervisorID != "" {
+			s.selectConversation(s.supervisorID)
+		}
 	})
-	row.Label("main agent")
+	switch {
+	case selected:
+		row.Background(t.SidebarSelected)
+	case row.Hovered():
+		row.Background(t.Hover)
+	}
 	row.Children(func() {
-		ui.Icon(ctx, iconBird).Size(gwtheme.Icon, gwtheme.Icon).TextColor(t.Foreground)
-		kit.Text(ctx, "main agent", t.Text.Base).FontWeight(600).TextColor(t.Foreground).Grow(1).SingleLine()
+		tile := ui.Box(ctx).Size(th.Space(7), th.Space(7)).Radius(t.Radius.Md).Background(octopusTile(t)).Center()
+		tile.Children(func() {
+			ui.Icon(ctx, iconOctopus).Size(gwtheme.IconLg, gwtheme.IconLg).TextColor(octopusInk(t))
+		})
+		ui.Column(ctx).Gap(0).Children(func() {
+			kit.Text(ctx, "main agent", t.Text.Base).FontWeight(600).TextColor(t.Foreground)
+			kit.Text(ctx, "主控 · 常驻", t.Text.Xs).TextColor(t.Muted)
+		})
 		ui.Spacer(ctx)
-		kit.StatusDot(ctx, kit.OK)
 	})
-	row.Margin(0, 0, th.Space(1.5), 0)
+	row.Margin(0, 0, th.Space(1), 0)
+	kit.Separator(ctx, false).Margin(0, 0, th.Space(1.5), 0)
 }
 
 func (s *shellState) conversationList(ctx *ui.Context) {
