@@ -15,23 +15,24 @@ const CONVERSATION_DELTA_FLUSH_MS = 60
 const PROMPT_SUGGESTION_TIMEOUT_MS = 5_000
 
 type PiAdapterOptions struct {
-	RecoverySnapshot *FrozenExecutionRecovery
-	Store            *TaskStore
-	InstancesDir     string
-	Catalog          *Catalog
-	Artifacts        *ArtifactWorkspace
-	Directory func() []ModelEntry
-	ApiKey *string
-	ApiKeyFor func(entry ModelEntry) *string
-	BindingFor func(entry ModelEntry) *PiAdapterBinding
-	Scheduler *ModelScheduler
-	ModelRuntime *ModelRuntime
-	Network *PiAdapterNetwork
-	TaskSetups *TaskSetupLedger
+	RecoverySnapshot  *FrozenExecutionRecovery
+	Store             *TaskStore
+	InstancesDir      string
+	Catalog           *Catalog
+	Artifacts         *ArtifactWorkspace
+	Directory         func() []ModelEntry
+	ApiKey            *string
+	ApiKeyFor         func(entry ModelEntry) *string
+	BindingFor        func(entry ModelEntry) *PiAdapterBinding
+	Scheduler         *ModelScheduler
+	ModelRuntime      *ModelRuntime
+	Network           *PiAdapterNetwork
+	TaskSetups        *TaskSetupLedger
 	CapabilitySecrets func() map[string]string
-	Channels *PiAdapterChannels
-	Transport AgentSessionTransport
-	SpawnAgent func(parent AgentSpawnParent, input AgentSpawnInput) any
+	Channels          *PiAdapterChannels
+	Transport         AgentSessionTransport
+	SpawnAgent        func(parent AgentSpawnParent, input AgentSpawnInput) any
+	ControlAgent      func(parent AgentSpawnParent, input AgentControlInput) any
 	DaemonNativeTools bool
 }
 

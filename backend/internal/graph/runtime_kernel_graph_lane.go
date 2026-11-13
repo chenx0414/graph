@@ -29,27 +29,28 @@ type KernelGraphLaneCredential struct {
 }
 
 type KernelGraphLaneOptions struct {
-	Kernel  *KernelStore
-	Network *KernelGraphLaneNetwork
-	Program *KernelGraphLaneProgram
-	Catalog *Catalog
-	Library *AgentContextLibrary
-	Codemode GraphCodemode
+	Kernel        *KernelStore
+	Network       *KernelGraphLaneNetwork
+	Program       *KernelGraphLaneProgram
+	Catalog       *Catalog
+	Library       *AgentContextLibrary
+	Codemode      GraphCodemode
 	TokenBudget   *TokenBudget
 	ReserveTokens *float64
-	Directory func() []ModelEntry
-	Scheduler *ModelScheduler
+	Directory     func() []ModelEntry
+	Scheduler     *ModelScheduler
 	CredentialFor func(entry ModelEntry) *KernelGraphLaneCredential
-	InstancesDir string
-	StateDir  string
-	GraphHome string
-	WorkspaceFor func(graphId string) *string
-	Git *GitIntegration
-	Artifacts *ArtifactWorkspace
-	GateFor func(graphId, nodeId string) *SendGate
+	InstancesDir  string
+	StateDir      string
+	GraphHome     string
+	WorkspaceFor  func(graphId string) *string
+	Git           *GitIntegration
+	Artifacts     *ArtifactWorkspace
+	GateFor       func(graphId, nodeId string) *SendGate
 	OnMainMessage func(graphId, nodeId, text, requestId string) any
-	SpawnAgent func(parent AgentSpawnParent, input AgentSpawnInput) any
-	OnToolCall func(graphId, nodeId, name string, args any) PiToolAnswer
+	SpawnAgent    func(parent AgentSpawnParent, input AgentSpawnInput) any
+	ControlAgent  func(parent AgentSpawnParent, input AgentControlInput) any
+	OnToolCall    func(graphId, nodeId, name string, args any) PiToolAnswer
 }
 
 type ModelForContext struct {
@@ -65,8 +66,8 @@ type kernelGraphLaneNodeLocation struct {
 
 type kernelGraphLaneNodeChannels struct {
 	OnTelemetry func(call PiAdapterToolCall)
-	OnEvent func(event any)
-	OnToolCall func(name string, args any) (PiToolAnswer, error)
+	OnEvent     func(event any)
+	OnToolCall  func(name string, args any) (PiToolAnswer, error)
 }
 
 func ModelFor(options KernelGraphLaneOptions, recipe string, context *ModelForContext) *ModelEntry {

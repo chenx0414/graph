@@ -231,7 +231,8 @@ func (state *kernelGraphLaneState) sessionFor(graphId, nodeId string, revisionVe
 		InstancesDir:       state.options.InstancesDir,
 		Bindings:           bindings,
 		SpawnAgent:         state.options.SpawnAgent,
-		DaemonNativeTools: true,
+		ControlAgent:       state.options.ControlAgent,
+		DaemonNativeTools:  true,
 	}
 	if library != nil {
 		sessionOptions.Library = library

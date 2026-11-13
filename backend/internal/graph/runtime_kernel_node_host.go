@@ -14,9 +14,9 @@ type NodeSessionBinding struct {
 }
 
 type NodeSessionEnvironment struct {
-	Revision  int                   `json:"revision"`
-	Workspace string                `json:"workspace"`
-	Base      string                `json:"base"`
+	Revision  int    `json:"revision"`
+	Workspace string `json:"workspace"`
+	Base      string `json:"base"`
 }
 
 type NodeSession struct {
@@ -48,16 +48,17 @@ type NodeSessionOptions struct {
 	Gate               *SendGate
 	Library            *AgentContextLibrary
 	SpawnAgent         func(parent AgentSpawnParent, input AgentSpawnInput) any
-	DaemonNativeTools bool
+	ControlAgent       func(parent AgentSpawnParent, input AgentControlInput) any
+	DaemonNativeTools  bool
 }
 
 type NodeSessionBindings struct {
-	Peers           any
-	Artifacts       any
-	AskSupervisor   func(PiAdapterAskedQuestion)
+	Peers            any
+	Artifacts        any
+	AskSupervisor    func(PiAdapterAskedQuestion)
 	NotifySupervisor func(notice PiAdapterSupervisorNotice) any
-	CommitWorkspace func(paths []string, message string) any
-	Fetch           func(url string, signal *AbortSignal) RetrievalResult
+	CommitWorkspace  func(paths []string, message string) any
+	Fetch            func(url string, signal *AbortSignal) RetrievalResult
 }
 
 type GraphSectionQuery struct {
@@ -223,7 +224,7 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 			}
 			built := tools
 			nativeToolInput = &built
-			if options.SpawnAgent != nil {
+			if options.SpawnAgent != nil || options.ControlAgent != nil {
 				parent := AgentSpawnParent{AgentId: options.GraphId + "/" + options.NodeId, TaskId: options.GraphId, NodeId: options.NodeId, Workspace: options.Workspace}
 				if task := options.Kernel.Store.Task(options.GraphId); task.ID != "" {
 					if task.ConversationID != nil {
@@ -231,11 +232,16 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 					}
 					parent.ProjectId = task.ProjectID
 				}
-				tools.Spawn = func(request AgentToolsSpawnInput) any {
-					return options.SpawnAgent(parent, AgentSpawnInput{
-						Objective: request.Objective, Name: request.Name, Model: request.Model,
-						Workspace: request.Workspace, RequestId: request.RequestId,
-					})
+				if options.SpawnAgent != nil {
+					tools.Spawn = func(request AgentToolsSpawnInput) any {
+						return options.SpawnAgent(parent, AgentSpawnInput{
+							Objective: request.Objective, Name: request.Name, Model: request.Model,
+							Workspace: request.Workspace, RequestId: request.RequestId,
+						})
+					}
+				}
+				if options.ControlAgent != nil {
+					tools.ControlAgent = func(request AgentControlInput) any { return options.ControlAgent(parent, request) }
 				}
 			}
 			if options.Bindings != nil {

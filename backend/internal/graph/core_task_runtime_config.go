@@ -54,7 +54,6 @@ func (runtime *TaskRuntime) liveEntries() []ModelEntry {
 	return []ModelEntry{}
 }
 
-
 func (runtime *TaskRuntime) masterModel() *string {
 	if runtime.master == nil {
 		return nil
@@ -121,7 +120,6 @@ func (runtime *TaskRuntime) graphs() []ExecutionGraph {
 	return out
 }
 
-
 func (runtime *TaskRuntime) projectRootFor(graphId string) *string {
 	row := kernelRow(runtime.store.Db, "SELECT p.root AS root FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?", graphId)
 	if row == nil {
@@ -172,7 +170,8 @@ func (runtime *TaskRuntime) residentGraphLane() *GraphLane {
 		OnMainMessage: func(graphId, nodeId, text, requestId string) any {
 			return SendKernelMainMessage(runtime.kernel, graphId, nodeId, NodeMessageInput{Text: text, RequestID: requestId})
 		},
-		SpawnAgent: runtime.SpawnAgent,
+		SpawnAgent:   runtime.SpawnAgent,
+		ControlAgent: runtime.ControlAgent,
 		OnToolCall: func(graphId, nodeId, name string, args any) PiToolAnswer {
 			if name != "submit" {
 				return PiToolAnswer{Ok: false, Text: "the host does not offer a tool named " + name}
