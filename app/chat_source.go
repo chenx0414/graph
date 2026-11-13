@@ -181,15 +181,26 @@ func (source *nodeChatSource) path(suffix string) string {
 }
 
 func (source *nodeChatSource) Load(c *chatState) error {
-	payload, err := source.api.get(source.path("/run") + "?limit=50")
+	messages, hasOlder, err := source.loadPage(0)
 	if err != nil {
 		c.status = "读不到这个节点的记录：" + err.Error()
 		return err
 	}
-	messages, hasOlder, err := parseNodeRunEntries(payload)
-	if err != nil {
-		c.status = "节点记录不是预期的 JSON"
-		return err
+	for page := 0; page < 5 && hasOlder && !nodeEntriesHaveMessage(messages); page++ {
+		before := oldestSeqOf(messages)
+		if before <= 0 {
+			break
+		}
+		older, olderHas, err := source.loadPage(before)
+		if err != nil {
+			c.status = "读不到这个节点的记录：" + err.Error()
+			return err
+		}
+		if len(older) == 0 {
+			break
+		}
+		messages = mergeMessages(older, messages)
+		hasOlder = olderHas
 	}
 	c.messages = messages
 	c.fingerprint = transcriptFingerprint(messages)
@@ -206,12 +217,32 @@ func (source *nodeChatSource) Load(c *chatState) error {
 	return nil
 }
 
+func (source *nodeChatSource) loadPage(before int64) ([]transcriptMessage, bool, error) {
+	query := "?limit=" + itoa64(historyPageSize)
+	if before > 0 {
+		query += "&before=" + itoa64(before)
+	}
+	payload, err := source.api.get(source.path("/run") + query)
+	if err != nil {
+		return nil, false, err
+	}
+	return parseNodeRunEntries(payload)
+}
+
+func nodeEntriesHaveMessage(messages []transcriptMessage) bool {
+	for _, message := range messages {
+		if message.Role == "user" || message.Role == "assistant" || message.Role == "system" || message.Role == "error" {
+			return true
+		}
+	}
+	return false
+}
+
 func (source *nodeChatSource) Refresh(c *chatState) (bool, error) {
-	payload, err := source.api.get(source.path("/run") + "?limit=50")
+	messages, _, err := source.loadPage(0)
 	if err != nil {
 		return false, err
 	}
-	messages, _, err := parseNodeRunEntries(payload)
 	if err != nil {
 		return false, err
 	}

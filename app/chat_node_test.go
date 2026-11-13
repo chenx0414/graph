@@ -312,3 +312,24 @@ func TestNodeChatLoadsOlderEntriesWhenScrollingUp(t *testing.T) {
 		t.Fatal("the last page must stop further history loading")
 	}
 }
+
+func TestNodeChatLoadsPastAToolOnlyTailUntilItFindsAMessage(t *testing.T) {
+	fleet := ringGraphFleet()
+	node := fleetAgent{ID: "p1-n2", ParentID: "p1", Kind: "node", Name: "fleet-ui", TaskID: "tA", NodeID: "n2", Status: "running"}
+	mock := &nodeChatMock{
+		fleet: fleet,
+		run:   `{"entries":[{"seq":30,"id":"t30","role":"tool","kind":"call","text":"tool tail","createdAt":30}],"hasOlder":true}`,
+		runOlder: map[string]string{
+			"30": `{"entries":[{"seq":20,"id":"a20","role":"assistant","kind":"message","text":"真正的回答在前面","createdAt":20}],"hasOlder":false}`,
+		},
+	}
+	state, tester := nodeChatShell(t, mock)
+	state.openFleetAgentChat(node)
+	tester = frames(tester)
+	if !tester.HasText("真正的回答在前面") {
+		t.Fatalf("the initial node chat must page past a tool-only tail to its message, texts %q", tester.Texts())
+	}
+	if !tester.HasText("▸ 1 次调用 · 进行中") {
+		t.Fatalf("the tool tail stays available as a collapsed run, texts %q", tester.Texts())
+	}
+}
