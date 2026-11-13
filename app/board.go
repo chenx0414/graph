@@ -162,10 +162,6 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 	})
 }
 
-func boardPanelFadesRight(kind string) bool {
-	return kind != "context-overview"
-}
-
 func boardModuleRows(panels []boardPanel) [][]boardPanel {
 	rows := [][]boardPanel{}
 	pending := []boardPanel{}
@@ -361,12 +357,6 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform
 			content := ui.Column(ctx).FillWidth().Gap(th.Space(2))
 			if fills {
 				content.FillHeight()
-			} else if boardPanelFadesRight(panel.Kind) {
-				content.MaskLinearGradient(ui.LinearGradient{Angle: 90, Stops: []ui.GradientStop{
-					{Color: ui.RGB(0, 0, 0), At: 0},
-					{Color: ui.RGB(0, 0, 0), At: 0.88},
-					{Color: ui.Transparent, At: 1},
-				}})
 			}
 			content.Children(func() {
 				s.boardPanelBody(ctx, panel)

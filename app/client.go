@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+const apiTimeout = 30 * time.Second
+
 type errStatus string
 
 func (e errStatus) Error() string { return "服务端拒绝：" + string(e) }
@@ -29,7 +31,7 @@ func (c apiClient) get(path string) ([]byte, error) {
 		return nil, err
 	}
 	c.authorize(request)
-	response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
+	response, err := (&http.Client{Timeout: apiTimeout}).Do(request)
 	if err != nil {
 		return nil, err
 	}

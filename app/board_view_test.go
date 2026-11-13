@@ -514,13 +514,8 @@ func TestTheBoardStacksTheContextOverviewAndTheNetwork(t *testing.T) {
 	}
 }
 
-func TestTheContextOverviewKeepsItsRightEdgeUnfaded(t *testing.T) {
-	if boardPanelFadesRight("context-overview") {
-		t.Fatal("the context overview must not fade its right edge")
-	}
-	for _, kind := range []string{"agent", "trajectory", "agent-network"} {
-		if !boardPanelFadesRight(kind) {
-			t.Fatalf("panel %q keeps the scroll fade", kind)
-		}
+func TestTheAPIClientWaitsForLargeTrajectoryPayloads(t *testing.T) {
+	if apiTimeout < 30*time.Second {
+		t.Fatalf("the trajectory payloads need headroom, timeout %s", apiTimeout)
 	}
 }
