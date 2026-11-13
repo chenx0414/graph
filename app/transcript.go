@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"sync"
 
 	"github.com/egoist/mygo"
@@ -54,30 +53,6 @@ func (c *chatState) runs() []transcriptRun {
 	return groupRunsAt(c.messages, c.runBoundaries)
 }
 
-func runSummary(run transcriptRun) string {
-	names := []string{}
-	seen := map[string]bool{}
-	running := false
-	for _, message := range run.messages {
-		name := message.Data.Tool
-		if name == "" {
-			name = "tool"
-		}
-		if !seen[name] {
-			seen[name] = true
-			names = append(names, name)
-		}
-		if message.State != "done" {
-			running = true
-		}
-	}
-	head := strings.Join(names, ", ")
-	if running {
-		return head + " · 进行中"
-	}
-	return head
-}
-
 func messageStreaming(message transcriptMessage) bool {
 	return message.Role == "assistant" && message.State == "streaming"
 }
@@ -100,32 +75,6 @@ func runKey(run transcriptRun) string {
 		return ""
 	}
 	return run.messages[0].Data.ToolCallID
-}
-
-func toolLine(message transcriptMessage) string {
-	name := message.Data.Tool
-	if name == "" {
-		name = "tool"
-	}
-	state := "完成"
-	if message.State != "done" {
-		state = "进行中"
-	}
-	text := strings.TrimSpace(message.Text)
-	if index := strings.Index(text, ": "); index >= 0 && index < 40 {
-		text = text[index+2:]
-	}
-	if newline := strings.Index(text, "\n"); newline >= 0 {
-		text = text[:newline]
-	}
-	runes := []rune(text)
-	if len(runes) > 80 {
-		text = string(runes[:80]) + "…"
-	}
-	if text == "" {
-		return name + " · " + state
-	}
-	return name + " · " + state + " · " + text
 }
 
 func messageQueued(message transcriptMessage) bool {

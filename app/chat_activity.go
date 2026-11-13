@@ -11,24 +11,164 @@ import (
 	gwtheme "graph/app/gwui/theme"
 )
 
+type codexActivity struct {
+	kind   string
+	text   string
+	detail string
+}
+
+var codexCommandTools = map[string]bool{"bash": true, "shell": true, "exec": true, "terminal": true, "run_command": true, "cmd": true}
+
+var codexImageTools = map[string]bool{"view_image": true, "image": true, "screenshot": true, "read_image": true, "computer_screenshot": true}
+
+var codexEditTools = map[string]bool{"apply_patch": true, "edit": true, "write": true, "create_file": true, "str_replace_editor": true, "apply_patch_file": true}
+
+func codexToolPayload(text, tool string) string {
+	if index := strings.Index(text, ": "); index >= 0 && index < 48 {
+		return strings.TrimSpace(text[index+2:])
+	}
+	return strings.TrimSpace(text)
+}
+
+func codexActivities(run transcriptRun) []codexActivity {
+	activities := []codexActivity{}
+	commands := []string{}
+	flushCommands := func() {
+		if len(commands) == 0 {
+			return
+		}
+		activities = append(activities, codexActivity{kind: "command", text: "已运行 " + strings.Join(commands, "; ")})
+		commands = nil
+	}
+	for _, message := range run.messages {
+		name := message.Data.Tool
+		payload := codexToolPayload(message.Text, name)
+		running := message.State != "done"
+		switch {
+		case codexCommandTools[name]:
+			if payload == "" {
+				continue
+			}
+			if running {
+				flushCommands()
+				activities = append(activities, codexActivity{kind: "command", text: "正在运行 " + payload})
+				continue
+			}
+			commands = append(commands, payload)
+		case codexImageTools[name]:
+			flushCommands()
+			text := "已查看 1 张图像"
+			if running {
+				text = "正在查看图像"
+			}
+			activities = append(activities, codexActivity{kind: "image", text: text})
+		case codexEditTools[name]:
+			flushCommands()
+			text := "已编辑文件"
+			if payload != "" {
+				text = "已编辑 " + payload
+			}
+			if running {
+				text = "正在编辑文件"
+				if payload != "" {
+					text = "正在编辑 " + payload
+				}
+			}
+			activities = append(activities, codexActivity{kind: "edit", text: text})
+		default:
+			flushCommands()
+			label := name
+			if label == "" {
+				label = "tool"
+			}
+			text := label + "已完成"
+			if running {
+				text = label + "运行中"
+			}
+			activities = append(activities, codexActivity{kind: "tool", text: text})
+		}
+	}
+	flushCommands()
+	return activities
+}
+
+func codexActivityIcon(kind string) *ui.SVG {
+	switch kind {
+	case "command":
+		return iconTerminal
+	case "image":
+		return iconImage
+	case "edit":
+		return iconPencil
+	}
+	return iconSpark
+}
+
+func runElapsed(run transcriptRun) time.Duration {
+	if len(run.messages) < 2 {
+		return 0
+	}
+	start := run.messages[0].CreatedAt
+	end := run.messages[len(run.messages)-1].CreatedAt
+	if start <= 0 || end <= start {
+		return 0
+	}
+	return time.Duration(end-start) * time.Millisecond
+}
+
+func codexWorkedFor(elapsed time.Duration) string {
+	seconds := int64(elapsed / time.Second)
+	if seconds <= 0 {
+		seconds = 1
+	}
+	hours := seconds / 3600
+	minutes := (seconds % 3600) / 60
+	rest := seconds % 60
+	switch {
+	case hours > 0:
+		return strconv.FormatInt(hours, 10) + "h " + strconv.FormatInt(minutes, 10) + "m"
+	case minutes > 0:
+		return strconv.FormatInt(minutes, 10) + "m " + strconv.FormatInt(rest, 10) + "s"
+	}
+	return strconv.FormatInt(rest, 10) + "s"
+}
+
 func (c *chatState) toolRow(ctx *ui.Context, run transcriptRun) {
-	t := gwtheme.Of(ctx)
+	t, th := gwtheme.Of(ctx), ctx.Theme()
 	key := runKey(run)
-	fade := ui.Box(ctx).FillWidth().MaskLinearGradient(chatRightFade())
-	fade.Children(func() {
-		ui.Column(ctx).Gap(2).Children(func() {
-			label := workedLabel(run, c.expanded[key])
-			if kit.Button(ctx, label, kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).TextColor(t.Muted).Justify(ui.Start).Clicked() {
-				c.expanded[key] = !c.expanded[key]
-			}
-			if !c.expanded[key] {
-				return
-			}
-			for _, message := range run.messages {
-				kit.Text(ctx, toolLine(message), t.Text.Xs).TextColor(t.Muted)
-			}
-		})
+	expanded, known := c.expanded[key]
+	if !known {
+		expanded = true
+	}
+	worked := ""
+	if elapsed := runElapsed(run); elapsed > 0 {
+		worked = codexWorkedFor(elapsed)
+	}
+	label := "用时 " + worked
+	if worked == "" {
+		label = strconv.Itoa(len(run.messages)) + " 次工具调用"
+	}
+	header := ui.Row(ctx).FillWidth().Height(th.Space(7)).Gap(th.Space(1.5)).AlignItems(ui.Center).
+		Label(label).Focusable()
+	header.OnClick(func() {
+		c.expanded[key] = !expanded
+		c.frame()
 	})
+	header.Children(func() {
+		ui.Icon(ctx, iconChevron).Size(gwtheme.IconXs, gwtheme.IconXs).TextColor(t.Muted)
+		kit.Text(ctx, label, t.Text.Xs).TextColor(t.Muted).SingleLine()
+	})
+	kit.Separator(ctx, false)
+	if !expanded {
+		return
+	}
+	for _, activity := range codexActivities(run) {
+		row := ui.Row(ctx).FillWidth().Height(th.Space(8)).Gap(th.Space(2)).AlignItems(ui.Center)
+		row.Children(func() {
+			ui.Icon(ctx, codexActivityIcon(activity.kind)).Size(gwtheme.Icon, gwtheme.Icon).TextColor(t.Muted)
+			kit.Text(ctx, activity.text, t.Text.Sm).TextColor(t.Muted).Grow(1).SingleLine().Ellipsis("…")
+		})
+	}
 }
 
 func chatRightFade() ui.LinearGradient {
@@ -112,51 +252,6 @@ func (c *chatState) messageMeta(ctx *ui.Context, message transcriptMessage, mine
 		iconAction(ctx, iconVolume, "朗读", false, 5, nil)
 		iconAction(ctx, iconMore, "更多", false, 5, nil)
 	})
-}
-
-func workedLabel(run transcriptRun, expanded bool) string {
-	marker := "▸"
-	if expanded {
-		marker = "▾"
-	}
-	parts := []string{}
-	if worked := runWorked(run); worked != "" {
-		parts = append(parts, "已用时 "+worked)
-	}
-	parts = append(parts, strconv.Itoa(len(run.messages))+" 次调用")
-	if strings.Contains(runSummary(run), "进行中") {
-		parts = append(parts, "进行中")
-	}
-	return marker + " " + strings.Join(parts, " · ")
-}
-
-func runWorked(run transcriptRun) string {
-	if len(run.messages) < 2 {
-		return ""
-	}
-	start := run.messages[0].CreatedAt
-	end := run.messages[len(run.messages)-1].CreatedAt
-	if start <= 0 || end <= start {
-		return ""
-	}
-	return workedFor(time.Duration(end-start) * time.Millisecond)
-}
-
-func workedFor(elapsed time.Duration) string {
-	seconds := int64(elapsed / time.Second)
-	if seconds <= 0 {
-		return "<1 秒"
-	}
-	hours := seconds / 3600
-	minutes := (seconds % 3600) / 60
-	rest := seconds % 60
-	switch {
-	case hours > 0:
-		return strconv.FormatInt(hours, 10) + " 小时 " + strconv.FormatInt(minutes, 10) + " 分 " + strconv.FormatInt(rest, 10) + " 秒"
-	case minutes > 0:
-		return strconv.FormatInt(minutes, 10) + " 分 " + strconv.FormatInt(rest, 10) + " 秒"
-	}
-	return strconv.FormatInt(rest, 10) + " 秒"
 }
 
 func markdownHasTable(text string) bool {

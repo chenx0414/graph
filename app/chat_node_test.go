@@ -346,8 +346,8 @@ func TestNodeChatLoadsPastAToolOnlyTailUntilItFindsAMessage(t *testing.T) {
 	if !tester.HasText("真正的回答在前面") {
 		t.Fatalf("the initial node chat must page past a tool-only tail to its message, texts %q", tester.Texts())
 	}
-	if !tester.HasText("▸ 1 次调用 · 进行中") {
-		t.Fatalf("the tool tail stays available as a collapsed run, texts %q", tester.Texts())
+	if !tester.HasText("1 次工具调用") || !tester.HasText("tool运行中") {
+		t.Fatalf("the tool tail stays available as a run, texts %q", tester.Texts())
 	}
 }
 
@@ -410,7 +410,7 @@ func TestNodeChatMarksAnUnansweredToolCallAsRunning(t *testing.T) {
 	tester = frames(tester)
 	found := false
 	for _, text := range tester.Texts() {
-		if strings.HasPrefix(text, "▸") && strings.Contains(text, "进行中") {
+		if strings.HasPrefix(text, "正在运行") {
 			found = true
 		}
 	}

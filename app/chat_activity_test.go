@@ -1,0 +1,75 @@
+package main
+
+import (
+	"testing"
+	"time"
+
+	"github.com/egoist/mygo/ui"
+)
+
+func activityTool(name, text, state string) transcriptMessage {
+	message := transcriptMessage{Role: "tool", Kind: "tool", Text: text, State: state}
+	message.Data.Tool = name
+	return message
+}
+
+func TestCodexActivitiesSummarizeAToolRun(t *testing.T) {
+	run := transcriptRun{tools: true, messages: []transcriptMessage{
+		activityTool("bash", "bash: echo hi", "done"),
+		activityTool("bash", "bash: go test ./...", "done"),
+		activityTool("view_image", "view_image: a.png", "done"),
+		activityTool("apply_patch", "apply_patch: app/main.go", "done"),
+		activityTool("graph_inspect", "graph_inspect: graph_inspect", "done"),
+	}}
+	activities := codexActivities(run)
+	want := []string{"已运行 echo hi; go test ./...", "已查看 1 张图像", "已编辑 app/main.go", "graph_inspect已完成"}
+	if len(activities) != len(want) {
+		t.Fatalf("activities %+v", activities)
+	}
+	for index, text := range want {
+		if activities[index].text != text {
+			t.Fatalf("activity %d is %q, want %q", index, activities[index].text, text)
+		}
+	}
+	if activities[0].kind != "command" || activities[1].kind != "image" || activities[2].kind != "edit" || activities[3].kind != "tool" {
+		t.Fatalf("activity kinds %+v", activities)
+	}
+}
+
+func TestCodexWorkedForFormatsDurations(t *testing.T) {
+	cases := map[time.Duration]string{
+		45 * time.Second:             "45s",
+		181 * time.Second:            "3m 1s",
+		time.Hour + 2*time.Minute:    "1h 2m",
+		3*time.Hour + 40*time.Minute: "3h 40m",
+		time.Millisecond:             "1s",
+	}
+	for elapsed, want := range cases {
+		if got := codexWorkedFor(elapsed); got != want {
+			t.Fatalf("%s formats as %q, want %q", elapsed, got, want)
+		}
+	}
+}
+
+func TestTheToolActivityFoldsUnderItsDurationHeader(t *testing.T) {
+	state := newChatState("http://127.0.0.1:1", "tok")
+	first := activityTool("bash", "bash: echo hi", "done")
+	first.CreatedAt = 1_000_000
+	second := activityTool("bash", "bash: go test ./...", "done")
+	second.CreatedAt = 1_181_000
+	state.messages = []transcriptMessage{first, second}
+	tester := frames(ui.NewTester(state.view, 760, 620))
+	if !tester.HasText("用时 3m 1s") {
+		t.Fatalf("the run shows its duration header, texts %q", tester.Texts())
+	}
+	if !tester.HasText("已运行 echo hi; go test ./...") {
+		t.Fatalf("the run lists its commands, texts %q", tester.Texts())
+	}
+	if err := tester.Click("用时 3m 1s"); err != nil {
+		t.Fatalf("fold the activity: %v", err)
+	}
+	frames(tester)
+	if tester.HasText("已运行 echo hi; go test ./...") {
+		t.Fatalf("folding hides the rows, texts %q", tester.Texts())
+	}
+}

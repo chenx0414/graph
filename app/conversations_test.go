@@ -223,13 +223,6 @@ func TestToolCallsGroupIntoOneRowPerRun(t *testing.T) {
 	if len(runs[1].messages) != 3 {
 		t.Fatalf("consecutive tool calls must share one run, got %d", len(runs[1].messages))
 	}
-	if summary := runSummary(runs[1]); summary != "bash, edit · 进行中" {
-		t.Fatalf("summary %q", summary)
-	}
-	finished := transcriptRun{tools: true, messages: messages[1:2]}
-	if summary := runSummary(finished); summary != "bash" {
-		t.Fatalf("a finished run must not say 进行中: %q", summary)
-	}
 }
 
 func TestLegacyReloadReceiptsStayOutOfTheChat(t *testing.T) {
@@ -256,9 +249,6 @@ func TestToolMessagesSurviveParsingSoTheViewCanGroupThem(t *testing.T) {
 	if len(messages) != 2 || messages[0].Role != "tool" || messages[0].Data.Tool != "bash" {
 		t.Fatalf("messages %+v", messages)
 	}
-	if summary := runSummary(transcriptRun{tools: true, messages: messages[:1]}); summary != "bash" {
-		t.Fatalf("summary %q", summary)
-	}
 }
 
 func TestSpokenMessagesNeverMergeIntoOneRun(t *testing.T) {
@@ -281,70 +271,6 @@ func TestSpokenMessagesNeverMergeIntoOneRun(t *testing.T) {
 	}
 }
 
-func TestToolLineShowsNameStateAndATrimmedCommand(t *testing.T) {
-	line := toolLine(transcriptMessage{Role: "tool", State: "done", Text: "bash: cd /repo\ngit status", Data: struct {
-		Tool       string `json:"tool"`
-		ToolCallID string `json:"toolCallId"`
-		Ordinal    int    `json:"ordinal"`
-	}{Tool: "bash"}})
-	if line != "bash · 完成 · cd /repo" {
-		t.Fatalf("line %q", line)
-	}
-	long := ""
-	for index := 0; index < 200; index++ {
-		long += "字"
-	}
-	clipped := toolLine(transcriptMessage{Role: "tool", State: "running", Text: long})
-	if len([]rune(clipped)) > 110 || !contains(clipped, "进行中") {
-		t.Fatalf("clipped %q", clipped)
-	}
-	if toolLine(transcriptMessage{Role: "tool", State: "done"}) != "tool · 完成" {
-		t.Fatalf("an empty text keeps name and state only: %q", toolLine(transcriptMessage{Role: "tool", State: "done"}))
-	}
-}
-
-func TestToolRunsSummarizeTheirWorkAtAGlance(t *testing.T) {
-	now := time.Now().UnixMilli()
-	run := transcriptRun{tools: true, messages: []transcriptMessage{
-		{Role: "tool", State: "done", CreatedAt: now, Text: "bash: ls"},
-		{Role: "tool", State: "done", CreatedAt: now + 125_000, Text: "bash: pwd"},
-	}}
-	if worked := runWorked(run); worked != "2 分 5 秒" {
-		t.Fatalf("worked for %q", worked)
-	}
-	label := workedLabel(run, false)
-	if !contains(label, "已用时 2 分 5 秒") || !contains(label, "2 次调用") {
-		t.Fatalf("label %q", label)
-	}
-	for _, sample := range []struct {
-		elapsed time.Duration
-		want    string
-	}{
-		{500 * time.Millisecond, "<1 秒"},
-		{12 * time.Second, "12 秒"},
-		{time.Minute + 5*time.Second, "1 分 5 秒"},
-		{time.Hour + time.Minute + 5*time.Second, "1 小时 1 分 5 秒"},
-	} {
-		if got := workedFor(sample.elapsed); got != sample.want {
-			t.Fatalf("workedFor(%v) = %q, want %q", sample.elapsed, got, sample.want)
-		}
-	}
-	state := newChatState("http://127.0.0.1:1", "tok")
-	state.status = ""
-	state.messages = run.messages
-	tester := frames(ui.NewTester(state.view, 700, 500))
-	joined := ""
-	for _, text := range tester.Texts() {
-		joined += text
-	}
-	if !contains(joined, "已用时 2 分 5 秒") {
-		t.Fatalf("the transcript shows the worked summary, texts %q", tester.Texts())
-	}
-	if tester.HasText("bash: ls") {
-		t.Fatalf("the detail stays folded until asked, texts %q", tester.Texts())
-	}
-}
-
 func TestToolRunsExpandAndCollapse(t *testing.T) {
 	messages := []transcriptMessage{
 		{Role: "tool", State: "done", Text: "bash: ls", Data: struct {
@@ -360,15 +286,17 @@ func TestToolRunsExpandAndCollapse(t *testing.T) {
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
-	if tester.HasText("bash · 完成 · ls") {
-		t.Fatal("a collapsed run must not show its commands")
+	if !tester.HasText("已运行 ls") {
+		t.Fatalf("the run lists its commands, texts %q", tester.Texts())
 	}
-	state.expanded[runKey(groupRuns(messages)[0])] = true
+	if err := tester.Click("1 次工具调用"); err != nil {
+		t.Fatalf("fold the run: %v", err)
+	}
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
-	if !tester.HasText("bash · 完成 · ls") {
-		t.Fatalf("an expanded run must show its commands, texts %q", tester.Texts())
+	if tester.HasText("已运行 ls") {
+		t.Fatalf("a folded run must not show its commands, texts %q", tester.Texts())
 	}
 }
 
