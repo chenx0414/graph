@@ -98,6 +98,30 @@ func (s *shellState) pinBoardPages() {
 	}
 }
 
+func (s *shellState) resetFleetPage() {
+	index := -1
+	for current := range s.board.pages {
+		if s.board.pages[current].ID == fleetPageID || s.board.pages[current].Kind == fleetPageID {
+			index = current
+			break
+		}
+	}
+	if index < 0 {
+		return
+	}
+	s.board.pages[index] = defaultFleetPage()
+	s.board.rects = map[string]ui.Rect{}
+	s.board.splits = map[string]ui.Rect{}
+	s.board.active = index
+	s.boardScrollTop = true
+	s.fleet.netKey = ""
+	s.fleet.netScroll = ui.ScrollState{}
+	s.fleet.hoverID = ""
+	s.ensureBoardPageData()
+	s.saveBoard()
+	s.frame()
+}
+
 func (s *shellState) resetBoardPage() {
 	if len(s.board.pages) == 0 {
 		return

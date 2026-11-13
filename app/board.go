@@ -60,10 +60,17 @@ func (s *shellState) boardTabBar(ctx *ui.Context) {
 				active := pageIndex == s.board.active
 				tab := ui.Row(ctx).Height(th.Space(7.5)).PaddingX(th.Space(2.5)).Gap(th.Space(1)).
 					Radius(t.Radius.Xl).AlignItems(ui.Center).MaxWidth(th.Space(40)).Focusable().Label("标签页 " + page.Title)
-				if index == 0 {
+				switch {
+				case index == 0:
 					tab.ContextMenu(func(m *ui.Menu) {
 						if m.Item("重置白板为默认初始状态").Chosen() {
 							s.resetBoardPage()
+						}
+					})
+				case page.ID == fleetPageID || page.Kind == fleetPageID:
+					tab.ContextMenu(func(m *ui.Menu) {
+						if m.Item("重置编队为默认初始状态").Chosen() {
+							s.resetFleetPage()
 						}
 					})
 				}

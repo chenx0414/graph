@@ -463,3 +463,34 @@ func TestTheFleetNetworkStartsAtTheWorldOrigin(t *testing.T) {
 		t.Fatalf("the network starts unscrolled, scroll %.1f,%.1f", state.fleet.netScroll.X, state.fleet.netScroll.Y)
 	}
 }
+
+func TestTheFleetTabResetsFromItsContextMenu(t *testing.T) {
+	state := fleetServerShell(t, fleetSampleServer)
+	state.selectBoardPage(1)
+	state.board.pages[1].Panels = state.board.pages[1].Panels[:2]
+	state.board.pages[1].Layout = layoutFromPanels(state.board.pages[1].Panels)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	if err := tester.RightClick("标签页 编队"); err != nil {
+		t.Fatalf("open the fleet tab menu: %v", err)
+	}
+	menu := tester.Menu()
+	found := false
+	for _, item := range menu {
+		if item == "重置编队为默认初始状态" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the fleet tab menu misses reset, menu %q", menu)
+	}
+	if err := tester.ChooseMenuItem("重置编队为默认初始状态"); err != nil {
+		t.Fatalf("choose reset: %v", err)
+	}
+	frames(tester)
+	if len(state.board.pages[1].Panels) != len(defaultFleetPanels()) {
+		t.Fatalf("the fleet kept its panels, %+v", state.board.pages[1].Panels)
+	}
+	if state.board.active != 1 || state.board.pages[1].ID != fleetPageID {
+		t.Fatalf("reset leaves the fleet tab active, pages %+v active %d", state.board.pages, state.board.active)
+	}
+}
