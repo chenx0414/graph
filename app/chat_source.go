@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/url"
 	"reflect"
 	"strconv"
@@ -9,9 +10,10 @@ import (
 )
 
 type chatCapabilities struct {
-	ModelChip bool
-	Pause     bool
-	History   bool
+	ModelChip   bool
+	Pause       bool
+	History     bool
+	Attachments bool
 }
 
 type agentChatSource interface {
@@ -39,7 +41,7 @@ func (source *conversationChatSource) Scope() chatScope {
 	return chatScope{Kind: "conversation", ConversationID: source.id}
 }
 func (source *conversationChatSource) Capabilities() chatCapabilities {
-	return chatCapabilities{ModelChip: true, Pause: true, History: true}
+	return chatCapabilities{ModelChip: true, Pause: true, History: true, Attachments: true}
 }
 func (source *conversationChatSource) Follows() bool { return true }
 
@@ -55,6 +57,7 @@ func (source *conversationChatSource) Load(c *chatState) error {
 		return err
 	}
 	c.messages = messages
+	c.projectID, c.projectRoot = parseConversationScope(payload)
 	c.fingerprint = transcriptFingerprint(messages)
 	c.historyLoading = false
 	c.pagedHistory = false
@@ -118,6 +121,7 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 		}
 		changed = fingerprint != c.fingerprint
 		c.fingerprint = fingerprint
+		c.projectID, c.projectRoot = parseConversationScope(payload)
 		if c.pagedHistory {
 			c.messages = mergeMessages(c.messages, messages)
 		} else {
@@ -167,7 +171,19 @@ func (source *conversationChatSource) LoadOlder(c *chatState, before int64) ([]t
 }
 
 func (source *conversationChatSource) Send(c *chatState, text string) error {
-	body := map[string]string{"text": text, "requestId": "native-" + time.Now().Format("150405.000000")}
+	body := map[string]any{"text": text, "requestId": "native-" + time.Now().Format("150405.000000")}
+	if len(c.attachments) > 0 {
+		attachments := make([]map[string]any, 0, len(c.attachments))
+		for _, attachment := range c.attachments {
+			attachments = append(attachments, map[string]any{
+				"name": attachment.Name,
+				"type": attachment.Type,
+				"size": attachment.Size,
+				"text": attachment.Text,
+			})
+		}
+		body["attachments"] = attachments
+	}
 	_, err := source.api.post("/api/conversations/"+source.id+"/messages", body)
 	return err
 }
@@ -316,7 +332,7 @@ func (source *nodeChatSource) Send(c *chatState, text string) error {
 func (s *shellState) activeChatCapabilities() chatCapabilities {
 	chat := s.active()
 	if chat == nil || chat.source == nil {
-		return chatCapabilities{ModelChip: true, Pause: true, History: true}
+		return chatCapabilities{ModelChip: true, Pause: true, History: true, Attachments: true}
 	}
 	return chat.source.Capabilities()
 }
@@ -339,3 +355,14 @@ func (s *shellState) installAgentChat(source agentChatSource, agent fleetAgent) 
 func stripSpace(text string) string { return strings.TrimSpace(text) }
 
 func itoa64(value int64) string { return strconv.FormatInt(value, 10) }
+
+func parseConversationScope(payload []byte) (string, string) {
+	var scope struct {
+		ProjectID   string `json:"projectId"`
+		ProjectRoot string `json:"projectRoot"`
+	}
+	if json.Unmarshal(payload, &scope) != nil {
+		return "", ""
+	}
+	return scope.ProjectID, scope.ProjectRoot
+}

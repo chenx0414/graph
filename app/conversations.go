@@ -153,6 +153,7 @@ func (c *chatState) sendText(text string) {
 	if stripSpace(c.draft) == text {
 		c.draft = ""
 	}
+	c.attachments = nil
 	c.focusComposer = true
 	c.status = "已发出，等待回复…"
 	c.refresh()
@@ -318,11 +319,23 @@ func (c *chatState) composerMode() composerMode {
 
 func (c *chatState) composer(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
-	ui.Row(ctx).Padding(th.Space(3), th.Space(4), th.Space(3), th.Space(4)).Children(func() {
+	ui.Column(ctx).Padding(th.Space(3), th.Space(4), th.Space(3), th.Space(4)).Children(func() {
+		menuSlot := ui.Column(ctx).FillWidth()
+		menuSlot.Children(func() {
+			if c.menuTrigger == nil {
+				ui.Box(ctx).Height(0)
+				return
+			}
+			c.composerMenuView(ctx, c.composerMenuItems(c.menuTrigger))
+			ui.Box(ctx).Height(th.Space(1.5))
+		})
 		card := ui.Column(ctx).FillWidth().Padding(th.Space(3)).Gap(th.Space(2)).
 			Radius(t.Radius.X2l).Background(t.Background).Border(gwtheme.Stroke, t.Input).Clip()
 		kit.Elevate(ctx, card, composerShadow)
 		card.Children(func() {
+			if len(c.attachments) > 0 {
+				c.attachmentStrip(ctx)
+			}
 			field := kit.TextArea(ctx, &c.draft, kit.InputOpts{Placeholder: "想问什么？  @ 文件，$ 技能，/ 命令", Bare: true})
 			field.Label("消息").FillWidth().PaddingX(th.Space(0.5)).Lines(1, 6)
 			if c.focusComposer {
@@ -330,6 +343,9 @@ func (c *chatState) composer(ctx *ui.Context) {
 				c.focusComposer = false
 			}
 			field.OnTextKey(func(k ui.TextKey) bool {
+				if c.composerMenuKey(k) {
+					return true
+				}
 				if k.Key != ui.KeyEnter || k.Mods != 0 {
 					return false
 				}
@@ -342,7 +358,11 @@ func (c *chatState) composer(ctx *ui.Context) {
 				return true
 			})
 			ui.Row(ctx).FillWidth().AlignItems(ui.Center).Gap(th.Space(1.5)).Children(func() {
-				composerPlaceholder(ctx, iconClip, "附件")
+				if c.source != nil && c.source.Capabilities().Attachments {
+					c.attachmentButton(ctx)
+				} else {
+					composerPlaceholder(ctx, iconClip, "附件")
+				}
 				ui.Spacer(ctx)
 				if c.source == nil || c.source.Capabilities().ModelChip {
 					c.modelChip(ctx)
@@ -350,8 +370,35 @@ func (c *chatState) composer(ctx *ui.Context) {
 				composerPlaceholder(ctx, iconMic, "语音")
 				c.composerButton(ctx)
 			})
+			c.composerTrackTrigger(field)
 		})
 	})
+}
+
+func (c *chatState) composerTrackTrigger(field ui.Element) {
+	if c.pendingCaret >= 0 {
+		field.SetTextSelection(c.pendingCaret, c.pendingCaret)
+		c.caret = c.pendingCaret
+		c.pendingCaret = -1
+	} else if _, end := field.TextSelection(); end >= 0 {
+		c.caret = end
+	}
+	trigger := detectComposerTrigger(c.draft, c.caret)
+	if trigger != nil && c.menuDismissed == c.draft {
+		trigger = nil
+	}
+	if trigger == nil {
+		c.menuTrigger = nil
+		c.menuActive = 0
+		c.menuDismissed = ""
+		return
+	}
+	if c.menuTrigger == nil || c.menuTrigger.kind != trigger.kind || c.menuTrigger.query != trigger.query {
+		c.menuActive = 0
+	}
+	c.menuTrigger = trigger
+	c.ensureComposerPaths()
+	c.ensureComposerSkills()
 }
 
 func composerPlaceholder(ctx *ui.Context, icon *ui.SVG, label string) {
