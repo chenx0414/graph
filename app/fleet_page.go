@@ -207,12 +207,3 @@ func (s *shellState) openFleetAgentPage(agent fleetAgent) error {
 	s.frame()
 	return nil
 }
-
-func (s *shellState) openFleetThreadPage(threadID string) error {
-	for _, data := range []*fleetSnapshot{s.fleet.data, s.fleet.global} {
-		if agent, ok := fleetAgentByID(data, threadID); ok {
-			return s.openFleetAgentPage(agent)
-		}
-	}
-	return s.openFleetAgentPage(fleetAgent{ID: threadID, Name: threadID})
-}

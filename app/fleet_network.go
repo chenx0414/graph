@@ -141,6 +141,7 @@ func (s *shellState) fleetAgentCard(ctx *ui.Context, agent fleetAgent, width, he
 	card.Label("编队 Agent " + fleetAgentLabel(agent))
 	s.fleetHoverCard(card, agent.ID, accent, t)
 	card.OnClick(func() { s.openFleetAgentChat(agent) })
+	s.fleetAgentDetailMenu(card, agent)
 	card.Children(func() {
 		s.fleetAgentCardHead(ctx, agent, accent)
 		fleetEllipsis(ctx, fleetAgentRole(agent), t.Text.Xs, accent)
@@ -173,6 +174,7 @@ func (s *shellState) fleetThreadCard(ctx *ui.Context, node fleetRingNode) ui.Ele
 	} else {
 		card.Label("编队 Agent " + fleetAgentLabel(agent))
 		card.OnClick(func() { s.openFleetAgentChat(agent) })
+		s.fleetAgentDetailMenu(card, agent)
 	}
 	s.fleetHoverCard(card, node.ID, accent, t)
 	card.Children(func() {
@@ -194,6 +196,15 @@ func (s *shellState) fleetThreadCard(ctx *ui.Context, node fleetRingNode) ui.Ele
 		}
 	})
 	return card
+}
+
+func (s *shellState) fleetAgentDetailMenu(card ui.Element, agent fleetAgent) {
+	selected := agent
+	card.ContextMenu(func(m *ui.Menu) {
+		if m.Item("查看详情").Chosen() {
+			_ = s.openFleetAgentPage(selected)
+		}
+	})
 }
 
 func fleetThreadTitle(node fleetRingNode) string {

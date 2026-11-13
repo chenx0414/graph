@@ -333,3 +333,28 @@ func TestNodeChatLoadsPastAToolOnlyTailUntilItFindsAMessage(t *testing.T) {
 		t.Fatalf("the tool tail stays available as a collapsed run, texts %q", tester.Texts())
 	}
 }
+
+func TestRightClickingAnAgentCardOpensItsDetailPage(t *testing.T) {
+	state := fleetServerShell(t, fleetSampleServer)
+	tester := openFleetTester(t, state)
+	if err := tester.RightClick("编队 Agent 主控"); err != nil {
+		t.Fatalf("open the agent card menu: %v", err)
+	}
+	menu := tester.Menu()
+	found := false
+	for _, item := range menu {
+		if item == "查看详情" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the agent card menu misses the detail entry, menu %q", menu)
+	}
+	if err := tester.ChooseMenuItem("查看详情"); err != nil {
+		t.Fatalf("choose detail: %v", err)
+	}
+	frames(tester)
+	if page := state.boardPage(); page.ID != "agent:g1" {
+		t.Fatalf("the detail entry opens the agent page, page %+v", page)
+	}
+}

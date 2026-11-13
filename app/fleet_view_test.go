@@ -192,13 +192,6 @@ func TestTheFleetNetworkAggregatesAThousandAgents(t *testing.T) {
 	if tester.HasText("node-P00-00") {
 		t.Fatalf("graph agents must not render one by one, texts %q", tester.Texts())
 	}
-	if err := state.openFleetThreadPage("p00"); err != nil {
-		t.Fatalf("open the first project thread: %v", err)
-	}
-	tester = frames(tester)
-	if page := state.boardPage(); page.ID != "agent:p00" {
-		t.Fatalf("a thread chip opens its thread page, page %+v", page)
-	}
 }
 
 func TestTheFleetPageUsesTheFreeformBoardLayout(t *testing.T) {
