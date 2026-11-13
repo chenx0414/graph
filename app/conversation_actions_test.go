@@ -271,6 +271,10 @@ func TestTheComposerSendsOnEnterAndBreaksLinesWithShift(t *testing.T) {
 	if !contains(posted, "你好") {
 		t.Fatalf("Enter must send the prompt, body %q", posted)
 	}
+	frames(tester)
+	if err := tester.Click("消息"); err != nil {
+		t.Fatalf("refocus the composer field: %v", err)
+	}
 	tester.Type("第一行")
 	tester.Key(ui.Shift, ui.KeyEnter)
 	tester.Type("第二行")

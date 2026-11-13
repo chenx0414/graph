@@ -31,8 +31,8 @@ func (s *shellState) boardPanelBody(ctx *ui.Context, panel *boardPanel) {
 		s.trajectoryTokensCard(ctx)
 	case "trajectory-timing":
 		s.trajectoryTimingCard(ctx)
-	case "trajectory-context":
-		s.trajectoryContextCard(ctx)
+	case "context-overview":
+		s.panelContextOverview(ctx)
 	case "trajectory-trend":
 		s.trajectoryTrendCard(ctx)
 	case "trajectory-events":

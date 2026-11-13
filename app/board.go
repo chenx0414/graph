@@ -133,15 +133,12 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 			ui.Scroll(ctx).Fill().TrackScroll(&s.boardScroll).Children(func() {
 				grid := ui.Column(ctx).FillWidth().Padding(10).Gap(10)
 				grid.Children(func() {
-					for row := 0; row*2 < len(page.Panels); row++ {
-						rowIndex := row
+					rows := boardModuleRows(page.Panels)
+					for _, row := range rows {
+						panels := row
 						ui.Row(ctx).FillWidth().Height(boardCardHeight).Gap(10).Children(func() {
-							for column := 0; column < 2; column++ {
-								index := rowIndex*2 + column
-								if index >= len(page.Panels) {
-									break
-								}
-								panel := page.Panels[index]
+							for index := range panels {
+								panel := panels[index]
 								cell := ui.Column(ctx).Grow(1).FillHeight()
 								cell.Children(func() {
 									s.boardPanelView(ctx, &panel, false, false)
@@ -163,6 +160,35 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 			s.boardNodeView(ctx, &page.Layout, "root", freeform, page.Kind == "")
 		})
 	})
+}
+
+func boardModuleRows(panels []boardPanel) [][]boardPanel {
+	rows := [][]boardPanel{}
+	pending := []boardPanel{}
+	flush := func() {
+		if len(pending) == 0 {
+			return
+		}
+		rows = append(rows, pending)
+		pending = nil
+	}
+	for _, panel := range panels {
+		if boardPanelFullWidth(panel.Kind) {
+			flush()
+			rows = append(rows, []boardPanel{panel})
+			continue
+		}
+		pending = append(pending, panel)
+		if len(pending) == 2 {
+			flush()
+		}
+	}
+	flush()
+	return rows
+}
+
+func boardPanelFullWidth(kind string) bool {
+	return kind == "context-overview"
 }
 
 func (s *shellState) boardNodeView(ctx *ui.Context, node *boardNode, path string, freeform, autoHide bool) {

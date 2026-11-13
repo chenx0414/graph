@@ -11,28 +11,31 @@ import (
 )
 
 type shellState struct {
-	updates        uiUpdates
-	api            apiClient
-	status         string
-	activeID       string
-	chatMu         sync.Mutex
-	chat           *chatState
-	settings       *settingsState
-	usage          *usageState
-	resources      *resourceState
-	trajectory     trajectoryState
-	insights       insightsState
-	fleet          fleetState
-	graph          fleetGraphView
-	boardNet       netPanelState
-	conversations  []conversationSummary
-	supervisorID   string
-	broken         bool
-	board          boardState
-	boardScroll    ui.ScrollState
-	boardScrollTop bool
-	window         *mygo.Window
-	list           ui.ListState
+	updates          uiUpdates
+	api              apiClient
+	status           string
+	activeID         string
+	chatMu           sync.Mutex
+	chat             *chatState
+	settings         *settingsState
+	usage            *usageState
+	resources        *resourceState
+	trajectory       trajectoryState
+	insights         insightsState
+	fleet            fleetState
+	graph            fleetGraphView
+	modelMeta        map[string]modelMeta
+	modelMetaLoading bool
+	modelMetaError   string
+	boardNet         netPanelState
+	conversations    []conversationSummary
+	supervisorID     string
+	broken           bool
+	board            boardState
+	boardScroll      ui.ScrollState
+	boardScrollTop   bool
+	window           *mygo.Window
+	list             ui.ListState
 }
 
 func newShellState(address, token string) *shellState {

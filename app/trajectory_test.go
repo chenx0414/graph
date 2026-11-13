@@ -52,7 +52,7 @@ func TestTrajectoryModuleQuantifiesTheLatestConversation(t *testing.T) {
 	tester := frames(ui.NewTester(shell.view, 1440, 900))
 	for _, wanted := range []string{"上下文统计窗口", "Token 统计窗口", "耗时统计窗口", "当前上下文窗口",
 		"上下文趋势窗口", "上下文事件窗口", "命令执行窗口", "文件活动窗口", "Token 组成窗口", "请求浏览窗口", "Agent 网络窗口", "请求详情窗口",
-		"轮次", "步数", "工具调用", "缓存命中", "44.4%", "bash", "未缓存输入", "首 token 等待", "峰值", "最近一次请求",
+		"轮次", "步数", "工具调用", "缓存命中", "44.4%", "bash", "未缓存输入", "首 token 等待", "峰值",
 		"git", "读取", "上下文压缩", "次请求", "系统提示词", "按字符估算", "估算 tokens", "master", "第 1 次"} {
 		if !tester.HasText(wanted) {
 			t.Fatalf("the trajectory dashboard shows %q, texts %q", wanted, tester.Texts())

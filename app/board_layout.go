@@ -43,7 +43,7 @@ type boardFile struct {
 	Active  int          `json:"active"`
 }
 
-const boardLayoutVersion = 11
+const boardLayoutVersion = 12
 
 const boardDefaultTitle = "白板"
 
@@ -120,7 +120,7 @@ func boardPanelTitle(kind string) string {
 		return "Token 统计"
 	case "trajectory-timing":
 		return "耗时统计"
-	case "trajectory-context":
+	case "context-overview":
 		return "当前上下文"
 	case "trajectory-trend":
 		return "上下文趋势"
@@ -209,12 +209,46 @@ func (s *shellState) loadBoard(stateDir string) {
 		s.board.pages = []boardPage{{ID: "board", Title: boardDefaultTitle, Panels: file.Panels}}
 	}
 	for index := range s.board.pages {
+		for panel := range s.board.pages[index].Panels {
+			if s.board.pages[index].Panels[panel].Kind == "trajectory-context" {
+				s.board.pages[index].Panels[panel].Kind = "context-overview"
+				s.board.pages[index].Panels[panel].ID = "context-overview"
+			}
+		}
+		replaceBoardPanelInLayout(&s.board.pages[index].Layout, "trajectory-context", "context-overview")
 		if s.board.pages[index].Kind == "fleet-network" {
 			s.board.pages[index].Kind = "agent-network"
 			s.board.pages[index].Scope = "fleet"
 		}
 	}
 	if file.Version < boardLayoutVersion {
+		for index := range s.board.pages {
+			page := &s.board.pages[index]
+			if page.Kind != "trajectory" {
+				continue
+			}
+			kinds := trajectoryPageKinds()
+			ordered := make([]boardPanel, 0, len(page.Panels))
+			known := map[string]bool{}
+			for _, kind := range kinds {
+				for _, panel := range page.Panels {
+					if panel.Kind == kind {
+						ordered = append(ordered, panel)
+						known[kind] = true
+						break
+					}
+				}
+			}
+			for _, panel := range page.Panels {
+				if !known[panel.Kind] {
+					ordered = append(ordered, panel)
+				}
+			}
+			page.Panels = ordered
+			page.Layout = trajectoryPageLayout(kinds)
+		}
+	}
+	if file.Version < 11 {
 		kept := make([]boardPage, 0, len(s.board.pages))
 		for _, page := range s.board.pages {
 			if page.ID == fleetPageID || page.Kind == fleetPageID {
@@ -483,23 +517,13 @@ func (s *shellState) openModuleWithScope(kind, scope string) {
 	}
 	if kind == "trajectory" {
 		s.boardScrollTop = true
-		kinds := []string{"trajectory-summary", "trajectory-tokens", "trajectory-timing", "trajectory-context",
-			"trajectory-trend", "trajectory-events", "trajectory-commands", "trajectory-files",
-			"trajectory-composition", "trajectory-requests", "trajectory-agents", "trajectory-request-detail"}
+		kinds := trajectoryPageKinds()
 		panels := make([]boardPanel, 0, len(kinds))
 		for _, panelKind := range kinds {
 			panels = append(panels, boardPanel{ID: panelKind, Kind: panelKind})
 		}
 		page.Panels = panels
-		rows := []boardSlot{}
-		for row := 0; row*2 < len(kinds); row++ {
-			cells := []boardSlot{}
-			for column := 0; column < 2 && row*2+column < len(kinds); column++ {
-				cells = append(cells, boardSlot{Weight: 1, Node: boardNode{Kind: "panel", PanelID: kinds[row*2+column]}})
-			}
-			rows = append(rows, boardSlot{Weight: 1, Node: boardNode{Kind: "split", Axis: "row", Children: cells}})
-		}
-		page.Layout = boardNode{Kind: "split", Axis: "column", Children: rows}
+		page.Layout = trajectoryPageLayout(kinds)
 	}
 	s.board.pages = append(s.board.pages, page)
 	s.board.active = len(s.board.pages) - 1
@@ -526,6 +550,48 @@ func (s *shellState) closeModule(id string) {
 	pruneBoardPanels(page)
 	s.saveBoard()
 	s.frame()
+}
+
+func trajectoryPageKinds() []string {
+	return []string{"trajectory-summary", "trajectory-tokens", "context-overview", "trajectory-timing",
+		"trajectory-trend", "trajectory-events", "trajectory-commands", "trajectory-files",
+		"trajectory-composition", "trajectory-requests", "trajectory-agents", "trajectory-request-detail"}
+}
+
+func trajectoryPageLayout(kinds []string) boardNode {
+	rows := []boardSlot{}
+	pending := []boardSlot{}
+	flush := func() {
+		if len(pending) == 0 {
+			return
+		}
+		cells := pending
+		pending = nil
+		rows = append(rows, boardSlot{Weight: 1, Node: boardNode{Kind: "split", Axis: "row", Children: cells}})
+	}
+	for _, kind := range kinds {
+		cell := boardSlot{Weight: 1, Node: boardNode{Kind: "panel", PanelID: kind}}
+		if kind == "context-overview" {
+			flush()
+			rows = append(rows, boardSlot{Weight: 1, Node: cell.Node})
+			continue
+		}
+		pending = append(pending, cell)
+		if len(pending) == 2 {
+			flush()
+		}
+	}
+	flush()
+	return boardNode{Kind: "split", Axis: "column", Children: rows}
+}
+
+func replaceBoardPanelInLayout(node *boardNode, from, to string) {
+	if node.Kind == "panel" && node.PanelID == from {
+		node.PanelID = to
+	}
+	for index := range node.Children {
+		replaceBoardPanelInLayout(&node.Children[index].Node, from, to)
+	}
 }
 
 func (s *shellState) ensureBoardPageData() {

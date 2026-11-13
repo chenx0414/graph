@@ -24,8 +24,8 @@ func Mid(a, b OKLCH) OKLCH {
 }
 
 var (
-	White = OKLCH{1, 0, 0}
-	Black = OKLCH{0, 0, 0}
+	White        = OKLCH{1, 0, 0}
+	Black        = OKLCH{0, 0, 0}
 	MacAlertGray = OKLCH{0.7412, 0, 0}
 
 	Neutral50  = OKLCH{0.985, 0, 0}
@@ -97,6 +97,8 @@ var (
 	Violet200 = OKLCH{0.894, 0.057, 293.283}
 	Violet300 = OKLCH{0.811, 0.111, 293.571}
 	Violet500 = OKLCH{0.606, 0.25, 292.717}
+	Indigo500 = OKLCH{0.585, 0.233, 277.117}
+	Purple500 = OKLCH{0.627, 0.265, 303.9}
 	Violet700 = OKLCH{0.491, 0.27, 292.581}
 	Violet800 = OKLCH{0.432, 0.232, 292.759}
 	Violet950 = OKLCH{0.283, 0.141, 291.089}
