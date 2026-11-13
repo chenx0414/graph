@@ -18,12 +18,12 @@ const (
 )
 
 type netScene struct {
-	mode      string
-	width     float32
-	height    float32
-	nodes     []fleetRingNode
-	polylines [][][2]float32
-	topology  *fleetTopologyData
+	mode     string
+	width    float32
+	height   float32
+	nodes    []fleetRingNode
+	edges    []canvasEdge
+	topology *fleetTopologyData
 }
 
 type netPanelState struct {
@@ -88,7 +88,7 @@ func (s *shellState) panelChatNetwork(ctx *ui.Context, scope string) {
 		state.scene = scene
 	}
 	s.networkCaption(ctx, scene, scope)
-	s.infiniteView(ctx, &state.view, scene.width, scene.height, scene.polylines, scene.hit, func(ctx *ui.Context, view *infiniteCanvas) {
+	s.infiniteView(ctx, &state.view, scene.width, scene.height, scene.edges, scene.hit, func(ctx *ui.Context, view *infiniteCanvas) {
 		s.networkCards(ctx, scene, view)
 	})
 }
@@ -160,17 +160,17 @@ func (s *shellState) networkScene(ctx *ui.Context, scope string) (netScene, stri
 			return netScene{}, ""
 		}
 		s.fleetNetworkModels(data)
-		return fleetNetScene(data), ""
+		return s.fleetNetScene(data), ""
 	}
 	chat := s.chatScope()
 	if chat.key() == "" {
 		return netScene{}, "先打开一个对话，这里会显示它所在的编队。"
 	}
-	scene, note := s.networkSceneForChat(chat)
+	scene, note := s.networkSceneForChat(ctx, chat)
 	return scene, note
 }
 
-func (s *shellState) networkSceneForChat(scope chatScope) (netScene, string) {
+func (s *shellState) networkSceneForChat(ctx *ui.Context, scope chatScope) (netScene, string) {
 	if scope.Kind == "node" {
 		state := &s.boardNet
 		s.ensureNetGraph(scope)
@@ -181,7 +181,7 @@ func (s *shellState) networkSceneForChat(scope chatScope) (netScene, string) {
 			}
 			return netScene{}, note
 		}
-		return graphNetScene(state.topology), ""
+		return s.graphNetScene(ctx, state.topology), ""
 	}
 	agent, data := s.chatAgent()
 	if agent == nil || data == nil {
@@ -198,24 +198,28 @@ func (s *shellState) networkSceneForChat(scope chatScope) (netScene, string) {
 		return netScene{}, "这个对话还没有登记为 Agent。"
 	}
 	if agent.Kind == "global" {
-		return fleetNetScene(data), ""
+		return s.fleetNetScene(data), ""
 	}
-	return threadNetScene(*agent, data), ""
+	return s.threadNetScene(*agent, data), ""
 }
 
-func fleetNetScene(data *fleetSnapshot) netScene {
+func (s *shellState) fleetNetScene(data *fleetSnapshot) netScene {
 	ring := fleetRingLayout(data)
 	if len(ring.Nodes) == 0 {
 		return netScene{}
 	}
-	polylines := make([][][2]float32, 0, len(ring.Edges))
+	edges := make([]canvasEdge, 0, len(ring.Edges))
 	for _, edge := range ring.Edges {
-		polylines = append(polylines, edge.Points)
+		color, ok := s.fleet.accents[edge.ToID]
+		if !ok {
+			color = fleetAccents()[1]
+		}
+		edges = append(edges, canvasEdge{From: edge.FromID, To: edge.ToID, Points: edge.Points, Color: color})
 	}
-	return netScene{mode: "fleet", width: ring.Width, height: ring.Height, nodes: ring.Nodes, polylines: polylines}
+	return netScene{mode: "fleet", width: ring.Width, height: ring.Height, nodes: ring.Nodes, edges: edges}
 }
 
-func threadNetScene(thread fleetAgent, data *fleetSnapshot) netScene {
+func (s *shellState) threadNetScene(thread fleetAgent, data *fleetSnapshot) netScene {
 	units := make([]fleetGraphUnit, 0, 8)
 	for _, unit := range fleetGraphUnits(data) {
 		if unit.ThreadID == thread.ID {
@@ -243,12 +247,12 @@ func threadNetScene(thread fleetAgent, data *fleetSnapshot) netScene {
 			X: x - fleetRingGraphW/2, Y: y - fleetRingGraphH/2,
 		}
 		scene.nodes = append(scene.nodes, node)
-		scene.polylines = append(scene.polylines, [][2]float32{hub, [2]float32{x, y}})
+		scene.edges = append(scene.edges, canvasEdge{From: thread.ID, To: "graph:" + unit.TaskID, Points: [][2]float32{hub, [2]float32{x, y}}, Color: fleetAccents()[1]})
 	}
 	return scene
 }
 
-func graphNetScene(data *fleetTopologyData) netScene {
+func (s *shellState) graphNetScene(ctx *ui.Context, data *fleetTopologyData) netScene {
 	if data == nil {
 		return netScene{}
 	}
@@ -256,11 +260,18 @@ func graphNetScene(data *fleetTopologyData) netScene {
 	for _, node := range data.Nodes {
 		nodes = append(nodes, fleetRingNode{Kind: "graph-node", ID: node.ID, X: node.X, Y: node.Y, W: node.W, H: node.H})
 	}
-	polylines := make([][][2]float32, 0, len(data.Edges))
+	edges := make([]canvasEdge, 0, len(data.Edges))
 	for _, edge := range data.Edges {
-		polylines = append(polylines, edge.Points)
+		target := ""
+		for _, node := range data.Nodes {
+			if node.ID == edge.To {
+				target = node.Status
+			}
+		}
+		color := fleetStatusColor(gwtheme.Of(ctx), target)
+		edges = append(edges, canvasEdge{From: edge.From, To: edge.To, Points: edge.Points, Color: color})
 	}
-	return netScene{mode: "graph", width: data.Width, height: data.Height, nodes: nodes, polylines: polylines, topology: data}
+	return netScene{mode: "graph", width: data.Width, height: data.Height, nodes: nodes, edges: edges, topology: data}
 }
 
 func (s *shellState) ensureNetGraph(scope chatScope) {

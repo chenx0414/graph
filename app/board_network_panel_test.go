@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/egoist/mygo/ui"
 )
 
 func networkPanelFleet() *fleetSnapshot {
@@ -268,5 +270,48 @@ func TestLoadingAnOldBoardRenamesTheNetworkToTheSharedPanel(t *testing.T) {
 	}
 	if modulePages != 1 {
 		t.Fatalf("the old network tabs collapse into one page, pages %+v", state.board.pages)
+	}
+}
+
+func TestTheNetworkCanvasDrawsItsEdges(t *testing.T) {
+	shell := newShellState("http://127.0.0.1:1", "")
+	view := &infiniteCanvas{fit: true, zoom: 1, x: 0, y: 0}
+	edges := []canvasEdge{{
+		From: "a", To: "b",
+		Points: [][2]float32{{20, 60}, {200, 60}},
+		Color:  ui.RGB(0, 220, 0),
+	}}
+	tester := ui.NewTester(func(ctx *ui.Context) {
+		shell.infiniteView(ctx, view, 320, 120, edges, nil, func(ctx *ui.Context, view *infiniteCanvas) {})
+	}, 480, 240)
+	frames(tester)
+	green := 0
+	img := tester.Image()
+	for y := 0; y < 240; y++ {
+		for x := 0; x < 480; x++ {
+			r, g, b, _ := img.At(x, y).RGBA()
+			red, greenChannel, blue := int(r>>8), int(g>>8), int(b>>8)
+			if greenChannel > red+24 && greenChannel > blue+24 {
+				green++
+			}
+		}
+	}
+	if green == 0 {
+		t.Fatal("the network canvas must draw the connecting lines")
+	}
+}
+
+func TestTheFleetSceneCarriesColoredEdges(t *testing.T) {
+	state := fleetServerShell(t, fleetSampleServer)
+	state.ensureFleet()
+	openFleetTester(t, state).Frame()
+	scene := state.fleetNetScene(state.fleet.data)
+	if len(scene.edges) == 0 {
+		t.Fatalf("the fleet scene has no edges, nodes %d", len(scene.nodes))
+	}
+	for _, edge := range scene.edges {
+		if len(edge.Points) < 2 || edge.Color.A == 0 {
+			t.Fatalf("an edge needs points and a color, edge %+v", edge)
+		}
 	}
 }

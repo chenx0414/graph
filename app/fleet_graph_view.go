@@ -61,11 +61,20 @@ func (s *shellState) fleetGraphCanvas(ctx *ui.Context, data *fleetTopologyData) 
 	if view.fit && view.worldW > 0 && view.worldW != data.Width {
 		view.fit = false
 	}
-	polylines := make([][][2]float32, 0, len(data.Edges))
+	edges := make([]canvasEdge, 0, len(data.Edges))
 	for _, edge := range data.Edges {
-		if len(edge.Points) >= 2 {
-			polylines = append(polylines, edge.Points)
+		if len(edge.Points) < 2 {
+			continue
 		}
+		color := gwtheme.Of(ctx).Border
+		if agent := s.fleetTopologyAgent(data.TaskID, edge.To); agent != nil {
+			if value, ok := s.fleet.accents[agent.ID]; ok {
+				color = value
+			}
+		} else if node, ok := fleetTopologyNodeByID(data.Nodes, edge.To); ok && node.Status != "" {
+			color = fleetStatusColor(gwtheme.Of(ctx), node.Status)
+		}
+		edges = append(edges, canvasEdge{From: edge.From, To: edge.To, Points: edge.Points, Color: color})
 	}
 	hit := func(x, y float32) bool {
 		for _, node := range data.Nodes {
@@ -77,7 +86,7 @@ func (s *shellState) fleetGraphCanvas(ctx *ui.Context, data *fleetTopologyData) 
 	}
 	t := gwtheme.Of(ctx)
 	kit.Text(ctx, "拖拽平移 · 滚轮缩放", t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
-	s.infiniteView(ctx, view, data.Width, data.Height, polylines, hit, func(ctx *ui.Context, view *infiniteCanvas) {
+	s.infiniteView(ctx, view, data.Width, data.Height, edges, hit, func(ctx *ui.Context, view *infiniteCanvas) {
 		for index := range data.Nodes {
 			node := data.Nodes[index]
 			card := s.fleetTopologyCard(ctx, data, node)

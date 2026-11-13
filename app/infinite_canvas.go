@@ -104,7 +104,13 @@ func minFleetFloat(a, b float32) float32 {
 	return b
 }
 
-func (s *shellState) infiniteView(ctx *ui.Context, view *infiniteCanvas, worldW, worldH float32, edges [][][2]float32, hit func(x, y float32) bool, cards func(*ui.Context, *infiniteCanvas)) {
+type canvasEdge struct {
+	From, To string
+	Points   [][2]float32
+	Color    ui.Color
+}
+
+func (s *shellState) infiniteView(ctx *ui.Context, view *infiniteCanvas, worldW, worldH float32, edges []canvasEdge, hit func(x, y float32) bool, cards func(*ui.Context, *infiniteCanvas)) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	stage := ui.Box(ctx).Fill().Clip().Label("无限画布")
 	stage.HandleInput(func(ev ui.InputEvent) bool {
@@ -153,14 +159,19 @@ func (s *shellState) infiniteView(ctx *ui.Context, view *infiniteCanvas, worldW,
 		}
 		s.canvasGrid(p, r, view, t)
 		for _, edge := range edges {
-			if len(edge) < 2 {
+			if len(edge.Points) < 2 {
 				continue
 			}
-			points := make([][2]float32, 0, len(edge))
-			for _, point := range edge {
+			width, alpha := fleetEdgePaint(edge.From, edge.To, s.fleet.hoverID, float32(gwtheme.Stroke), 0.6)
+			color := edge.Color
+			if color.A == 0 {
+				color = t.Border
+			}
+			points := make([][2]float32, 0, len(edge.Points))
+			for _, point := range edge.Points {
 				points = append(points, [2]float32{r.X + view.x + point[0]*view.zoom, r.Y + view.y + point[1]*view.zoom})
 			}
-			p.StrokePolyline(points, float32(gwtheme.Stroke), t.Border.Alpha(0.55))
+			p.StrokePolyline(points, width, color.Alpha(alpha))
 		}
 	})
 	stage.Children(func() { cards(ctx, view) })
