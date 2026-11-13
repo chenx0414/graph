@@ -49,50 +49,35 @@ func (c *chatState) ensureHistory() {
 		return
 	}
 	c.historyLoading = true
-	id, before := c.active, c.oldestSeq
+	source := c.source
+	before := c.oldestSeq
 	go func() {
-		payload, err := c.api.get("/api/conversations/" + id + "/history?before=" + strconv.FormatInt(before, 10) + "&limit=" + strconv.Itoa(historyPageSize))
+		older, oldest, hasMore, err := source.LoadOlder(c, before)
+		if c.source == nil || c.source.Key() != source.Key() {
+			return
+		}
 		if err != nil {
 			c.status = "读不到更早的对话：" + err.Error()
 			c.historyLoading = false
 			c.frame()
 			return
 		}
-		raw, err := parseConversationRaw(payload)
-		if err != nil {
-			c.status = "更早的对话不是预期的 JSON：" + err.Error()
-			c.historyLoading = false
-			c.frame()
-			return
+		if len(older) > 0 {
+			c.messages = mergeMessages(older, c.messages)
+			c.pagedHistory = true
+			c.runBoundaries[older[0].ID] = true
 		}
-		raw = olderBefore(raw, before)
-		kept, err := parseConversationMessages(payload)
-		if err != nil {
-			c.status = "更早的对话不是预期的 JSON：" + err.Error()
-			c.historyLoading = false
-			c.frame()
-			return
+		if oldest > 0 {
+			c.oldestSeq = oldest
 		}
-		kept = olderBefore(kept, before)
-		if len(raw) == 0 {
+		if !hasMore {
 			c.noMoreHistory = true
-		} else {
-			if len(kept) > 0 {
-				c.messages = mergeMessages(kept, c.messages)
-				c.pagedHistory = true
-				c.runBoundaries[kept[0].ID] = true
-			}
-			c.oldestSeq = oldestSeqOf(raw)
-			if len(raw) < historyPageSize {
-				c.noMoreHistory = true
-			}
 		}
 		c.historyLoading = false
 		c.historySettle = 2
 		c.frame()
 	}()
 }
-
 func olderBefore(messages []transcriptMessage, before int64) []transcriptMessage {
 	filtered := make([]transcriptMessage, 0, len(messages))
 	for _, message := range messages {

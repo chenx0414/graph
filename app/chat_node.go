@@ -5,9 +5,10 @@ import (
 	"strings"
 )
 
-func parseNodeRunEntries(payload []byte) ([]transcriptMessage, error) {
+func parseNodeRunEntries(payload []byte) ([]transcriptMessage, bool, error) {
 	var raw struct {
-		Entries []struct {
+		HasOlder bool `json:"hasOlder"`
+		Entries  []struct {
 			Seq       int64  `json:"seq"`
 			ID        string `json:"id"`
 			Role      string `json:"role"`
@@ -18,7 +19,7 @@ func parseNodeRunEntries(payload []byte) ([]transcriptMessage, error) {
 		} `json:"entries"`
 	}
 	if err := json.Unmarshal(payload, &raw); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	messages := []transcriptMessage{}
 	for _, entry := range raw.Entries {
@@ -35,7 +36,7 @@ func parseNodeRunEntries(payload []byte) ([]transcriptMessage, error) {
 		}
 		messages = append(messages, message)
 	}
-	return messages, nil
+	return messages, raw.HasOlder, nil
 }
 
 func formatSeq(seq int64) string {

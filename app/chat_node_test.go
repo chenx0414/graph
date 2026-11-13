@@ -8,17 +8,19 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
 
 type nodeChatMock struct {
-	mu     sync.Mutex
-	run    string
-	fail   bool
-	posted []string
-	fleet  *fleetSnapshot
-	conv   map[string]string
+	mu       sync.Mutex
+	run      string
+	runOlder map[string]string
+	fail     bool
+	posted   []string
+	fleet    *fleetSnapshot
+	conv     map[string]string
 }
 
 func (m *nodeChatMock) server(t *testing.T) *httptest.Server {
@@ -59,6 +61,10 @@ func (m *nodeChatMock) server(t *testing.T) *httptest.Server {
 		}
 		if strings.Contains(r.URL.Path, "/n3/") {
 			_, _ = w.Write([]byte(`{"entries":[{"seq":1,"id":"x3","role":"assistant","kind":"message","text":"这是第三个节点的记录","createdAt":3}]}`))
+			return
+		}
+		if before := r.URL.Query().Get("before"); before != "" && m.runOlder[before] != "" {
+			_, _ = w.Write([]byte(m.runOlder[before]))
 			return
 		}
 		_, _ = w.Write([]byte(m.run))
@@ -274,5 +280,35 @@ func TestFourAgentKindsShareOpenAgentChat(t *testing.T) {
 		if active := state.active(); active == nil || active.active != want[index] {
 			t.Fatalf("%s opens %q, got %+v", agent.Kind, want[index], active)
 		}
+	}
+}
+
+func TestNodeChatLoadsOlderEntriesWhenScrollingUp(t *testing.T) {
+	fleet := ringGraphFleet()
+	node := fleetAgent{ID: "p1-n2", ParentID: "p1", Kind: "node", Name: "fleet-ui", TaskID: "tA", NodeID: "n2", Status: "running"}
+	mock := &nodeChatMock{
+		fleet: fleet,
+		run:   `{"entries":[{"seq":20,"id":"e20","role":"assistant","kind":"message","text":"最新记录","createdAt":20}],"hasOlder":true}`,
+		runOlder: map[string]string{
+			"20": `{"entries":[{"seq":5,"id":"e5","role":"assistant","kind":"message","text":"更早的记录","createdAt":5}],"hasOlder":false}`,
+		},
+	}
+	state, tester := nodeChatShell(t, mock)
+	state.openFleetAgentChat(node)
+	tester = frames(tester)
+	active := state.active()
+	if active == nil || active.oldestSeq != 20 || active.noMoreHistory {
+		t.Fatalf("node load must remember the oldest page cursor, %+v", active)
+	}
+	active.ensureHistory()
+	deadline := time.Now().Add(2 * time.Second)
+	for !tester.HasText("更早的记录") && time.Now().Before(deadline) {
+		tester = frames(tester)
+	}
+	if !tester.HasText("更早的记录") || !tester.HasText("最新记录") {
+		t.Fatalf("scrolling up must prepend older entries, texts %q", tester.Texts())
+	}
+	if !state.active().noMoreHistory {
+		t.Fatal("the last page must stop further history loading")
 	}
 }
