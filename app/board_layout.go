@@ -190,7 +190,7 @@ func (s *shellState) loadBoard(stateDir string) {
 	}
 	kept := make([]boardPage, 0, len(file.Pages))
 	for _, page := range file.Pages {
-		if page.Kind == "history" || page.Kind == "conversation" || page.Kind == "overview" {
+		if page.Kind == "history" || page.Kind == "conversation" || page.Kind == "overview" || page.Kind == "graph" {
 			continue
 		}
 		kept = append(kept, page)
@@ -209,7 +209,7 @@ func (s *shellState) loadBoard(stateDir string) {
 		if page.Kind == "" {
 			kept := make([]boardPanel, 0, len(page.Panels))
 			for _, panel := range page.Panels {
-				if panel.Kind == "history" || panel.Kind == "conversation" || panel.Kind == "overview" {
+				if panel.Kind == "history" || panel.Kind == "conversation" || panel.Kind == "overview" || panel.Kind == "graph" {
 					removeBoardPanelFromLayout(&page.Layout, panel.ID)
 					removedPanels = true
 					continue

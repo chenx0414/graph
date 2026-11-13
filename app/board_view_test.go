@@ -190,6 +190,7 @@ func TestLoadingTheBoardDropsTheRemovedPages(t *testing.T) {
 			{ID: "board", Title: boardDefaultTitle, Panels: defaultBoardPanels(), Layout: defaultBoardLayout()},
 			{ID: "tab-history", Title: "历史记录", Kind: "history", Panels: []boardPanel{{ID: "history", Kind: "history"}}, Layout: boardNode{Kind: "panel", PanelID: "history"}},
 			{ID: "tab-conversation", Title: "对话信息", Kind: "conversation", Panels: []boardPanel{{ID: "conversation", Kind: "conversation"}}, Layout: boardNode{Kind: "panel", PanelID: "conversation"}},
+			{ID: "tab-graph", Title: "图谱画布", Kind: "graph", Panels: []boardPanel{{ID: "graph", Kind: "graph"}}, Layout: boardNode{Kind: "panel", PanelID: "graph"}},
 		},
 		Active: 2,
 	})
@@ -204,7 +205,7 @@ func TestLoadingTheBoardDropsTheRemovedPages(t *testing.T) {
 		t.Fatalf("removed pages survived, pages %+v", state.board.pages)
 	}
 	for _, panel := range state.board.pages[0].Panels {
-		if panel.Kind == "history" || panel.Kind == "conversation" {
+		if panel.Kind == "history" || panel.Kind == "conversation" || panel.Kind == "graph" {
 			t.Fatalf("removed panel survived, panels %+v", state.board.pages[0].Panels)
 		}
 	}
