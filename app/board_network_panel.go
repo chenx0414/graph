@@ -28,6 +28,7 @@ type netScene struct {
 
 type netPanelState struct {
 	key        string
+	page       string
 	generation int
 	loading    bool
 	failed     string
@@ -62,6 +63,10 @@ func (s *shellState) panelChatNetwork(ctx *ui.Context) {
 		return
 	}
 	state := &s.boardNet
+	if page := s.boardPage(); page != nil && state.page != page.ID {
+		state.page = page.ID
+		state.view.fit = false
+	}
 	if state.key != scope.key() || !sameNetScene(state.scene, scene) {
 		if state.key != scope.key() {
 			state.view = infiniteCanvas{}
