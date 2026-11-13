@@ -314,20 +314,30 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform
 		if !autoHide {
 			s.boardPanelHeader(ctx, panel, freeform)
 		}
-		body := ui.Scroll(ctx).Grow(1).Padding(th.Space(3))
-		body.MaskLinearGradient(ui.LinearGradient{Angle: 180, Stops: []ui.GradientStop{
-			{Color: ui.Transparent, At: 0},
-			{Color: ui.RGB(0, 0, 0), At: 0.08},
-			{Color: ui.RGB(0, 0, 0), At: 0.92},
-			{Color: ui.Transparent, At: 1},
-		}})
-		body.Children(func() {
-			content := ui.Column(ctx).FillWidth().Gap(th.Space(2))
-			content.MaskLinearGradient(ui.LinearGradient{Angle: 90, Stops: []ui.GradientStop{
-				{Color: ui.RGB(0, 0, 0), At: 0},
-				{Color: ui.RGB(0, 0, 0), At: 0.88},
+		fills := boardPanelFills(panel.Kind)
+		var body ui.Element
+		if fills {
+			body = ui.Box(ctx).Grow(1).Padding(th.Space(3))
+		} else {
+			body = ui.Scroll(ctx).Grow(1).Padding(th.Space(3))
+			body.MaskLinearGradient(ui.LinearGradient{Angle: 180, Stops: []ui.GradientStop{
+				{Color: ui.Transparent, At: 0},
+				{Color: ui.RGB(0, 0, 0), At: 0.08},
+				{Color: ui.RGB(0, 0, 0), At: 0.92},
 				{Color: ui.Transparent, At: 1},
 			}})
+		}
+		body.Children(func() {
+			content := ui.Column(ctx).FillWidth().Gap(th.Space(2))
+			if fills {
+				content.FillHeight()
+			} else {
+				content.MaskLinearGradient(ui.LinearGradient{Angle: 90, Stops: []ui.GradientStop{
+					{Color: ui.RGB(0, 0, 0), At: 0},
+					{Color: ui.RGB(0, 0, 0), At: 0.88},
+					{Color: ui.Transparent, At: 1},
+				}})
+			}
 			content.Children(func() {
 				s.boardPanelBody(ctx, panel)
 			})
@@ -359,6 +369,14 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform
 			s.boardDropPreview(ctx, panel)
 		}
 	})
+}
+
+func boardPanelFills(kind string) bool {
+	switch kind {
+	case "agent-network":
+		return true
+	}
+	return false
 }
 
 func (s *shellState) boardPanelHeader(ctx *ui.Context, panel *boardPanel, freeform bool) ui.Element {

@@ -24,10 +24,10 @@ func TestTheWhiteboardNetworkShowsThreadsForMain(t *testing.T) {
 	state, tester := nodeChatShell(t, mock)
 	state.selectConversation("g1")
 	tester = frames(frames(tester))
-	if !tester.HasText("2 个 Thread Agent · Main 中心") {
-		t.Fatalf("the network panel lists the threads around Main, texts %q", tester.Texts())
+	if !tester.HasText("编队 · Main 中心 · Thread 环 · 拖拽平移 · 滚轮缩放") {
+		t.Fatalf("the network panel is the fleet network around Main, texts %q", tester.Texts())
 	}
-	if !tester.HasText("项目 A") || !tester.HasText("项目 B") {
+	if !tester.HasText("编队 Agent 项目 A") || !tester.HasText("编队 Agent 项目 B") {
 		t.Fatalf("the network panel shows the thread agents, texts %q", tester.Texts())
 	}
 }
@@ -42,8 +42,8 @@ func TestTheWhiteboardNetworkShowsGraphsForAThread(t *testing.T) {
 	state, tester := nodeChatShell(t, mock)
 	state.selectConversation("p1")
 	tester = frames(frames(tester))
-	if !tester.HasText("项目 A · 1 个 Graph") {
-		t.Fatalf("the network panel lists the thread's graphs, texts %q", tester.Texts())
+	if !tester.HasText("线程 · Graph 环 · 拖拽平移 · 滚轮缩放") {
+		t.Fatalf("the network panel shows the thread's graphs, texts %q", tester.Texts())
 	}
 	if !tester.HasText("目标：验证编队网络") {
 		t.Fatalf("the network panel names the graph unit, texts %q", tester.Texts())
@@ -67,7 +67,7 @@ func TestTheWhiteboardNetworkShowsTheGraphForAGraphAgent(t *testing.T) {
 	if !tester.HasText("图节点 planner") {
 		t.Fatalf("the network panel renders the graph of the open graph agent, texts %q", tester.Texts())
 	}
-	if !tester.HasText("Graph · 1 节点 · 0 边") {
+	if !tester.HasText("Graph · 1 节点 · 拖拽平移 · 滚轮缩放") {
 		t.Fatalf("the network panel captions the graph, texts %q", tester.Texts())
 	}
 }
@@ -83,5 +83,95 @@ func TestTheDefaultWhiteboardShowsTheNetworkBesideTheAgentPanel(t *testing.T) {
 	}
 	if seen["artifacts"] {
 		t.Fatalf("the generic artifacts card is gone from the whiteboard, panels %+v", page.Panels)
+	}
+}
+
+func TestTheNetworkCanvasPansAndZooms(t *testing.T) {
+	mock := &nodeChatMock{
+		fleet: networkPanelFleet(),
+		conv: map[string]string{
+			"g1": `{"messages":[{"id":"m1","seq":1,"role":"assistant","kind":"message","text":"Main 在这里","createdAt":1}]}`,
+		},
+	}
+	state, tester := nodeChatShell(t, mock)
+	state.selectConversation("g1")
+	tester = frames(frames(tester))
+	state.boardNet.view.fit = true
+	state.boardNet.view.x = 0
+	state.boardNet.view.y = 0
+	canvas, ok := tester.Find("无限画布")
+	if !ok {
+		t.Fatalf("the network canvas never rendered, texts %q", tester.Texts())
+	}
+	tester.Wheel(canvas.X+canvas.W/2, canvas.Y+canvas.H/2, 0, -120)
+	frames(tester)
+	if state.boardNet.view.y == 0 {
+		t.Fatal("the wheel must pan the network canvas")
+	}
+	before := state.boardNet.view.zoom
+	if err := tester.Click("+"); err != nil {
+		t.Fatalf("zoom in: %v", err)
+	}
+	frames(tester)
+	if state.boardNet.view.zoom <= before {
+		t.Fatalf("zoom in raises the zoom, %v -> %v", before, state.boardNet.view.zoom)
+	}
+	state.boardNet.view.x, state.boardNet.view.y = 999, 999
+	if err := tester.Click("居中"); err != nil {
+		t.Fatalf("center: %v", err)
+	}
+	frames(tester)
+	if state.boardNet.view.x == 999 {
+		t.Fatal("居中 re-centers the network")
+	}
+}
+
+func TestTheNetworkCanvasDragsWithoutSwallowingClicks(t *testing.T) {
+	mock := &nodeChatMock{
+		fleet: networkPanelFleet(),
+		conv: map[string]string{
+			"g1": `{"messages":[{"id":"m1","seq":1,"role":"assistant","kind":"message","text":"Main 在这里","createdAt":1}]}`,
+		},
+	}
+	state, tester := nodeChatShell(t, mock)
+	state.selectConversation("g1")
+	tester = frames(frames(tester))
+	state.boardNet.view.fit = true
+	state.boardNet.view.zoom = 1
+	state.boardNet.view.x = 20
+	state.boardNet.view.y = 20
+	frames(tester)
+	canvas, ok := tester.Find("无限画布")
+	if !ok {
+		t.Fatalf("the network canvas never rendered, texts %q", tester.Texts())
+	}
+	x, y := canvas.X+canvas.W/2, canvas.Y+canvas.H/2
+	tester.Press(x, y)
+	tester.Move(x+60, y+40)
+	frames(tester)
+	tester.Release(x+60, y+40)
+	frames(tester)
+	if state.boardNet.view.x == 20 && state.boardNet.view.y == 20 {
+		t.Fatal("dragging the empty canvas must pan it")
+	}
+}
+
+func TestTheNetworkPanelFullScreenShowsTheSameNetwork(t *testing.T) {
+	mock := &nodeChatMock{
+		fleet: networkPanelFleet(),
+		conv: map[string]string{
+			"g1": `{"messages":[{"id":"m1","seq":1,"role":"assistant","kind":"message","text":"Main 在这里","createdAt":1}]}`,
+		},
+	}
+	state, tester := nodeChatShell(t, mock)
+	state.selectConversation("g1")
+	frames(tester)
+	state.openModule("agent-network")
+	tester = frames(frames(tester))
+	if page := state.boardPage(); page == nil || page.Kind != "agent-network" {
+		t.Fatalf("the full screen page is the network, page %+v", page)
+	}
+	if !tester.HasText("编队 · Main 中心 · Thread 环 · 拖拽平移 · 滚轮缩放") || !tester.HasText("居中") {
+		t.Fatalf("the full screen keeps the same network canvas, texts %q", tester.Texts())
 	}
 }
