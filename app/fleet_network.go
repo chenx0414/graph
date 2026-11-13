@@ -26,17 +26,14 @@ func (s *shellState) panelFleetNetwork(ctx *ui.Context) {
 	}
 	ring := fleetRingLayout(data)
 	s.fleetNetworkModels(data)
-	family := map[string]bool{}
-	if s.fleet.hoverID != "" {
-		family = fleetFamilyOf(data, s.fleet.hoverID)
-	}
+	s.fleetHoverScope(s.boardPage().ID + "/network")
 	caption := formatFleetCount(len(data.Agents)) + " 个 Agent · " +
 		formatFleetCount(data.Stats.Running) + " 运行中 · Main 中心 · Thread 环 · Graph 环"
 	kit.Text(ctx, caption, t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
 	ui.ScrollBoth(ctx).Fill().TrackScroll(&s.fleet.netScroll).Children(func() {
 		world := ui.Box(ctx).Width(ring.Width).Height(ring.Height)
 		world.Draw(func(p *ui.Painter, r ui.Rect) {
-			s.drawFleetRing(p, r.X, r.Y, ring, family, t)
+			s.drawFleetRing(p, r.X, r.Y, ring, t)
 		})
 		world.Children(func() {
 			for _, node := range ring.Nodes {
@@ -46,7 +43,7 @@ func (s *shellState) panelFleetNetwork(ctx *ui.Context) {
 				default:
 					continue
 				}
-				element := s.fleetRingElement(ctx, positioned, family)
+				element := s.fleetRingElement(ctx, positioned)
 				element.Absolute().Left(positioned.X).Top(positioned.Y)
 			}
 		})
@@ -89,7 +86,7 @@ func (s *shellState) fleetNetworkModels(data *fleetSnapshot) {
 	}
 }
 
-func (s *shellState) drawFleetRing(p *ui.Painter, x, y float32, ring fleetRing, family map[string]bool, t gwtheme.Tokens) {
+func (s *shellState) drawFleetRing(p *ui.Painter, x, y float32, ring fleetRing, t gwtheme.Tokens) {
 	s.fleetRingEllipse(p, x, y, ring, ring.Ring1X, ring.Ring1Y, t.Border.Alpha(fleetRingAxisAlpha))
 	s.fleetRingEllipse(p, x, y, ring, ring.Ring2X, ring.Ring2Y, t.Border.Alpha(fleetRingAxisAlpha))
 	label := t.Muted.Alpha(0.7)
@@ -100,16 +97,7 @@ func (s *shellState) drawFleetRing(p *ui.Painter, x, y float32, ring fleetRing, 
 		if !ok {
 			color = s.fleet.accents[edge.FromID]
 		}
-		alpha := float32(fleetRingEdgeAlpha)
-		width := float32(gwtheme.Stroke)
-		if s.fleet.hoverID != "" {
-			switch {
-			case family[edge.ToID] && family[edge.FromID]:
-				alpha, width = 0.9, 2
-			default:
-				alpha = 0.05
-			}
-		}
+		width, alpha := fleetEdgePaint(edge.FromID, edge.ToID, s.fleet.hoverID, float32(gwtheme.Stroke), float32(fleetRingEdgeAlpha))
 		points := make([][2]float32, len(edge.Points))
 		for index, point := range edge.Points {
 			points[index] = [2]float32{x + point[0], y + point[1]}
@@ -130,32 +118,29 @@ func (s *shellState) fleetRingEllipse(p *ui.Painter, x, y float32, ring fleetRin
 	p.StrokePolyline(points, 1, color)
 }
 
-func (s *shellState) fleetRingElement(ctx *ui.Context, node fleetRingNode, family map[string]bool) ui.Element {
+func (s *shellState) fleetRingElement(ctx *ui.Context, node fleetRingNode) ui.Element {
 	switch node.Kind {
 	case "global":
-		return s.fleetAgentCard(ctx, node.Agent, family, node.W, node.H)
+		return s.fleetAgentCard(ctx, node.Agent, node.W, node.H)
 	case "thread":
-		return s.fleetThreadCard(ctx, node, family)
+		return s.fleetThreadCard(ctx, node)
 	case "orphan":
 		return s.fleetOrphanCard(ctx, node)
 	case "graph-unit", "graph-aggregate":
-		return s.fleetGraphUnitCard(ctx, node, family)
+		return s.fleetGraphUnitCard(ctx, node)
 	}
 	return ui.Element{}
 }
 
-func (s *shellState) fleetAgentCard(ctx *ui.Context, agent fleetAgent, family map[string]bool, width, height float32) ui.Element {
+func (s *shellState) fleetAgentCard(ctx *ui.Context, agent fleetAgent, width, height float32) ui.Element {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	accent := s.fleet.accents[agent.ID]
 	card := ui.Column(ctx).Clip().Padding(th.Space(1), th.Space(1.5)).Gap(th.Space(0.25)).
-		Radius(t.Radius.Lg).Background(t.Card).Border(gwtheme.Stroke, accent.Alpha(0.42)).Focusable()
+		Radius(t.Radius.Lg).Background(t.Card).Focusable()
 	card.Width(width).Height(height)
 	card.Label("编队 Agent " + fleetAgentLabel(agent))
-	s.fleetCardHover(card, agent.ID)
+	s.fleetHoverCard(card, agent.ID, accent, t)
 	card.OnClick(func() { _ = s.openFleetAgentPage(agent) })
-	if s.fleet.hoverID != "" && !family[agent.ID] {
-		card.Opacity(0.45)
-	}
 	card.Children(func() {
 		s.fleetAgentCardHead(ctx, agent, accent)
 		fleetEllipsis(ctx, fleetAgentRole(agent), t.Text.Xs, accent)
@@ -175,24 +160,21 @@ func (s *shellState) fleetAgentCard(ctx *ui.Context, agent fleetAgent, family ma
 	return card
 }
 
-func (s *shellState) fleetThreadCard(ctx *ui.Context, node fleetRingNode, family map[string]bool) ui.Element {
+func (s *shellState) fleetThreadCard(ctx *ui.Context, node fleetRingNode) ui.Element {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	agent := node.Agent
 	accent := s.fleetRingAccent(node)
 	card := ui.Column(ctx).Clip().Padding(th.Space(0.75), th.Space(1)).Gap(th.Space(0.25)).
-		Radius(t.Radius.Lg).Background(t.Card).Border(gwtheme.Stroke, accent.Alpha(0.42)).Focusable()
+		Radius(t.Radius.Lg).Background(t.Card).Focusable()
 	card.Width(node.W).Height(node.H)
 	if node.Aggregate {
 		card.Label("编队其他项目 " + node.Detail)
 		card.Tooltip(node.Detail)
 	} else {
 		card.Label("编队 Agent " + fleetAgentLabel(agent))
-		s.fleetCardHover(card, agent.ID)
 		card.OnClick(func() { _ = s.openFleetAgentPage(agent) })
-		if s.fleet.hoverID != "" && !family[agent.ID] {
-			card.Opacity(0.45)
-		}
 	}
+	s.fleetHoverCard(card, node.ID, accent, t)
 	card.Children(func() {
 		ui.Row(ctx).FillWidth().Gap(th.Space(0.75)).AlignItems(ui.Center).Children(func() {
 			fleetAvatar(ctx, fleetAgentInitial(agent), accent, th.Space(4.5))
@@ -234,9 +216,11 @@ func (s *shellState) fleetRingAccent(node fleetRingNode) ui.Color {
 
 func (s *shellState) fleetOrphanCard(ctx *ui.Context, node fleetRingNode) ui.Element {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
+	accent := fleetAccents()[1]
 	card := ui.Column(ctx).Clip().Padding(th.Space(0.75), th.Space(1)).Gap(th.Space(0.25)).
-		Radius(t.Radius.Lg).Background(t.Card).Border(gwtheme.Stroke, t.Border).Justify(ui.Center)
+		Radius(t.Radius.Lg).Background(t.Card).Justify(ui.Center)
 	card.Width(node.W).Height(node.H)
+	s.fleetHoverCard(card, node.ID, accent, t)
 	card.Children(func() {
 		kit.Text(ctx, "未归属", t.Text.Xs).FontWeight(600).TextColor(t.Muted).SingleLine().Ellipsis("…")
 		kit.Text(ctx, strconv.Itoa(node.Count)+" 个图", t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
@@ -244,7 +228,7 @@ func (s *shellState) fleetOrphanCard(ctx *ui.Context, node fleetRingNode) ui.Ele
 	return card
 }
 
-func (s *shellState) fleetGraphUnitCard(ctx *ui.Context, node fleetRingNode, family map[string]bool) ui.Element {
+func (s *shellState) fleetGraphUnitCard(ctx *ui.Context, node fleetRingNode) ui.Element {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	unit := node.Unit
 	accent := fleetAccents()[0]
@@ -252,7 +236,7 @@ func (s *shellState) fleetGraphUnitCard(ctx *ui.Context, node fleetRingNode, fam
 		accent = agent
 	}
 	card := ui.Column(ctx).Clip().Padding(th.Space(0.5), th.Space(1.25)).Gap(th.Space(0.25)).
-		Radius(t.Radius.Lg).Background(t.Card).Border(gwtheme.Stroke, accent.Alpha(0.45)).Focusable()
+		Radius(t.Radius.Lg).Background(t.Card).Focusable()
 	card.Width(node.W).Height(node.H)
 	if unit.Aggregate {
 		card.Label("编队图 " + unit.Title)
@@ -262,11 +246,8 @@ func (s *shellState) fleetGraphUnitCard(ctx *ui.Context, node fleetRingNode, fam
 		card.Tooltip(unit.Title + " · " + strconv.Itoa(unit.NodeCount) + " 节点")
 		selected := unit
 		card.OnClick(func() { _ = s.openFleetGraphPage(selected) })
-		s.fleetCardHover(card, unit.TaskID)
-		if s.fleet.hoverID != "" && !family[unit.TaskID] {
-			card.Opacity(0.45)
-		}
 	}
+	s.fleetHoverCard(card, node.ID, accent, t)
 	card.Children(func() {
 		ui.Row(ctx).FillWidth().Gap(th.Space(0.75)).AlignItems(ui.Center).Children(func() {
 			fleetStatusDot(ctx, unit.Status)
@@ -282,17 +263,6 @@ func (s *shellState) fleetGraphUnitCard(ctx *ui.Context, node fleetRingNode, fam
 		kit.Text(ctx, meta, t.Text.Xs).TextColor(t.Muted).Grow(1).SingleLine().Ellipsis("…")
 	})
 	return card
-}
-
-func (s *shellState) fleetCardHover(card ui.Element, agentID string) {
-	if !card.Hovered() {
-		return
-	}
-	if s.fleet.hoverID == agentID {
-		return
-	}
-	s.fleet.hoverID = agentID
-	s.frame()
 }
 
 func fleetAvatar(ctx *ui.Context, initial string, accent ui.Color, size float32) ui.Element {

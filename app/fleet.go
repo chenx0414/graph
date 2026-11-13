@@ -131,6 +131,7 @@ type fleetState struct {
 	globalFailed   string
 	detail         fleetDetailEntry
 	hoverID        string
+	hoverScope     string
 	agentFilter    string
 	category       string
 	generation     int

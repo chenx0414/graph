@@ -374,47 +374,6 @@ func TestTheFleetEventsFilterByCategory(t *testing.T) {
 	}
 }
 
-func TestFleetFamilyCoversTheLineage(t *testing.T) {
-	sample, err := parseFleet([]byte(fleetSampleJSON))
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	family := fleetFamilyOf(sample, "n2")
-	for _, id := range []string{"n2", "p1", "n1", "g1"} {
-		if !family[id] {
-			t.Fatalf("the family of n2 misses %q, got %v", id, family)
-		}
-	}
-	big := thousandAgentFleet()
-	family = fleetFamilyOf(big, "p00-n00")
-	if !family["p00-n01"] || !family["p00"] || !family["g1"] {
-		t.Fatalf("the family must cover siblings, the parent and the root, got %v", family)
-	}
-	if family["p01-n00"] || family["p01"] {
-		t.Fatalf("the family must not cross projects, got %v", family)
-	}
-}
-
-func TestHoveringAFleetCardLightsItsFamily(t *testing.T) {
-	state := fleetServerShell(t, fleetSampleServer)
-	tester := openFleetTester(t, state)
-	state.openModule("fleet-network")
-	tester = frames(tester)
-	card, ok := tester.Find("编队 Agent 13-Graph")
-	if !ok {
-		t.Fatalf("the project card never rendered, texts %q", tester.Texts())
-	}
-	tester.Move(card.X+card.W/2, card.Y+card.H/2)
-	frames(tester)
-	if state.fleet.hoverID != "p1" {
-		t.Fatalf("hovering a card lights its family, hovered %q", state.fleet.hoverID)
-	}
-	family := fleetFamilyOf(state.fleet.data, state.fleet.hoverID)
-	if !family["n1"] || !family["g1"] {
-		t.Fatalf("the lit family misses the planner or the root, %v", family)
-	}
-}
-
 func TestFleetStatusLabelsCoverTheContractStatuses(t *testing.T) {
 	for status, want := range map[string]string{
 		"running":   "运行中",

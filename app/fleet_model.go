@@ -129,47 +129,6 @@ func fleetStatusLabel(status string) string {
 	return status
 }
 
-func fleetFamilyOf(data *fleetSnapshot, id string) map[string]bool {
-	family := map[string]bool{}
-	if data == nil || id == "" {
-		return family
-	}
-	index := fleetIndex(data)
-	if _, ok := index[id]; !ok {
-		return family
-	}
-	family[id] = true
-	parentID := index[id].ParentID
-	for steps := 0; parentID != "" && steps < 64; steps++ {
-		family[parentID] = true
-		parent, ok := index[parentID]
-		if !ok {
-			break
-		}
-		parentID = parent.ParentID
-	}
-	queue := []string{id}
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		for _, agent := range data.Agents {
-			if agent.ParentID == current && !family[agent.ID] {
-				family[agent.ID] = true
-				queue = append(queue, agent.ID)
-			}
-		}
-	}
-	agent := index[id]
-	if agent.Kind == "node" || agent.Kind == "child" {
-		for _, candidate := range data.Agents {
-			if candidate.ParentID == agent.ParentID && candidate.ID != id && !family[candidate.ID] {
-				family[candidate.ID] = true
-			}
-		}
-	}
-	return family
-}
-
 func fleetEventCategory(event fleetEvent) string {
 	kind := strings.ToLower(event.Type)
 	switch {

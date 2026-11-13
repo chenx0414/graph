@@ -62,6 +62,7 @@ func (s *shellState) fleetGraphMessage(ctx *ui.Context, text string, color ui.Co
 }
 
 func (s *shellState) fleetGraphCanvas(ctx *ui.Context, data *fleetTopologyData) {
+	s.fleetHoverScope(s.boardPage().ID)
 	world := ui.Box(ctx).Width(data.Width).Height(data.Height)
 	world.Draw(func(p *ui.Painter, r ui.Rect) {
 		for _, edge := range data.Edges {
@@ -75,11 +76,12 @@ func (s *shellState) fleetGraphCanvas(ctx *ui.Context, data *fleetTopologyData) 
 					accent = value
 				}
 			}
+			width, alpha := fleetEdgePaint(edge.From, edge.To, s.fleet.hoverID, 2, 0.85)
 			points := make([][2]float32, len(edge.Points))
 			for index, point := range edge.Points {
 				points[index] = [2]float32{r.X + point[0], r.Y + point[1]}
 			}
-			p.StrokePolyline(points, 2, accent.Alpha(0.85))
+			p.StrokePolyline(points, width, accent.Alpha(alpha))
 		}
 	})
 	world.Children(func() {
@@ -109,9 +111,10 @@ func (s *shellState) fleetTopologyCard(ctx *ui.Context, data *fleetTopologyData,
 		}
 	}
 	card := ui.Column(ctx).Clip().Padding(th.Space(1.25), th.Space(1.75)).Gap(th.Space(0.5)).
-		Radius(t.Radius.Lg).Background(t.Card).Border(gwtheme.Stroke, accent.Alpha(0.45)).Focusable()
+		Radius(t.Radius.Lg).Background(t.Card).Focusable()
 	card.Width(node.W).Height(node.H)
 	card.Label("图节点 " + fleetTopologyNodeLabel(node))
+	s.fleetHoverCard(card, node.ID, accent, t)
 	card.Draw(func(p *ui.Painter, r ui.Rect) {
 		p.Fill(ui.Rect{X: r.X, Y: r.Y + 8, W: 3, H: r.H - 16}, accent, 2)
 	})
