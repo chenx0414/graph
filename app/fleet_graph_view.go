@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -100,17 +101,16 @@ func (s *shellState) fleetTopologyCard(ctx *ui.Context, data *fleetTopologyData,
 	if agent != nil && agent.Status != "" {
 		status = agent.Status
 	}
-	accent := fleetAccents()[1]
 	module := node.Kind == "module" || node.Kind == "boundary"
-	if module {
-		accent = fleetAccents()[1]
-	}
+	accent := fleetAccents()[1]
 	if agent != nil {
 		if value, ok := s.fleet.accents[agent.ID]; ok {
 			accent = value
 		}
+	} else {
+		accent = fleetStatusColor(t, status)
 	}
-	card := ui.Column(ctx).Clip().Padding(th.Space(1.25), th.Space(1.75)).Gap(th.Space(0.5)).
+	card := ui.Column(ctx).Clip().Padding(th.Space(1), th.Space(1.5)).Gap(th.Space(0.25)).
 		Radius(t.Radius.Lg).Background(t.Card).Focusable()
 	card.Width(node.W).Height(node.H)
 	card.Label("图节点 " + fleetTopologyNodeLabel(node))
@@ -122,30 +122,120 @@ func (s *shellState) fleetTopologyCard(ctx *ui.Context, data *fleetTopologyData,
 		selected := *agent
 		card.OnClick(func() { _ = s.openFleetAgentPage(selected) })
 	}
+	share, second := s.graphTokenShare(data, agent)
+	steps := 0
+	var duration int64
+	if agent != nil {
+		steps = agent.Requests
+		duration = fleetAgentDurationMs(*agent)
+	}
 	card.Children(func() {
-		ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center).Children(func() {
-			fleetAvatar(ctx, fleetAgentInitial(fleetAgent{Name: fleetTopologyNodeLabel(node)}), accent, th.Space(5))
+		ui.Row(ctx).FillWidth().Gap(th.Space(0.75)).AlignItems(ui.Center).Children(func() {
+			fleetAvatar(ctx, fleetGraphInitial(fleetTopologyNodeLabel(node)), accent, th.Space(5))
 			fleetStatusDot(ctx, status)
 			title := fleetTopologyNodeLabel(node)
 			if module {
 				title = "◇ " + title
 			}
 			kit.Text(ctx, title, t.Text.Sm).FontWeight(650).TextColor(t.Foreground).Grow(1).SingleLine().Ellipsis("…")
-		})
-		fleetEllipsis(ctx, fleetTopologyAction(node), t.Text.Xs, t.Muted)
-		meta := fleetStatusLabel(status)
-		if node.Model != "" {
-			meta += " · " + shortModel(node.Model)
-		}
-		if agent != nil {
-			meta += " · " + formatTrajectoryCompactTokens(agent.Tokens)
-			if agent.Cost > 0 {
-				meta += " · " + formatTrajectoryCost(agent.Cost)
+			if status == "running" {
+				fleetGraphPill(ctx, "当前", t.SuccessText, t.SuccessBg)
 			}
+		})
+		first, secondLine := fleetGraphDutyLines(fleetTopologyAction(node))
+		kit.Text(ctx, first, t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
+		if secondLine != "" {
+			kit.Text(ctx, secondLine, t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
 		}
-		kit.Text(ctx, meta, t.Text.Xs).TextColor(t.Muted).Grow(1).SingleLine().Ellipsis("…")
+		model := node.Model
+		if model == "" {
+			model = "—"
+		}
+		kit.Text(ctx, shortModel(model), t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
+		tokens := int64(0)
+		cost := 0.0
+		if agent != nil {
+			tokens, cost = agent.Tokens, agent.Cost
+		}
+		ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center).Children(func() {
+			kit.Text(ctx, formatTrajectoryCompactTokens(tokens)+" tokens", t.Text.Sm).FontWeight(600).TextColor(t.Foreground)
+			kit.Text(ctx, formatTrajectoryCost(cost), t.Text.Xs).TextColor(t.Muted)
+		})
+		s.fleetGraphUsageBar(ctx, share, second, accent)
+		ui.Row(ctx).FillWidth().AlignItems(ui.Center).Children(func() {
+			meta := strconv.Itoa(steps) + " 步 · " + formatTrajectoryCompactDuration(duration)
+			if agent == nil {
+				meta = fleetStatusLabel(status)
+			}
+			kit.Text(ctx, meta, t.Text.Xs).TextColor(t.Muted).Grow(1).SingleLine().Ellipsis("…")
+			kit.Text(ctx, "占比 "+formatTrajectoryPercent(float64(share)), t.Text.Xs).FontWeight(600).TextColor(t.SuccessText)
+		})
 	})
 	return card
+}
+
+func fleetGraphInitial(label string) string {
+	runes := []rune(strings.TrimSpace(label))
+	if len(runes) == 0 {
+		return "?"
+	}
+	if len(runes) == 1 {
+		return strings.ToUpper(string(runes[0]))
+	}
+	return strings.ToUpper(string(runes[:2]))
+}
+
+func fleetGraphDutyLines(action string) (string, string) {
+	runes := []rune(strings.TrimSpace(action))
+	if len(runes) <= 26 {
+		return string(runes), ""
+	}
+	return string(runes[:26]), string(runes[26:min(52, len(runes))])
+}
+
+func fleetGraphPill(ctx *ui.Context, label string, textColor, background ui.Color) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	ui.Row(ctx).Radius(t.Radius.Full).Background(background).Padding(0, th.Space(0.75)).
+		AlignItems(ui.Center).Children(func() {
+		kit.Text(ctx, label, t.Text.Xs).FontWeight(600).TextColor(textColor)
+	})
+}
+
+func (s *shellState) graphTokenShare(data *fleetTopologyData, agent *fleetAgent) (float32, float32) {
+	if agent == nil || agent.Tokens <= 0 {
+		return 0, 0
+	}
+	total := int64(0)
+	for _, node := range data.Nodes {
+		if matched := s.fleetTopologyAgent(data.TaskID, node.ID); matched != nil && matched.Tokens > 0 {
+			total += matched.Tokens
+		}
+	}
+	if total <= 0 {
+		return 0, 0
+	}
+	share := float32(agent.Tokens) / float32(total)
+	second := share
+	if agent.Cost > 0 {
+		second = min(share, float32(0.18))
+	}
+	return share, second
+}
+
+func (s *shellState) fleetGraphUsageBar(ctx *ui.Context, share, second float32, accent ui.Color) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	bar := ui.Box(ctx).FillWidth().Height(th.Space(1.25)).Radius(t.Radius.Full).Background(t.Border.Alpha(0.3)).Clip()
+	bar.Draw(func(p *ui.Painter, r ui.Rect) {
+		if share <= 0 {
+			return
+		}
+		width := r.W * share
+		p.Fill(ui.Rect{X: r.X, Y: r.Y, W: width, H: r.H}, accent, r.H/2)
+		if second > 0 && second < share {
+			first := r.W * second
+			p.Fill(ui.Rect{X: r.X, Y: r.Y, W: first, H: r.H}, accent.Alpha(0.45), r.H/2)
+		}
+	})
 }
 
 func fleetTopologyNodeLabel(node fleetTopologyNode) string {

@@ -14,11 +14,13 @@ import (
 const fleetTopologySample = `{
   "taskId": "tA",
   "nodes": [
-    {"id":"n0","kind":"action","action":"plan","status":"done","label":"Plan","boundDefinition":"plan","model":"deepseek-v4-flash"},
-    {"id":"n1","kind":"action","action":"ship","status":"running","label":"Ship","boundDefinition":"ship","model":"deepseek-v4-flash"},
-    {"id":"n2","kind":"action","action":"check","status":"idle","label":"Check","boundDefinition":"check","model":""}
+    {"id":"n0","kind":"action","action":"探索当前项目","status":"running","label":"Research","boundDefinition":"research","model":"deepseek-v4-flash"},
+    {"id":"n1","kind":"action","action":"实现编队图后端","status":"done","label":"fleet-backend","boundDefinition":"backend","model":"deepseek-v4-flash"},
+    {"id":"n2","kind":"action","action":"重做 Graph 页视觉","status":"running","label":"fleet-ui","boundDefinition":"ui","model":"deepseek-v4-flash"},
+    {"id":"n3","kind":"module","action":"核对规模与占比","status":"idle","label":"scale-engineer","boundDefinition":"scale","model":""},
+    {"id":"n4","kind":"action","action":"回收结果并归档","status":"idle","label":"archive","boundDefinition":"archive","model":"deepseek-v4-flash"}
   ],
-  "edges": [{"id":"e1","from":"n0","to":"n1"},{"id":"e2","from":"n0","to":"n2"},{"id":"e3","from":"n1","to":"n2"}]
+  "edges": [{"id":"e1","from":"n0","to":"n1"},{"id":"e2","from":"n0","to":"n2"},{"id":"e3","from":"n1","to":"n3"},{"id":"e4","from":"n2","to":"n4"}]
 }`
 
 func TestParseFleetTopologyAndLayers(t *testing.T) {
@@ -26,22 +28,33 @@ func TestParseFleetTopologyAndLayers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse topology: %v", err)
 	}
-	if len(data.Nodes) != 3 || len(data.Edges) != 3 || data.TaskID != "tA" {
+	if len(data.Nodes) != 5 || len(data.Edges) != 4 || data.TaskID != "tA" {
 		t.Fatalf("topology parses, %+v", data)
 	}
-	wantLevels := map[string]int{"n0": 0, "n1": 1, "n2": 2}
+	wantLevels := map[string]int{"n0": 0, "n1": 1, "n2": 1, "n3": 2, "n4": 2}
 	for id, want := range wantLevels {
 		if got := data.Levels[id]; got != want {
 			t.Fatalf("node %s sits at level %d, want %d", id, got, want)
 		}
 	}
 	for _, node := range data.Nodes {
-		if node.W != 220 || node.H != 96 {
-			t.Fatalf("node %s keeps a readable card, %.0fx%.0f", node.ID, node.W, node.H)
+		if node.W != 260 || node.H != 116 {
+			t.Fatalf("node %s keeps its DSH card, %.0fx%.0f", node.ID, node.W, node.H)
 		}
 	}
-	if data.Nodes[0].X >= data.Nodes[1].X {
-		t.Fatalf("layers run left to right, %.0f vs %.0f", data.Nodes[0].X, data.Nodes[1].X)
+	root, _ := fleetTopologyNodeByID(data.Nodes, "n0")
+	first, _ := fleetTopologyNodeByID(data.Nodes, "n1")
+	second, _ := fleetTopologyNodeByID(data.Nodes, "n2")
+	grand, _ := fleetTopologyNodeByID(data.Nodes, "n3")
+	if root.Y >= first.Y || first.Y >= grand.Y {
+		t.Fatalf("layers run top to bottom, %.0f %.0f %.0f", root.Y, first.Y, grand.Y)
+	}
+	if first.Y != second.Y {
+		t.Fatalf("siblings share a layer, %.0f vs %.0f", first.Y, second.Y)
+	}
+	middle := (first.X + second.X + second.W) / 2
+	if delta := middle - (root.X + root.W/2); delta < -1 || delta > 1 {
+		t.Fatalf("the root centers over its children, delta %.1f", delta)
 	}
 	for _, edge := range data.Edges {
 		if len(edge.Points) < 21 {
@@ -50,11 +63,11 @@ func TestParseFleetTopologyAndLayers(t *testing.T) {
 		from, _ := fleetTopologyNodeByID(data.Nodes, edge.From)
 		to, _ := fleetTopologyNodeByID(data.Nodes, edge.To)
 		first, last := edge.Points[0], edge.Points[len(edge.Points)-1]
-		if mathAbs(first[0]-(from.X+from.W)) > 0.5 || mathAbs(first[1]-(from.Y+from.H/2)) > 0.5 {
-			t.Fatalf("edge %s starts at the parent right", edge.ID)
+		if mathAbs(first[0]-(from.X+from.W/2)) > 0.5 || mathAbs(first[1]-(from.Y+from.H)) > 0.5 {
+			t.Fatalf("edge %s starts at the parent bottom", edge.ID)
 		}
-		if mathAbs(last[0]-to.X) > 0.5 || mathAbs(last[1]-(to.Y+to.H/2)) > 0.5 {
-			t.Fatalf("edge %s ends at the child left", edge.ID)
+		if mathAbs(last[0]-(to.X+to.W/2)) > 0.5 || mathAbs(last[1]-to.Y) > 0.5 {
+			t.Fatalf("edge %s ends at the child top", edge.ID)
 		}
 	}
 }
@@ -140,21 +153,41 @@ func TestGraphPageRendersNodesAndOpensTheAgent(t *testing.T) {
 	if !tester.HasText("Graph 编队") {
 		t.Fatalf("the panel is titled Graph 编队, texts %q", tester.Texts())
 	}
-	if !tester.HasText("打开线程详情") || !tester.HasText("3 节点 · 3 边") {
+	if !tester.HasText("打开线程详情") || !tester.HasText("5 节点 · 4 边") {
 		t.Fatalf("the page shows its KPI, texts %q", tester.Texts())
 	}
-	for _, want := range []string{"图节点 Plan", "图节点 Ship"} {
+	for _, want := range []string{"图节点 Research", "图节点 fleet-ui", "100 tokens", "0 步", "占比 25.0%"} {
 		if !tester.HasText(want) {
 			t.Fatalf("the page shows %q, texts %q", want, tester.Texts())
 		}
 	}
-	if err := tester.Click("图节点 Ship"); err != nil {
+	for _, want := range []string{"图节点 Research", "图节点 fleet-ui"} {
+		if !tester.HasText(want) {
+			t.Fatalf("the page shows %q, texts %q", want, tester.Texts())
+		}
+	}
+	if err := tester.Click("图节点 fleet-ui"); err != nil {
 		t.Fatalf("click the ship node: %v", err)
 	}
 	tester = frames(tester)
 	page := state.boardPage()
-	if page.ID != "agent:p1-n1" {
+	if page.ID != "agent:p1-n2" {
 		t.Fatalf("a matched node opens its agent page, page %+v", page)
+	}
+}
+
+func TestGraphPageHoverUsesTheSharedStyle(t *testing.T) {
+	mock := &fleetGraphMock{topology: fleetTopologySample, fleet: ringGraphFleet()}
+	state, tester := fleetGraphTester(t, mock, ringGraphFleet())
+	frames(tester)
+	rect, ok := tester.Find("图节点 fleet-ui")
+	if !ok {
+		t.Fatalf("the fleet-ui card lays out, texts %q", tester.Texts())
+	}
+	tester.Move(rect.X+rect.W/2, rect.Y+rect.H/2)
+	frames(tester)
+	if state.fleet.hoverID != "n2" {
+		t.Fatalf("hovering a graph card reuses the shared hover, got %q", state.fleet.hoverID)
 	}
 }
 
@@ -191,7 +224,7 @@ func TestFleetTopologyLayoutTerminatesOnCycles(t *testing.T) {
 	if data.Width <= 0 || data.Height <= 0 || len(data.Edges) != 3 {
 		t.Fatalf("cyclic topology layout = %+v", data)
 	}
-	if data.Nodes[0].X == data.Nodes[1].X && data.Nodes[1].X == data.Nodes[2].X {
+	if data.Nodes[0].Y == data.Nodes[1].Y && data.Nodes[1].Y == data.Nodes[2].Y {
 		t.Fatalf("cycle nodes should still lay out: %+v", data.Nodes)
 	}
 }

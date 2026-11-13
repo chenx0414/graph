@@ -7,10 +7,10 @@ import (
 )
 
 const (
-	fleetGraphCardW   = 220
-	fleetGraphCardH   = 96
-	fleetGraphColGap  = 90
-	fleetGraphRowGap  = 28
+	fleetGraphCardW   = 260
+	fleetGraphCardH   = 116
+	fleetGraphColGap  = 28
+	fleetGraphRowGap  = 48
 	fleetGraphPad     = 28
 	fleetGraphColsMax = 4
 )
@@ -105,29 +105,31 @@ func fleetTopologyLayout(data *fleetTopologyData) {
 	}
 	levels := fleetTopologyLevels(len(data.Nodes), byID, data.Edges)
 	maxLevel := 0
-	rows := map[int][]int{}
+	layers := map[int][]int{}
 	for index := range data.Nodes {
 		level := levels[index]
-		rows[level] = append(rows[level], index)
+		layers[level] = append(layers[level], index)
 		maxLevel = max(maxLevel, level)
 	}
-	columns := maxLevel + 1
-	maxRows := 1
-	for _, row := range rows {
-		maxRows = max(maxRows, len(row))
+	width := float32(0)
+	for level := 0; level <= maxLevel; level++ {
+		rowWidth := float32(len(layers[level])*fleetGraphCardW + max(0, len(layers[level])-1)*fleetGraphColGap)
+		if rowWidth > width {
+			width = rowWidth
+		}
 	}
-	width := float32(fleetGraphPad*2 + columns*fleetGraphCardW + (columns-1)*fleetGraphColGap)
-	height := float32(fleetGraphPad*2 + maxRows*fleetGraphCardH + (maxRows-1)*fleetGraphRowGap)
+	width += fleetGraphPad * 2
+	height := float32(fleetGraphPad*2 + (maxLevel+1)*fleetGraphCardH + maxLevel*fleetGraphRowGap)
 	height = max(height, 420)
 	for level := 0; level <= maxLevel; level++ {
-		row := rows[level]
-		layerHeight := float32(len(row)*fleetGraphCardH + max(0, len(row)-1)*fleetGraphRowGap)
-		startY := (height - layerHeight) / 2
+		row := layers[level]
+		rowWidth := float32(len(row)*fleetGraphCardW + max(0, len(row)-1)*fleetGraphColGap)
+		startX := (width - rowWidth) / 2
 		for index, nodeIndex := range row {
 			node := &data.Nodes[nodeIndex]
 			node.W, node.H = fleetGraphCardW, fleetGraphCardH
-			node.X = float32(fleetGraphPad + level*(fleetGraphCardW+fleetGraphColGap))
-			node.Y = startY + float32(index*(fleetGraphCardH+fleetGraphRowGap))
+			node.X = startX + float32(index*(fleetGraphCardW+fleetGraphColGap))
+			node.Y = float32(fleetGraphPad + level*(fleetGraphCardH+fleetGraphRowGap))
 			levels[nodeIndex] = level
 		}
 	}
@@ -141,8 +143,8 @@ func fleetTopologyLayout(data *fleetTopologyData) {
 			continue
 		}
 		data.Edges[edgeIndex].Points = fleetRingEdgePoints(
-			[2]float32{from.X + from.W, from.Y + from.H/2},
-			[2]float32{to.X, to.Y + to.H/2},
+			[2]float32{from.X + from.W/2, from.Y + from.H},
+			[2]float32{to.X + to.W/2, to.Y},
 		)
 	}
 	data.Width, data.Height = width, height
@@ -151,9 +153,8 @@ func fleetTopologyLayout(data *fleetTopologyData) {
 func fleetTopologyLevels(count int, byID map[string]int, edges []fleetTopologyEdge) []int {
 	levels := make([]int, count)
 	if len(edges) == 0 {
-		rows := (count + fleetGraphColsMax - 1) / fleetGraphColsMax
 		for index := range levels {
-			levels[index] = index / rows
+			levels[index] = index / fleetGraphColsMax
 		}
 		return levels
 	}
