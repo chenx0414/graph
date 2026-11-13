@@ -160,31 +160,39 @@ func (s *shellState) panelContextOverview(ctx *ui.Context) {
 	if used <= 0 {
 		used = total
 	}
-	card := ui.Column(ctx).FillWidth().Padding(th.Space(3.5), th.Space(4), th.Space(3.5), th.Space(4)).
-		Gap(th.Space(2)).Radius(t.Radius.Xl).Border(gwtheme.Hairline, t.Border).Background(t.Card)
+	card := ui.Column(ctx).FillWidth().PaddingEnd(th.Space(3)).Gap(th.Space(1.5))
 	card.Children(func() {
 		title := ui.Row(ctx).FillWidth().Gap(th.Space(2)).AlignItems(ui.Center)
 		title.Children(func() {
 			ui.Icon(ctx, iconGauge).Size(gwtheme.IconSm, gwtheme.IconSm).TextColor(t.Muted)
 			kit.Text(ctx, "当前上下文", t.Text.Base).FontWeight(600).SingleLine()
-			ui.Spacer(ctx)
-			if subtitle := s.contextOverviewSubtitle(model); subtitle != "" {
-				kit.Text(ctx, subtitle, t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
-			}
+			subtitleRow := ui.Row(ctx).Grow(1).AlignItems(ui.Center)
+			subtitleRow.Children(func() {
+				ui.Spacer(ctx)
+				if subtitle := s.contextOverviewSubtitle(model); subtitle != "" {
+					kit.Text(ctx, subtitle, t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
+				}
+			})
 		})
 		numbers := ui.Row(ctx).FillWidth().Gap(th.Space(1.5)).AlignItems(ui.End)
 		numbers.Children(func() {
-			kit.Text(ctx, formatTrajectoryCompactTokens(used), t.Text.X2l).FontWeight(600).SingleLine()
+			left := ui.Row(ctx).Grow(1).Gap(th.Space(1.5)).AlignItems(ui.End)
+			left.Children(func() {
+				kit.Text(ctx, formatTrajectoryCompactTokens(used), t.Text.X2l).FontWeight(600).SingleLine()
+				if window > 0 {
+					kit.Text(ctx, " / "+formatTrajectoryCompactTokens(window)+" tokens", t.Text.Sm).TextColor(t.Muted).
+						SingleLine().Ellipsis("…")
+				} else {
+					kit.Text(ctx, " tokens（估算）", t.Text.Sm).TextColor(t.Muted).SingleLine().Ellipsis("…")
+				}
+			})
 			if window > 0 {
-				kit.Text(ctx, " / "+formatTrajectoryCompactTokens(window)+" tokens", t.Text.Sm).TextColor(t.Muted).SingleLine()
-			} else {
-				kit.Text(ctx, " tokens（估算）", t.Text.Sm).TextColor(t.Muted).SingleLine()
-			}
-			ui.Spacer(ctx)
-			if window > 0 {
-				kit.Text(ctx, strconv.FormatFloat(float64(used)/float64(window)*100, 'f', 1, 64)+"%", t.Text.X2l).
-					FontWeight(600).SingleLine()
-				kit.Text(ctx, " 上下文已用", t.Text.Xs).TextColor(t.Muted).SingleLine()
+				right := ui.Row(ctx).Gap(th.Space(1)).AlignItems(ui.End)
+				right.Children(func() {
+					kit.Text(ctx, strconv.FormatFloat(float64(used)/float64(window)*100, 'f', 1, 64)+"%", t.Text.X2l).
+						FontWeight(600).SingleLine()
+					kit.Text(ctx, " 上下文已用", t.Text.Xs).TextColor(t.Muted).SingleLine()
+				})
 			}
 		})
 		s.contextOverviewBar(ctx, parts, total, used, window, meta.maxTokens)

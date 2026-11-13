@@ -43,7 +43,7 @@ type boardFile struct {
 	Active  int          `json:"active"`
 }
 
-const boardLayoutVersion = 14
+const boardLayoutVersion = 16
 
 const boardDefaultTitle = "白板"
 
@@ -62,9 +62,9 @@ func defaultBoardPanels() []boardPanel {
 
 func defaultBoardLayout() boardNode {
 	return boardNode{Kind: "split", Axis: "column", Children: []boardSlot{
-		{Weight: 2.6, Node: boardNode{Kind: "panel", PanelID: "context-overview"}},
-		{Weight: 3.2, Node: boardNode{Kind: "panel", PanelID: "agent-network"}},
-		{Weight: 2.4, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
+		{Weight: 1.5, Node: boardNode{Kind: "panel", PanelID: "context-overview"}},
+		{Weight: 3.5, Node: boardNode{Kind: "panel", PanelID: "agent-network"}},
+		{Weight: 3.0, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
 			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "agent"}},
 			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "trajectory"}},
 		}}},
@@ -219,7 +219,7 @@ func (s *shellState) loadBoard(stateDir string) {
 			s.board.pages[index].Scope = "fleet"
 		}
 	}
-	if file.Version < 14 {
+	if file.Version < 16 {
 		for index := range s.board.pages {
 			page := &s.board.pages[index]
 			if page.Kind == "" {
