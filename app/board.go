@@ -373,7 +373,7 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform
 
 func boardPanelFills(kind string) bool {
 	switch kind {
-	case "agent-network":
+	case "agent-network", "graph-dag":
 		return true
 	}
 	return false

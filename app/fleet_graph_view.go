@@ -42,17 +42,7 @@ func (s *shellState) panelFleetGraph(ctx *ui.Context) {
 	unit, _ := s.fleetGraphUnit(data.TaskID)
 	threadName, threadAgent := s.fleetGraphThread(unit)
 	s.panelFleetGraphHeader(ctx, data, unit, threadName, threadAgent)
-	if data.Width <= 820 && data.Height <= 620 {
-		ui.Column(ctx).FillWidth().Grow(1).Justify(ui.Center).Children(func() {
-			ui.Row(ctx).FillWidth().Justify(ui.Center).Children(func() {
-				s.fleetGraphCanvas(ctx, data)
-			})
-		})
-		return
-	}
-	ui.ScrollBoth(ctx).Fill().Children(func() {
-		s.fleetGraphCanvas(ctx, data)
-	})
+	s.fleetGraphCanvas(ctx, data)
 }
 
 func (s *shellState) fleetGraphMessage(ctx *ui.Context, text string, color ui.Color) {
@@ -67,32 +57,32 @@ func (s *shellState) fleetGraphCanvas(ctx *ui.Context, data *fleetTopologyData) 
 		s.fleetNetworkModels(s.fleet.data)
 	}
 	s.fleetHoverScope(s.boardPage().ID)
-	world := ui.Box(ctx).Width(data.Width).Height(data.Height)
-	world.Draw(func(p *ui.Painter, r ui.Rect) {
-		for _, edge := range data.Edges {
-			if len(edge.Points) < 2 {
-				continue
-			}
-			color, _ := fleetTopologyNodeByID(data.Nodes, edge.To)
-			accent := fleetStatusColor(gwtheme.Of(ctx), color.Status)
-			if agent := s.fleetTopologyAgent(data.TaskID, edge.To); agent != nil {
-				if value, ok := s.fleet.accents[agent.ID]; ok {
-					accent = value
-				}
-			}
-			width, alpha := fleetEdgePaint(edge.From, edge.To, s.fleet.hoverID, 2, 0.85)
-			points := make([][2]float32, len(edge.Points))
-			for index, point := range edge.Points {
-				points[index] = [2]float32{r.X + point[0], r.Y + point[1]}
-			}
-			p.StrokePolyline(points, width, accent.Alpha(alpha))
+	view := &s.graph.view
+	if view.fit && view.worldW > 0 && view.worldW != data.Width {
+		view.fit = false
+	}
+	polylines := make([][][2]float32, 0, len(data.Edges))
+	for _, edge := range data.Edges {
+		if len(edge.Points) >= 2 {
+			polylines = append(polylines, edge.Points)
 		}
-	})
-	world.Children(func() {
+	}
+	hit := func(x, y float32) bool {
+		for _, node := range data.Nodes {
+			if x >= node.X && x <= node.X+node.W && y >= node.Y && y <= node.Y+node.H {
+				return true
+			}
+		}
+		return false
+	}
+	t := gwtheme.Of(ctx)
+	kit.Text(ctx, "拖拽平移 · 滚轮缩放", t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
+	s.infiniteView(ctx, view, data.Width, data.Height, polylines, hit, func(ctx *ui.Context, view *infiniteCanvas) {
 		for index := range data.Nodes {
 			node := data.Nodes[index]
 			card := s.fleetTopologyCard(ctx, data, node)
-			card.Absolute().Left(node.X).Top(node.Y)
+			card.Width(node.W * view.zoom).Height(node.H * view.zoom)
+			card.Absolute().Left(view.x + node.X*view.zoom).Top(view.y + node.Y*view.zoom)
 		}
 	})
 }

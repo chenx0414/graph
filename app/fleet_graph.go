@@ -44,6 +44,7 @@ type fleetTopologyData struct {
 }
 
 type fleetGraphView struct {
+	view       infiniteCanvas
 	generation int
 	taskID     string
 	title      string
