@@ -4,3 +4,5 @@ ts	phase	decision	why	evidence	result
 2026-11-13T16:58:00+08:00	execute	容量测试改用和生产相同的单连接	OpenSQLite设置MaxOpenConns为1，多连接不是运行时的形状	go test -count=1 -timeout 15m -v -run TestFleetRunsOneThousandTwentyFourAgentsThroughExecution ./internal/graph；PASS 3.39s；concurrent=1024 goroutines=1028 heapAllocMiB=10.4	VERIFIED
 2026-11-13T16:58:30+08:00	control	父级分页读取、列出、追加和停止子级	越权拒绝，归档暂停子级且恢复项目不自动恢复	go test -count=1 -timeout 240s -run 'TestAgentControl|TestDeliverChildResult|TestSpawnAgent|TestFleetRuns' ./internal/graph；ok 4.584s	VERIFIED
 2026-11-13T16:58:40+08:00	ui	编队、任务和产物随后台工作刷新，产物打开指定版本	空窗口只排队，生产路径在绑定窗口后由Window.Update和下一帧排空	go -C app test -count=1 -timeout 180s -run 'TestWorkspaceRefresh|TestFleetArtifact' .；ok 0.665s	VERIFIED
+2026-11-13T17:02:00+08:00	gate	激活门禁通过，并记下新的 harness 面	工具定义变了，三个冻结用例仍通过	python3 scripts/check-queue.py 退出码 0；graphcheck harness --record 记下 runtime_agent_tool_definitions.go 与 runtime_agent_tools.go	VERIFIED
+2026-11-13T17:02:10+08:00	close	本地容量、父子控制和界面刷新成立；供应商限流下的真实模型吞吐未测	受控 adapter 不能代替付费模型	docs/specs/fleet-collaboration-1000.md	INCONCLUSIVE
