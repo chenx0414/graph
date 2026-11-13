@@ -73,11 +73,16 @@ func (s *shell) ensureDaemon() string {
 
 func (s *shell) watchConversation() {
 	for range time.Tick(3 * time.Second) {
-		state := s.chat
+		var state *shellState
+		mygo.RunOnMain(func() {
+			state = s.chat
+			if state != nil {
+				state.adoptConsole(s.paths)
+			}
+		})
 		if state == nil {
 			continue
 		}
-		state.adoptConsole(s.paths)
 		if state.refresh() {
 			state.frame()
 		}

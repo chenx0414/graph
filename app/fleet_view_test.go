@@ -106,7 +106,7 @@ func TestTheFleetPageSaysItIsLoadingAndThenLands(t *testing.T) {
 		if !time.Now().Before(deadline) {
 			t.Fatalf("the fleet data never landed, texts %q", tester.Texts())
 		}
-		time.Sleep(time.Millisecond)
+		tester.Frame()
 	}
 	tester = frames(tester)
 	if !tester.HasText("主控") || tester.HasText("正在读取编队…") {
@@ -125,7 +125,7 @@ func TestTheFleetPageExplainsAFailedRead(t *testing.T) {
 		if !time.Now().Before(deadline) {
 			t.Fatalf("the fleet failure never landed, texts %q", tester.Texts())
 		}
-		time.Sleep(time.Millisecond)
+		tester.Frame()
 	}
 	tester = frames(tester)
 	if !tester.HasText("读不到编队数据") {

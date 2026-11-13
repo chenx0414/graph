@@ -141,12 +141,17 @@ func (c *chatState) exportArtifactNow(row artifactRow) {
 }
 
 func (c *chatState) showArtifact(row artifactRow) {
-	payload, err := c.api.get("/api/tasks/" + row.taskID + "/artifacts/" + row.artifactID + "/" + strconv.Itoa(row.version) + "/content")
+	payload, err := c.artifactContent(row)
 	if err != nil {
 		c.status = "读不到产物：" + err.Error()
 		c.frame()
 		return
 	}
+	onUI(c.window, func() { c.setArtifactPreview(row, payload) })
+	c.frame()
+}
+
+func (c *chatState) setArtifactPreview(row artifactRow, payload []byte) {
 	text := string(payload)
 	if len(text) > artifactPreviewLimit {
 		text = text[:artifactPreviewLimit] + "…"
@@ -155,5 +160,4 @@ func (c *chatState) showArtifact(row artifactRow) {
 	c.preview = text
 	c.previewRow = row
 	c.status = ""
-	c.frame()
 }

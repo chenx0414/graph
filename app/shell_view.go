@@ -7,6 +7,7 @@ import (
 )
 
 func (s *shellState) view(ctx *ui.Context) {
+	s.updates.drain()
 	applyTheme(ctx)
 	t := gwtheme.Of(ctx)
 	shell := ui.Row(ctx).Fill().Background(pageBackdrop(t))

@@ -2,6 +2,7 @@ package main
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -132,6 +133,7 @@ func messageQueued(message transcriptMessage) bool {
 }
 
 type chatState struct {
+	refreshMu       sync.Mutex
 	tasks           []taskRow
 	artifacts       []artifactRow
 	previewTitle    string

@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -91,6 +92,10 @@ func (source *conversationChatSource) Load(c *chatState) error {
 }
 
 func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
+	if !c.refreshMu.TryLock() {
+		return false, nil
+	}
+	defer c.refreshMu.Unlock()
 	payload, err := source.api.get("/api/conversations/" + source.id)
 	if err != nil {
 		return false, err
@@ -101,13 +106,13 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 	}
 	fingerprint := transcriptFingerprint(messages)
 	body, bodyErr := parseConversationBody(payload)
-	changed := fingerprint != c.fingerprint
-	if bodyErr == nil {
-		if body.Paused != c.paused || len(body.Questions) != len(c.questions) {
-			changed = true
+	tasks, tasksErr := parseGraphTasks(payload)
+	changed := false
+	onUI(c.window, func() {
+		if c.source != source {
+			return
 		}
-	}
-	if changed {
+		changed = fingerprint != c.fingerprint
 		c.fingerprint = fingerprint
 		if c.pagedHistory {
 			c.messages = mergeMessages(c.messages, messages)
@@ -115,16 +120,19 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 			c.messages = messages
 		}
 		if bodyErr == nil {
-			c.paused = body.Paused
-			c.questions = nil
+			var questions []openQuestion
 			for _, question := range body.Questions {
 				if question.open() {
-					c.questions = append(c.questions, question)
+					questions = append(questions, question)
 				}
 			}
+			changed = changed || body.Paused != c.paused || !reflect.DeepEqual(questions, c.questions)
+			c.paused = body.Paused
+			c.questions = questions
 		}
-		if rows, err := parseGraphTasks(payload); err == nil {
-			c.tasks = rows
+		if tasksErr == nil {
+			changed = changed || !reflect.DeepEqual(tasks, c.tasks)
+			c.tasks = tasks
 		}
 		if len(messages) > 0 {
 			last := messages[len(messages)-1]
@@ -132,7 +140,7 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 				c.status = ""
 			}
 		}
-	}
+	})
 	return changed, nil
 }
 
