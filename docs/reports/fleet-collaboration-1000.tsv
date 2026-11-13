@@ -1,0 +1,6 @@
+ts	phase	decision	why	evidence	result
+2026-11-13T00:00:00+08:00	frame	以至少1024个真实执行中的工作Agent及完整父子控制作为验收	用户要求超过1000个Agent为同一目标工作，登记数量不能证明执行能力	docs/specs/fleet-collaboration-1000.md	open
+2026-11-13T16:50:00+08:00	execute	1024路同时进入runDispatch时测试库死锁	openTaskStore没有限制连接数，并发写在持有graphDatabaseMu时失败，锁不再释放	13条operations为dispatched，1011条仍为intent；栈停在core_execution_execute.go:139	NOT VERIFIED
+2026-11-13T16:58:00+08:00	execute	容量测试改用和生产相同的单连接	OpenSQLite设置MaxOpenConns为1，多连接不是运行时的形状	go test -count=1 -timeout 15m -v -run TestFleetRunsOneThousandTwentyFourAgentsThroughExecution ./internal/graph；PASS 3.39s；concurrent=1024 goroutines=1028 heapAllocMiB=10.4	VERIFIED
+2026-11-13T16:58:30+08:00	control	父级分页读取、列出、追加和停止子级	越权拒绝，归档暂停子级且恢复项目不自动恢复	go test -count=1 -timeout 240s -run 'TestAgentControl|TestDeliverChildResult|TestSpawnAgent|TestFleetRuns' ./internal/graph；ok 4.584s	VERIFIED
+2026-11-13T16:58:40+08:00	ui	编队、任务和产物随后台工作刷新，产物打开指定版本	空窗口只排队，生产路径在绑定窗口后由Window.Update和下一帧排空	go -C app test -count=1 -timeout 180s -run 'TestWorkspaceRefresh|TestFleetArtifact' .；ok 0.665s	VERIFIED
