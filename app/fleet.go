@@ -166,53 +166,62 @@ func parseFleet(payload []byte) (*fleetSnapshot, error) {
 
 func (s *shellState) ensureFleet() {
 	state := &s.fleet
-	if state.loading {
+	if state.conversationID == s.fleetScope() && (state.data != nil || state.loading) {
 		return
 	}
-	scope := s.activeID
-	if state.data != nil && state.conversationID == scope {
-		return
+	s.loadFleet()
+}
+
+func (s *shellState) fleetScope() string {
+	if active := s.active(); active != nil {
+		if _, node := active.source.(*nodeChatSource); node {
+			return s.supervisorID
+		}
 	}
+	return s.activeID
+}
+
+func (s *shellState) loadFleet() {
+	state := &s.fleet
+	scope := s.fleetScope()
 	path := "/api/fleet"
 	if scope != "" {
 		path += "?conversationId=" + url.QueryEscape(scope)
 	}
 	state.loading = true
 	state.failed = ""
+	if state.conversationID != scope {
+		state.data = nil
+	}
 	state.conversationID = scope
-	state.data = nil
 	state.generation++
 	generation := state.generation
+	api := s.api
 	go func() {
-		payload, err := s.api.get(path)
-		if state.generation != generation {
-			return
+		payload, err := api.get(path)
+		var data *fleetSnapshot
+		if err == nil {
+			data, err = parseFleet(payload)
 		}
-		if err != nil {
-			state.failed = "读不到编队数据：" + err.Error()
-			state.loading = false
-			s.frame()
-			return
-		}
-		data, err := parseFleet(payload)
-		if err != nil {
-			state.failed = "编队数据格式不对"
-			state.loading = false
-			s.frame()
-			return
-		}
-		state.data = data
-		state.loading = false
-		s.frame()
+		s.updates.post(s.window, func() {
+			if s.fleet.generation != generation || s.fleetScope() != scope || s.api != api {
+				return
+			}
+			s.fleet.loading = false
+			if err != nil {
+				s.fleet.failed = "读不到编队数据：" + err.Error()
+				return
+			}
+			s.fleet.data = data
+		})
 	}()
 }
 
 func (s *shellState) refreshFleet() {
-	s.fleet.data = nil
-	s.fleet.conversationID = ""
-	s.fleet.loading = false
-	s.fleet.generation++
-	s.ensureFleet()
+	if s.fleet.loading && s.fleet.conversationID == s.fleetScope() {
+		return
+	}
+	s.loadFleet()
 }
 
 func (s *shellState) fleetData(ctx *ui.Context) *fleetSnapshot {
@@ -238,24 +247,24 @@ func (s *shellState) ensureGlobalFleet() {
 	}
 	state.globalLoading = true
 	state.globalFailed = ""
+	api := s.api
 	go func() {
-		payload, err := s.api.get("/api/fleet")
-		if err != nil {
-			state.globalFailed = "读不到全局编队：" + err.Error()
-			state.globalLoading = false
-			s.frame()
-			return
+		payload, err := api.get("/api/fleet")
+		var data *fleetSnapshot
+		if err == nil {
+			data, err = parseFleet(payload)
 		}
-		data, err := parseFleet(payload)
-		if err != nil {
-			state.globalFailed = "全局编队数据格式不对"
-			state.globalLoading = false
-			s.frame()
-			return
-		}
-		state.global = data
-		state.globalLoading = false
-		s.frame()
+		s.updates.post(s.window, func() {
+			s.fleet.globalLoading = false
+			if s.api != api {
+				return
+			}
+			if err != nil {
+				s.fleet.globalFailed = "读不到全局编队：" + err.Error()
+				return
+			}
+			s.fleet.global = data
+		})
 	}()
 }
 
@@ -275,6 +284,31 @@ func (s *shellState) selectFleetCategory(category string) {
 
 func (s *shellState) openFleetArtifact(artifact fleetArtifact) {
 	s.openModule("artifacts")
+	active := s.active()
+	if active == nil {
+		return
+	}
+	row := artifactRow{
+		artifactID: artifact.ArtifactID, taskID: artifact.TaskID,
+		namespace: artifact.Namespace, name: artifact.Name, title: artifact.Title,
+		mediaType: artifact.MediaType, version: artifact.Version, size: artifact.Size,
+	}
+	active.previewRow = row
+	active.previewTitle = artifactLabel(row)
+	active.preview = "正在读取产物…"
+	go func() {
+		payload, err := active.artifactContent(row)
+		s.updates.post(s.window, func() {
+			if s.active() != active || active.previewRow != row {
+				return
+			}
+			if err != nil {
+				active.preview = "读不到产物：" + err.Error()
+				return
+			}
+			active.setArtifactPreview(row, payload)
+		})
+	}()
 }
 
 func fleetArtifactGroups(data *fleetSnapshot) []fleetArtifactGroup {

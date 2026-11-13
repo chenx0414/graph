@@ -44,11 +44,12 @@ type fleetTopologyData struct {
 }
 
 type fleetGraphView struct {
-	taskID  string
-	title   string
-	loading bool
-	failed  string
-	data    *fleetTopologyData
+	generation int
+	taskID     string
+	title      string
+	loading    bool
+	failed     string
+	data       *fleetTopologyData
 }
 
 func fleetGraphPageID(taskID string) string {
@@ -265,32 +266,26 @@ func (s *shellState) graphRetry() {
 	}
 	state.loading = true
 	state.failed = ""
+	state.generation++
 	s.graph = state
 	taskID := state.taskID
+	api := s.api
 	go func() {
-		payload, err := s.api.get("/api/tasks/" + url.PathEscape(taskID) + "/graph/topology")
-		if s.graph.taskID != taskID {
-			return
+		payload, err := api.get("/api/tasks/" + url.PathEscape(taskID) + "/graph/topology")
+		var data *fleetTopologyData
+		if err == nil {
+			data, err = parseFleetTopology(payload)
 		}
-		state := s.graph
-		if err != nil {
-			state.loading = false
-			state.failed = "读不到 Graph 拓扑：" + err.Error()
-			s.graph = state
-			s.frame()
-			return
-		}
-		data, err := parseFleetTopology(payload)
-		if err != nil {
-			state.loading = false
-			state.failed = "Graph 拓扑不是预期的 JSON"
-			s.graph = state
-			s.frame()
-			return
-		}
-		state.data = data
-		state.loading = false
-		s.graph = state
-		s.frame()
+		s.updates.post(s.window, func() {
+			if s.graph.taskID != taskID || s.graph.generation != state.generation || s.api != api {
+				return
+			}
+			s.graph.loading = false
+			if err != nil {
+				s.graph.failed = "读不到 Graph 拓扑：" + err.Error()
+				return
+			}
+			s.graph.data = data
+		})
 	}()
 }

@@ -11,6 +11,7 @@ import (
 )
 
 type shellState struct {
+	updates        uiUpdates
 	api            apiClient
 	status         string
 	activeID       string
@@ -198,10 +199,18 @@ func (s *shellState) selectConversation(id string) {
 
 func (s *shellState) refresh() bool {
 	changed := false
-	if active := s.active(); active != nil {
+	var active *chatState
+	reload := false
+	onUI(s.window, func() {
+		active = s.active()
+		reload = s.broken || len(s.conversations) == 0
+		s.refreshVisibleWorkspace()
+	})
+	if active != nil {
 		changed = active.poll()
+		changed = active.refreshArtifacts() || changed
 	}
-	if (s.broken || len(s.conversations) == 0) && s.loadRows() {
+	if reload && s.loadRows() {
 		changed = true
 	}
 	return changed

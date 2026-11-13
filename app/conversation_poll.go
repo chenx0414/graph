@@ -19,9 +19,15 @@ func transcriptFingerprint(messages []transcriptMessage) string {
 }
 
 func (c *chatState) poll() bool {
-	if c.active == "" || c.api.address == "" || c.source == nil {
+	var source agentChatSource
+	onUI(c.window, func() {
+		if c.active != "" && c.api.address != "" {
+			source = c.source
+		}
+	})
+	if source == nil {
 		return false
 	}
-	changed, err := c.source.Refresh(c)
+	changed, err := source.Refresh(c)
 	return err == nil && changed
 }

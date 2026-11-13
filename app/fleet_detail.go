@@ -88,32 +88,28 @@ func (s *shellState) ensureFleetDetail(agent fleetAgent) {
 		return
 	}
 	state.loading = true
+	api := s.api
 	go func() {
-		payload, err := s.api.get(path)
-		if s.fleet.detail.agentID != agent.ID {
-			return
-		}
-		if err != nil {
-			state.failed = "读不到最近活动：" + err.Error()
-			state.loading = false
-			s.frame()
-			return
-		}
+		payload, err := api.get(path)
 		var activities []fleetActivity
-		if nodeRun {
-			activities, err = parseFleetNodeRun(payload)
-		} else {
-			activities, err = parseFleetHistory(payload)
+		if err == nil {
+			if nodeRun {
+				activities, err = parseFleetNodeRun(payload)
+			} else {
+				activities, err = parseFleetHistory(payload)
+			}
 		}
-		if err != nil {
-			state.failed = "最近活动不是预期的 JSON"
-			state.loading = false
-			s.frame()
-			return
-		}
-		state.entries = activities
-		state.loading = false
-		s.frame()
+		s.updates.post(s.window, func() {
+			if s.fleet.detail.agentID != agent.ID || s.api != api {
+				return
+			}
+			s.fleet.detail.loading = false
+			if err != nil {
+				s.fleet.detail.failed = "读不到最近活动：" + err.Error()
+				return
+			}
+			s.fleet.detail.entries = activities
+		})
 	}()
 }
 

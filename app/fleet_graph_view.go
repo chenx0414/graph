@@ -18,7 +18,7 @@ func (s *shellState) panelFleetGraph(ctx *ui.Context) {
 		s.fleetGraphMessage(ctx, "正在读取 Graph 拓扑…", t.Muted)
 		return
 	}
-	if state.loading {
+	if state.loading && state.data == nil {
 		s.fleetGraphMessage(ctx, "正在读取 Graph 拓扑…", t.Muted)
 		return
 	}

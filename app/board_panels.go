@@ -189,7 +189,7 @@ func (s *shellState) panelArtifacts(ctx *ui.Context) {
 		s.boardNote(ctx, "还没有选中的会话。")
 		return
 	}
-	if len(active.artifacts) == 0 {
+	if len(active.artifacts) == 0 && active.preview == "" {
 		s.boardNote(ctx, "这个会话还没有共享产物。")
 		return
 	}
