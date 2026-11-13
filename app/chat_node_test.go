@@ -297,8 +297,8 @@ func TestNodeChatLoadsOlderEntriesWhenScrollingUp(t *testing.T) {
 	state.openFleetAgentChat(node)
 	tester = frames(tester)
 	active := state.active()
-	if active == nil || active.oldestSeq != 20 || active.noMoreHistory {
-		t.Fatalf("node load must remember the oldest page cursor, %+v", active)
+	if active == nil {
+		t.Fatal("the node chat never opened")
 	}
 	active.ensureHistory()
 	deadline := time.Now().Add(2 * time.Second)
@@ -399,5 +399,44 @@ func TestNodeChatMarksAnUnansweredToolCallAsRunning(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("an unanswered tool call reads as running, texts %q", tester.Texts())
+	}
+}
+
+func TestNodeChatLoadsOlderPagesWhenTheFirstPageFitsTheViewport(t *testing.T) {
+	fleet := ringGraphFleet()
+	node := fleetAgent{ID: "p1-n2", ParentID: "p1", Kind: "node", Name: "fleet-ui", TaskID: "tA", NodeID: "n2", Status: "stopped"}
+	mock := &nodeChatMock{
+		fleet: fleet,
+		run: `{"entries":[
+			{"seq":50,"id":"a50","role":"assistant","kind":"message","text":"最后一页的回答","createdAt":50},
+			{"seq":51,"id":"c51","role":"tool","kind":"call","text":"{\"name\":\"bash\"}","createdAt":51,"data":{"toolCallId":"call-51","toolName":"bash"}}
+		],"hasOlder":true}`,
+		runOlder: map[string]string{
+			"50": `{"entries":[{"seq":10,"id":"u10","role":"user","kind":"message","text":"更早的请求","createdAt":10}],"hasOlder":false}`,
+		},
+	}
+	state, tester := nodeChatShell(t, mock)
+	state.openFleetAgentChat(node)
+	deadline := time.Now().Add(3 * time.Second)
+	for !tester.HasText("更早的请求") && time.Now().Before(deadline) {
+		tester = frames(tester)
+	}
+	if !tester.HasText("更早的请求") {
+		t.Fatalf("a node page that fits the viewport must keep loading older pages, texts %q", tester.Texts())
+	}
+}
+
+func TestNodeChatSaysWhenTheHistoryStarts(t *testing.T) {
+	fleet := ringGraphFleet()
+	node := fleetAgent{ID: "p1-n2", ParentID: "p1", Kind: "node", Name: "fleet-ui", TaskID: "tA", NodeID: "n2", Status: "stopped"}
+	mock := &nodeChatMock{
+		fleet: fleet,
+		run:   `{"entries":[{"seq":1,"id":"a1","role":"assistant","kind":"message","text":"节点唯一的记录","createdAt":1}],"hasOlder":false}`,
+	}
+	state, tester := nodeChatShell(t, mock)
+	state.openFleetAgentChat(node)
+	tester = frames(frames(tester))
+	if !tester.HasText("已经是最早的记录") {
+		t.Fatalf("a fully loaded node chat says where its history starts, texts %q", tester.Texts())
 	}
 }

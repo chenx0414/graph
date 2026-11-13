@@ -146,6 +146,8 @@ type chatState struct {
 	currentModel    string
 	currentThinking string
 	oldestSeq       int64
+	listFirst       int
+	listLast        int
 	runBoundaries   map[string]bool
 	historySettle   int
 	historyLoading  bool
@@ -168,7 +170,7 @@ type chatState struct {
 }
 
 func newChatState(address, token string) *chatState {
-	state := &chatState{api: newAPIClient(address, token), status: "正在读取会话…", expanded: map[string]bool{}, runBoundaries: map[string]bool{}}
+	state := &chatState{api: newAPIClient(address, token), status: "正在读取会话…", expanded: map[string]bool{}, runBoundaries: map[string]bool{}, listFirst: -1, listLast: -1}
 	state.list.FollowEnd = true
 	state.list.FollowAnimation = &ui.Smooth
 	state.md.CodeBlock = func(ctx *ui.Context, block *markdown.CodeBlockView) {

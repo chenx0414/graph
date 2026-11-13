@@ -242,12 +242,12 @@ func TestTheComposerGrowsWithThePrompt(t *testing.T) {
 }
 
 func TestTheComposerSendsOnEnterAndBreaksLinesWithShift(t *testing.T) {
-	posted := ""
+	sent := make(chan string, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" && r.URL.Path == "/api/conversations/c1/messages" {
 			payload := make([]byte, 2048)
 			read, _ := r.Body.Read(payload)
-			posted = string(payload[:read])
+			sent <- string(payload[:read])
 			w.Write([]byte(`{}`))
 			return
 		}
@@ -257,13 +257,16 @@ func TestTheComposerSendsOnEnterAndBreaksLinesWithShift(t *testing.T) {
 
 	state := newChatState(server.URL, "tok")
 	state.open("c1")
-	state.focusComposer = true
 	tester := frames(ui.NewTester(state.view, 760, 620))
+	if err := tester.Click("消息"); err != nil {
+		t.Fatalf("focus the composer field: %v", err)
+	}
 	tester.Type("你好")
 	tester.Key(0, ui.KeyEnter)
-	deadline := time.Now().Add(2 * time.Second)
-	for posted == "" && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
+	posted := ""
+	select {
+	case posted = <-sent:
+	case <-time.After(2 * time.Second):
 	}
 	if !contains(posted, "你好") {
 		t.Fatalf("Enter must send the prompt, body %q", posted)

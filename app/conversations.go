@@ -251,6 +251,12 @@ func (c *chatState) transcript(ctx *ui.Context) {
 	}
 	if c.historyLoading {
 		kit.Text(ctx, "正在加载更早的对话…", t.Text.Xs).TextColor(t.Muted).Padding(0, 0, th.Space(1), 0)
+	} else {
+		marker, gap := "", float32(0)
+		if c.noMoreHistory && c.listFirst == 0 && c.listLast >= 0 {
+			marker, gap = "已经是最早的记录", th.Space(1)
+		}
+		kit.Text(ctx, marker, t.Text.Xs).TextColor(t.Muted).Padding(0, 0, gap, 0)
 	}
 	runs := c.runs()
 	c.list.Key = func(row int) any { return runIdentity(runs[row]) }
@@ -273,9 +279,10 @@ func (c *chatState) transcript(ctx *ui.Context) {
 		}})
 	})
 	first, last := c.list.Visible()
+	c.listFirst, c.listLast = first, last
 	if c.historySettle > 0 {
 		c.historySettle--
-	} else if !c.historyLoading && first == 0 && last >= 0 && last < len(runs)-1 {
+	} else if !c.historyLoading && first == 0 && last >= 0 {
 		c.ensureHistory()
 	}
 }
