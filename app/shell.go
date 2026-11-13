@@ -22,6 +22,7 @@ type shellState struct {
 	trajectory     trajectoryState
 	insights       insightsState
 	fleet          fleetState
+	graph          fleetGraphView
 	conversations  []conversationSummary
 	supervisorID   string
 	broken         bool

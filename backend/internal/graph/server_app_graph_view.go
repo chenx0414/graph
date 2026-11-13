@@ -88,6 +88,7 @@ type appGraphNode struct {
 	Agent             any                    `json:"agent"`
 	Label             string                 `json:"label"`
 	VisualKind        string                 `json:"visualKind"`
+	Model             string                 `json:"-"`
 }
 
 func appGraphNodePicture(id, kind, action string) (string, string) {
@@ -112,6 +113,85 @@ type appGraphStructure struct {
 	Layout     GraphLayout         `json:"layout"`
 }
 
+type appGraphTopologyNode struct {
+	ID              string `json:"id"`
+	Kind            string `json:"kind"`
+	Action          string `json:"action"`
+	Status          string `json:"status"`
+	Label           string `json:"label"`
+	BoundDefinition string `json:"boundDefinition"`
+	Model           string `json:"model"`
+}
+
+type appGraphTopologyEdge struct {
+	ID   string `json:"id"`
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+type appGraphTopology struct {
+	TaskId string                 `json:"taskId"`
+	Nodes  []appGraphTopologyNode `json:"nodes"`
+	Edges  []appGraphTopologyEdge `json:"edges"`
+}
+
+func appGraphEndpointNode(endpoint string) string {
+	return strings.SplitN(endpoint, ".", 2)[0]
+}
+
+func graphTopologyView(taskId string, definition GraphDefinition, nodes []appGraphNode) appGraphTopology {
+	view := appGraphTopology{
+		TaskId: taskId, Nodes: make([]appGraphTopologyNode, 0, len(nodes)),
+		Edges: []appGraphTopologyEdge{},
+	}
+	known := make(map[string]bool, len(nodes))
+	for _, node := range nodes {
+		known[node.ID] = true
+		view.Nodes = append(view.Nodes, appGraphTopologyNode{
+			ID: node.ID, Kind: node.Kind, Action: node.Action, Status: node.Status,
+			Label: node.Label, BoundDefinition: node.BoundDefinition, Model: node.Model,
+		})
+	}
+	for _, id := range appSortedKeys(definition.Edges) {
+		edge := definition.Edges[id]
+		if !edge.Enabled {
+			continue
+		}
+		from := appGraphEndpointNode(edge.From)
+		to := appGraphEndpointNode(edge.To)
+		if from == "" || to == "" || !known[from] || !known[to] {
+			continue
+		}
+		view.Edges = append(view.Edges, appGraphTopologyEdge{ID: id, From: from, To: to})
+	}
+	return view
+}
+
+func (app *GraphApp) appKernelGraphTopology(taskID string) *appKernelGraph {
+	revision := app.runtime.kernel.LatestRevision(taskID)
+	if revision == nil {
+		return nil
+	}
+	graph := &appKernelGraph{GraphID: taskID, Definition: revision.Definition, Revision: revision.Version}
+	for _, node := range kernelRows(app.runtime.kernel.Db, "SELECT node_id,status FROM kernel_nodes WHERE task_id=?", taskID) {
+		graph.States = append(graph.States, appGraphStateNode{NodeID: kernelString(node["node_id"]), Status: kernelString(node["status"])})
+	}
+	for _, module := range kernelRows(app.runtime.kernel.Db, "SELECT module_id,triggered FROM kernel_modules WHERE task_id=?", taskID) {
+		graph.StateModules = append(graph.StateModules, appGraphStateModule{ModuleID: kernelString(module["module_id"]), Triggered: kernelInt(module["triggered"]) != 0})
+	}
+	return graph
+}
+
+func (app *GraphApp) serveGraphTopology(w http.ResponseWriter, r *http.Request) {
+	taskID := r.PathValue("taskId")
+	native := app.appKernelGraphTopology(taskID)
+	if native == nil {
+		writeJSON(w, http.StatusOK, graphTopologyView(taskID, GraphDefinition{}, nil))
+		return
+	}
+	writeJSON(w, http.StatusOK, graphTopologyView(taskID, native.Definition, app.appNativeGraphNodes(native.Definition, native)))
+}
+
 func appSortedKeys[T any](values map[string]T) []string {
 	keys := make([]string, 0, len(values))
 	for key := range values {
@@ -121,9 +201,9 @@ func appSortedKeys[T any](values map[string]T) []string {
 	return keys
 }
 
-func (app *GraphApp) appNativeGraphStructure(definition GraphDefinition, native *appKernelGraph) appGraphStructure {
+func appGraphContainerFor(definition GraphDefinition) func(string) string {
 	groups := appSortedKeys(definition.SubgraphInstances)
-	containerFor := func(id string) string {
+	return func(id string) string {
 		best := ""
 		for _, group := range groups {
 			if strings.HasPrefix(id, group+"/") && len(group) > len(best) {
@@ -132,20 +212,10 @@ func (app *GraphApp) appNativeGraphStructure(definition GraphDefinition, native 
 		}
 		return best
 	}
-	containers := []appGraphContainer{}
-	for _, id := range groups {
-		binding := definition.SubgraphInstances[id]
-		container := appGraphContainer{
-			ID: id, Parent: containerFor(id), Template: binding.Template, Version: binding.Version,
-			Inputs: binding.Inputs, Outputs: binding.Outputs, Nodes: []string{},
-		}
-		for _, node := range appSortedKeys(definition.Nodes) {
-			if strings.HasPrefix(node, id+"/") {
-				container.Nodes = append(container.Nodes, node)
-			}
-		}
-		containers = append(containers, container)
-	}
+}
+
+func (app *GraphApp) appNativeGraphNodes(definition GraphDefinition, native *appKernelGraph) []appGraphNode {
+	containerFor := appGraphContainerFor(definition)
 	nodes := []appGraphNode{}
 	for _, id := range appSortedKeys(definition.Nodes) {
 		node := definition.Nodes[id]
@@ -155,6 +225,9 @@ func (app *GraphApp) appNativeGraphStructure(definition GraphDefinition, native 
 			Status: "draft", BoundDefinition: node.Recipe, DefinitionVersion: node.Recipe,
 			Inputs: node.Inputs, Outputs: node.Outputs,
 			Agent: app.appGraphAgentDetail(node.Recipe), Label: label, VisualKind: visualKind,
+		}
+		if node.Model != nil {
+			entry.Model = *node.Model
 		}
 		if native != nil {
 			entry.Status = "idle"
@@ -200,6 +273,26 @@ func (app *GraphApp) appNativeGraphStructure(definition GraphDefinition, native 
 		}
 		nodes = append(nodes, entry)
 	}
+	return nodes
+}
+
+func (app *GraphApp) appNativeGraphStructure(definition GraphDefinition, native *appKernelGraph) appGraphStructure {
+	containerFor := appGraphContainerFor(definition)
+	containers := []appGraphContainer{}
+	for _, id := range appSortedKeys(definition.SubgraphInstances) {
+		binding := definition.SubgraphInstances[id]
+		container := appGraphContainer{
+			ID: id, Parent: containerFor(id), Template: binding.Template, Version: binding.Version,
+			Inputs: binding.Inputs, Outputs: binding.Outputs, Nodes: []string{},
+		}
+		for _, node := range appSortedKeys(definition.Nodes) {
+			if strings.HasPrefix(node, id+"/") {
+				container.Nodes = append(container.Nodes, node)
+			}
+		}
+		containers = append(containers, container)
+	}
+	nodes := app.appNativeGraphNodes(definition, native)
 	edges := []appGraphEdge{}
 	for _, id := range appSortedKeys(definition.Edges) {
 		edge := definition.Edges[id]

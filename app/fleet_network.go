@@ -42,7 +42,7 @@ func (s *shellState) panelFleetNetwork(ctx *ui.Context) {
 			for _, node := range ring.Nodes {
 				positioned := node
 				switch positioned.Kind {
-				case "global", "thread", "orphan", "cluster", "graph":
+				case "global", "thread", "orphan", "graph-unit", "graph-aggregate":
 				default:
 					continue
 				}
@@ -138,10 +138,8 @@ func (s *shellState) fleetRingElement(ctx *ui.Context, node fleetRingNode, famil
 		return s.fleetThreadCard(ctx, node, family)
 	case "orphan":
 		return s.fleetOrphanCard(ctx, node)
-	case "cluster":
-		return s.fleetClusterPill(ctx, node, family)
-	case "graph":
-		return s.fleetGraphDot(ctx, node, family)
+	case "graph-unit", "graph-aggregate":
+		return s.fleetGraphUnitCard(ctx, node, family)
 	}
 	return ui.Element{}
 }
@@ -205,12 +203,12 @@ func (s *shellState) fleetThreadCard(ctx *ui.Context, node fleetRingNode, family
 		})
 		switch {
 		case node.H >= 80:
-			fleetEllipsis(ctx, strconv.Itoa(node.Count)+" 个 Graph Agent · "+formatTrajectoryCompactTokens(agent.Tokens), t.Text.Xs, t.Muted)
+			fleetEllipsis(ctx, strconv.Itoa(node.Count)+" 个图 · "+formatTrajectoryCompactTokens(agent.Tokens), t.Text.Xs, t.Muted)
 			s.fleetUsageBar(ctx, agent, accent)
 			bottom := strconv.Itoa(fleetAgentSteps(agent)) + " 步 · 占比 " + formatTrajectoryPercent(s.fleet.shares[agent.ID])
 			kit.Text(ctx, bottom, t.Text.Xs).TextColor(t.Muted).Grow(1).SingleLine().Ellipsis("…")
 		case node.H >= 48:
-			fleetEllipsis(ctx, strconv.Itoa(node.Count)+" 个 Graph Agent", t.Text.Xs, t.Muted)
+			fleetEllipsis(ctx, strconv.Itoa(node.Count)+" 个图", t.Text.Xs, t.Muted)
 		}
 	})
 	return card
@@ -241,51 +239,49 @@ func (s *shellState) fleetOrphanCard(ctx *ui.Context, node fleetRingNode) ui.Ele
 	card.Width(node.W).Height(node.H)
 	card.Children(func() {
 		kit.Text(ctx, "未归属", t.Text.Xs).FontWeight(600).TextColor(t.Muted).SingleLine().Ellipsis("…")
-		kit.Text(ctx, strconv.Itoa(node.Count)+" 个 Graph Agent", t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
+		kit.Text(ctx, strconv.Itoa(node.Count)+" 个图", t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
 	})
 	return card
 }
 
-func (s *shellState) fleetClusterPill(ctx *ui.Context, node fleetRingNode, family map[string]bool) ui.Element {
+func (s *shellState) fleetGraphUnitCard(ctx *ui.Context, node fleetRingNode, family map[string]bool) ui.Element {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
-	accent := s.fleetRingAccent(node)
-	pill := ui.Column(ctx).Clip().Padding(th.Space(0.5), th.Space(1)).Gap(0).
-		Radius(t.Radius.Full).Background(t.Card).Border(gwtheme.Stroke, accent.Alpha(0.5)).Focusable().Justify(ui.Center)
-	pill.Width(node.W).Height(node.H)
-	if node.Aggregate {
-		pill.Label("编队聚合 Graph " + node.Detail)
-		pill.Tooltip(node.Detail)
+	unit := node.Unit
+	accent := fleetAccents()[0]
+	if agent, ok := s.fleet.accents[unit.ThreadID]; ok {
+		accent = agent
+	}
+	card := ui.Column(ctx).Clip().Padding(th.Space(0.5), th.Space(1.25)).Gap(th.Space(0.25)).
+		Radius(t.Radius.Lg).Background(t.Card).Border(gwtheme.Stroke, accent.Alpha(0.45)).Focusable()
+	card.Width(node.W).Height(node.H)
+	if unit.Aggregate {
+		card.Label("编队图 " + unit.Title)
+		card.Tooltip(unit.Title + " · " + unit.Detail)
 	} else {
-		pill.Label("编队聚合 " + fleetAgentLabel(node.Agent))
-		s.fleetCardHover(pill, node.Agent.ID)
-		pill.OnClick(func() { _ = s.openFleetAgentPage(node.Agent) })
-		if s.fleet.hoverID != "" && !family[node.Agent.ID] {
-			pill.Opacity(0.45)
+		card.Label("编队图 " + unit.Title)
+		card.Tooltip(unit.Title + " · " + strconv.Itoa(unit.NodeCount) + " 节点")
+		selected := unit
+		card.OnClick(func() { _ = s.openFleetGraphPage(selected) })
+		s.fleetCardHover(card, unit.TaskID)
+		if s.fleet.hoverID != "" && !family[unit.TaskID] {
+			card.Opacity(0.45)
 		}
 	}
-	pill.Children(func() {
-		kit.Text(ctx, formatFleetCount(node.Count)+" 个 Graph Agent", t.Text.Xs).FontWeight(600).TextColor(accent).SingleLine().Ellipsis("…")
+	card.Children(func() {
+		ui.Row(ctx).FillWidth().Gap(th.Space(0.75)).AlignItems(ui.Center).Children(func() {
+			fleetStatusDot(ctx, unit.Status)
+			kit.Text(ctx, unit.Title, t.Text.Xs).FontWeight(650).TextColor(t.Foreground).Grow(1).SingleLine().Ellipsis("…")
+		})
+		meta := strconv.Itoa(unit.NodeCount) + " 节点"
+		if unit.Status != "" {
+			meta += " · " + fleetStatusLabel(unit.Status)
+		}
+		if unit.Tokens > 0 {
+			meta += " · " + formatTrajectoryCompactTokens(unit.Tokens)
+		}
+		kit.Text(ctx, meta, t.Text.Xs).TextColor(t.Muted).Grow(1).SingleLine().Ellipsis("…")
 	})
-	return pill
-}
-
-func (s *shellState) fleetGraphDot(ctx *ui.Context, node fleetRingNode, family map[string]bool) ui.Element {
-	t, th := gwtheme.Of(ctx), ctx.Theme()
-	agent := node.Agent
-	accent := s.fleet.accents[agent.ID]
-	dot := ui.Box(ctx).Size(node.W, node.H).Radius(t.Radius.Full).Center().
-		Background(accent.Alpha(0.22)).Border(gwtheme.Stroke, accent.Alpha(0.8)).Focusable()
-	dot.Label("编队 Agent " + fleetAgentLabel(agent))
-	dot.Tooltip(fleetAgentLabel(agent) + " · " + fleetAgentRole(agent) + " · " + fleetStatusLabel(agent.Status))
-	s.fleetCardHover(dot, agent.ID)
-	dot.OnClick(func() { _ = s.openFleetAgentPage(agent) })
-	if s.fleet.hoverID != "" && !family[agent.ID] {
-		dot.Opacity(0.4)
-	}
-	dot.Children(func() {
-		ui.Box(ctx).Size(th.Space(1.5), th.Space(1.5)).Radius(t.Radius.Full).Background(fleetStatusColor(t, agent.Status))
-	})
-	return dot
+	return card
 }
 
 func (s *shellState) fleetCardHover(card ui.Element, agentID string) {

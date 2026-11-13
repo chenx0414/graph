@@ -79,6 +79,8 @@ func (s *shellState) boardPanelBody(ctx *ui.Context, panel *boardPanel) {
 		s.panelFleetArtifacts(ctx)
 	case "agent-detail":
 		s.panelAgentDetail(ctx)
+	case "graph-dag":
+		s.panelFleetGraph(ctx)
 	}
 }
 

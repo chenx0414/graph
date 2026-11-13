@@ -158,6 +158,8 @@ func thousandAgentFleet() *fleetSnapshot {
 				Name:     fmt.Sprintf("node-P%02d-%02d", project, node),
 				Model:    "deepseek-v4-flash",
 				Status:   "running",
+				TaskID:   fmt.Sprintf("t%02d", project),
+				NodeID:   fmt.Sprintf("n%02d", node),
 			})
 		}
 	}
@@ -172,23 +174,30 @@ func TestTheFleetNetworkAggregatesAThousandAgents(t *testing.T) {
 	if !tester.HasText("1,000 个 Agent") {
 		t.Fatalf("the network must caption the thousand agents, texts %q", tester.Texts())
 	}
-	clusters, threads := 0, 0
+	units, threads := 0, 0
 	for _, text := range tester.Texts() {
-		if strings.HasPrefix(text, "编队聚合 ") {
-			clusters++
+		if strings.HasPrefix(text, "编队图 ") {
+			units++
 		}
-		if strings.HasPrefix(text, "编队其他项目 ") {
+		if strings.HasPrefix(text, "编队 Agent 项目 ") {
 			threads++
 		}
 	}
-	if clusters != 13 || threads != 1 {
-		t.Fatalf("a thousand graph agents collapse to twelve threads plus one aggregate, clusters %d aggregate %d texts %q", clusters, threads, tester.Texts())
+	if units != 13 || threads != 12 {
+		t.Fatalf("a thousand agents show twelve graph units plus one aggregate: units %d threads %d", units, threads)
 	}
-	if !tester.HasText("其他 15 个项目") {
-		t.Fatalf("the aggregate chip names the hidden projects, texts %q", tester.Texts())
+	if !tester.HasText("其他 15 个图") {
+		t.Fatalf("the aggregate graph chip names the hidden graphs, texts %q", tester.Texts())
 	}
 	if tester.HasText("node-P00-00") {
-		t.Fatalf("the cluttered graph agents must not render one by one, texts %q", tester.Texts())
+		t.Fatalf("graph agents must not render one by one, texts %q", tester.Texts())
+	}
+	if err := state.openFleetThreadPage("p00"); err != nil {
+		t.Fatalf("open the first project thread: %v", err)
+	}
+	tester = frames(tester)
+	if page := state.boardPage(); page.ID != "agent:p00" {
+		t.Fatalf("a thread chip opens its thread page, page %+v", page)
 	}
 }
 
@@ -237,36 +246,27 @@ func sameStrings(a, b []string) bool {
 	return true
 }
 
-func TestClickingAGraphDotOpensItsAgentPage(t *testing.T) {
+func TestClickingAGraphUnitOpensItsGraphPage(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
-	small := &fleetSnapshot{
-		RootID: "p1",
-		Stats:  fleetStats{Agents: 3, Running: 2},
-		Agents: []fleetAgent{
-			{ID: "g1", Kind: "global", Name: "Main", Status: "running"},
-			{ID: "p1", ParentID: "g1", Kind: "project", Name: "13-Graph", ConversationID: "p1", Status: "running"},
-			{ID: "n1", ParentID: "p1", Kind: "node", Name: "planner", Model: "deepseek-v4-flash", Status: "running", Tokens: 16000, Cost: 0.21, Requests: 4, TaskID: "t1", NodeID: "planner"},
-		},
-	}
-	state.fleet = fleetState{conversationID: "g1", data: small}
 	state.selectBoardPage(1)
 	state.openModule("fleet-network")
 	tester := frames(ui.NewTester(state.view, 1880, 900))
-	if err := tester.Click("编队 Agent planner"); err != nil {
-		t.Fatalf("click the graph dot: %v", err)
+	if err := tester.Click("编队图 实现四栏页面"); err != nil {
+		t.Fatalf("click the graph unit: %v", err)
 	}
 	tester = frames(tester)
 	page := state.boardPage()
-	if page.ID != "agent:n1" || page.Kind != "agent" || page.Title != "planner" {
-		t.Fatalf("a graph dot opens its own agent page, page %+v", page)
+	if page.ID != "graph:t1" || page.Kind != "fleet-graph" || page.Title != "实现四栏页面" {
+		t.Fatalf("a graph unit opens its graph page, page %+v", page)
 	}
-	if !tester.HasText("标签页 planner") {
-		t.Fatalf("the agent page shows a tab, texts %q", tester.Texts())
+	if !tester.HasText("标签页 实现四栏页面") {
+		t.Fatalf("the graph page shows a tab, texts %q", tester.Texts())
 	}
-	for _, want := range []string{"打开节点窗口", "deepseek-v4-flash", "16.0k"} {
-		if !tester.HasText(want) {
-			t.Fatalf("the agent page misses %q, texts %q", want, tester.Texts())
-		}
+	if err := state.openFleetGraphPage(fleetGraphUnit{TaskID: "t1", Title: "实现四栏页面"}); err != nil {
+		t.Fatalf("reopen the graph page: %v", err)
+	}
+	if count := len(state.board.pages); count != 4 {
+		t.Fatalf("the graph page reuses its tab, pages %d", count)
 	}
 }
 
@@ -302,9 +302,9 @@ func TestTheFleetCardsCarryTheAgentMetrics(t *testing.T) {
 			t.Fatalf("the ring misses %q, texts %q", want, tester.Texts())
 		}
 	}
-	for _, dot := range []string{"编队 Agent planner", "编队 Agent worker"} {
-		if !tester.HasText(dot) {
-			t.Fatalf("the graph ring misses the dot %q, texts %q", dot, tester.Texts())
+	for _, want := range []string{"编队图 实现四栏页面", "1 个图"} {
+		if !tester.HasText(want) {
+			t.Fatalf("the graph ring misses %q, texts %q", want, tester.Texts())
 		}
 	}
 	accents := fleetAccents()

@@ -6,19 +6,17 @@ const (
 	fleetRingGlobalW     = 260
 	fleetRingGlobalH     = 116
 	fleetRingThreadW     = 200
-	fleetRingThreadH     = 96
+	fleetRingThreadH     = 112
 	fleetRingChipW       = 132
 	fleetRingChipH       = 56
-	fleetRingClusterW    = 96
-	fleetRingClusterH    = 28
 	fleetRingOrphanW     = 132
 	fleetRingOrphanH     = 40
-	fleetRingDotSize     = 16
-	fleetRingDotSmall    = 12
-	fleetRingGraphLimit  = 160
+	fleetRingGraphW      = 132
+	fleetRingGraphH      = 44
+	fleetRingGraphLimit  = 12
 	fleetRingMaxThreads  = 12
-	fleetRingMaxW        = 800
-	fleetRingMaxH        = 740
+	fleetRingMaxW        = 900
+	fleetRingMaxH        = 760
 	fleetRingEdgeSamples = 20
 	fleetRingSectorGap   = 2.0
 )
@@ -27,6 +25,7 @@ type fleetRingNode struct {
 	Kind        string
 	ID          string
 	Agent       fleetAgent
+	Unit        fleetGraphUnit
 	Group       int
 	X, Y, W, H  float32
 	Count       int
@@ -56,14 +55,14 @@ type fleetRing struct {
 }
 
 type fleetRingItem struct {
-	Agent       fleetAgent
-	GraphAgents []fleetAgent
-	GraphCount  int
-	Name        string
-	Detail      string
-	Orphan      bool
-	Aggregate   bool
-	Weight      int
+	Agent      fleetAgent
+	Name       string
+	Detail     string
+	Orphan     bool
+	Aggregate  bool
+	GraphTotal int
+	Current    *fleetGraphUnit
+	Weight     int
 }
 
 type fleetEllipseArc struct {
@@ -82,91 +81,37 @@ func fleetRingLayout(data *fleetSnapshot) fleetRing {
 		return ring
 	}
 	main := globals[0]
-	items := fleetRingItems(fleetGroups(data))
-	graphTotal := 0
-	for _, agent := range data.Agents {
-		if agent.Kind == "node" || agent.Kind == "child" {
-			graphTotal++
-		}
-	}
-	displayedGraph := 0
-	for _, item := range items {
-		if !item.Aggregate {
-			displayedGraph += item.GraphCount
-		}
-	}
+	units := fleetGraphUnits(data)
+	items := fleetRingItems(fleetGroups(data), fleetGraphTotals(data), units)
 	ring.Width, ring.Height = fleetRingMaxW, fleetRingMaxH
 	ring.CX, ring.CY = ring.Width/2, ring.Height/2
-	dotsMode := graphTotal <= fleetRingGraphLimit
-	var cardW, cardH, ring1X, ring1Y, ring2X, ring2Y float32
-	widths, heights := fleetRingFitCandidates(len(items))
-	chosen := ""
-	for {
-		chosen = ""
-		for index, width := range widths {
-			fitW, fitH, fitRing1X, fitRing1Y, fitRing2X, fitRing2Y, ok := fleetRingFitCandidate(len(items), dotsMode, width, heights[index])
-			if !ok {
-				continue
-			}
-			if fitW > fleetRingChipW && fleetRingCardsOverlap(items, fitRing1X, fitRing1Y, fitRing2X, fitRing2Y, fitW, fitH) {
-				continue
-			}
-			if dotsMode {
-				capacity := int((fleetEllipsePerimeter(fitRing2X, fitRing2Y) - fleetRingSectorGap*float64(len(items))) / fleetRingDotSize)
-				if displayedGraph > capacity {
-					continue
-				}
-			}
-			cardW, cardH, ring1X, ring1Y, ring2X, ring2Y = fitW, fitH, fitRing1X, fitRing1Y, fitRing2X, fitRing2Y
-			chosen = "fitted"
-			break
-		}
-		if chosen != "" || !dotsMode {
-			break
-		}
-		dotsMode = false
-	}
-	if chosen == "" {
-		cardW, cardH = widths[len(widths)-1], heights[len(heights)-1]
-		half := max(cardW, cardH) / 2
-		neighbor := float32(fleetRingClusterW / 2)
-		if dotsMode {
-			neighbor = fleetRingDotSize / 2
-		}
-		clearance := half + neighbor + 24
-		ring2X, ring2Y = fleetRingMaxW/2-70, fleetRingMaxH/2-48
-		if dotsMode {
-			ring2X, ring2Y = fleetRingMaxW/2-24, fleetRingMaxH/2-24
-		}
-		ring1X = max(float32(fleetRingGlobalW/2+half+20), ring2X-clearance)
-		ring1Y = max(float32(fleetRingGlobalH/2+half+20), ring2Y-clearance)
-	}
-	ring.Clustered = !dotsMode
+	cardW, cardH, ring1X, ring1Y, ring2X, ring2Y := fleetRingThreadFit(len(items))
 	ring.Ring1X, ring.Ring1Y, ring.Ring2X, ring.Ring2Y = ring1X, ring1Y, ring2X, ring2Y
 	center := fleetRingNode{Kind: "global", ID: main.ID, Agent: main, Group: -1, W: fleetRingGlobalW, H: fleetRingGlobalH}
 	center.X, center.Y = ring.CX-center.W/2, ring.CY-center.H/2
 	ring.Nodes = append(ring.Nodes, center)
-	arc := newFleetEllipseArc(ring.Ring2X, ring.Ring2Y)
+	threadArc := newFleetEllipseArc(ring1X, ring1Y)
 	totalWeight := 0
 	for _, item := range items {
 		totalWeight += max(1, item.Weight)
 	}
-	usable := arc.total - fleetRingSectorGap*float64(len(items))
+	usable := threadArc.total - fleetRingSectorGap*float64(len(items))
 	floorArc := float64(cardW + 1)
 	extra := usable - floorArc*float64(len(items))
 	if extra < 0 {
 		extra = 0
 	}
+	threads := make([]fleetRingNode, 0, len(items))
+	hiddenGraphs := 0
 	cursor := 0.0
-	minSpacing := math.MaxFloat64
 	for index, item := range items {
 		arcLen := floorArc + extra*float64(max(1, item.Weight))/float64(totalWeight)
 		start, end := cursor, cursor+arcLen
 		cursor = end
-		threadAngle := arc.angleAt(start + arcLen/2)
+		angle := threadArc.angleAt(start + arcLen/2)
 		thread := fleetRingNode{
-			Kind: "thread", Group: index, Count: item.GraphCount, Aggregate: item.Aggregate, Detail: item.Detail,
-			SectorStart: float32(arc.angleAt(start)), SectorEnd: float32(arc.angleAt(end)),
+			Kind: "thread", Group: index, Count: item.GraphTotal, Aggregate: item.Aggregate,
+			Detail: item.Detail, SectorStart: float32(threadArc.angleAt(start)), SectorEnd: float32(threadArc.angleAt(end)),
 			W: cardW, H: cardH,
 		}
 		switch {
@@ -179,52 +124,72 @@ func fleetRingLayout(data *fleetSnapshot) fleetRing {
 			thread.ID = item.Agent.ID
 			thread.Agent = item.Agent
 		}
-		thread.X, thread.Y = ring.CX+ring.Ring1X*float32(math.Cos(threadAngle))-thread.W/2, ring.CY+ring.Ring1Y*float32(math.Sin(threadAngle))-thread.H/2
+		thread.X, thread.Y = ring.CX+ring1X*float32(math.Cos(angle))-thread.W/2, ring.CY+ring1Y*float32(math.Sin(angle))-thread.H/2
 		ring.Nodes = append(ring.Nodes, thread)
+		threads = append(threads, thread)
 		ring.Edges = append(ring.Edges, fleetRingEdgeOf(main.ID, thread.ID, center.Center(), thread.Center()))
-		if item.GraphCount == 0 {
+		if item.Current != nil {
+			ring.Nodes = append(ring.Nodes, fleetRingGraphNode(ring, item.Current.TaskID, *item.Current, angle))
+			ring.Edges = append(ring.Edges, fleetRingEdgeOf(thread.ID, "graph:"+item.Current.TaskID, thread.Center(), ring.Nodes[len(ring.Nodes)-1].Center()))
 			continue
 		}
-		switch {
-		case ring.Clustered || item.Aggregate:
-			pill := fleetRingNode{
-				Kind: "cluster", ID: "cluster:" + thread.ID, Agent: thread.Agent, Group: index,
-				Aggregate: thread.Aggregate, Detail: thread.Detail, Count: item.GraphCount,
-				W: fleetRingClusterW, H: fleetRingClusterH, SectorStart: thread.SectorStart, SectorEnd: thread.SectorEnd,
+		if item.Aggregate {
+			continue
+		}
+		hiddenGraphs += item.GraphTotal
+	}
+	if len(items) > 0 && items[len(items)-1].Aggregate {
+		aggregateThread := threads[len(threads)-1]
+		var count int
+		var tokens int64
+		var cost float64
+		titles := []string{}
+		for index, unit := range units {
+			if index < fleetRingGraphLimit {
+				continue
 			}
-			pill.X, pill.Y = ring.CX+ring.Ring2X*float32(math.Cos(threadAngle))-pill.W/2, ring.CY+ring.Ring2Y*float32(math.Sin(threadAngle))-pill.H/2
-			ring.Nodes = append(ring.Nodes, pill)
-			ring.Edges = append(ring.Edges, fleetRingEdgeOf(thread.ID, pill.ID, thread.Center(), pill.Center()))
-		default:
-			count := item.GraphCount
-			spacing := arcLen / float64(count)
-			if spacing < minSpacing {
-				minSpacing = spacing
+			count += unit.NodeCount
+			tokens += unit.Tokens
+			cost += unit.Cost
+			if len(titles) < 5 {
+				titles = append(titles, unit.Title)
 			}
-			size := float32(fleetRingDotSize)
-			if spacing < 20 {
-				size = fleetRingDotSmall
-			}
-			parent := thread
-			if item.Orphan {
-				parent = center
-			}
-			for dotIndex, agent := range item.GraphAgents {
-				dotArcLen := start + arcLen*(float64(dotIndex)+0.5)/float64(count)
-				dotAngle := arc.angleAt(dotArcLen)
-				dot := fleetRingNode{Kind: "graph", ID: agent.ID, Agent: agent, Group: index, W: size, H: size,
-					SectorStart: thread.SectorStart, SectorEnd: thread.SectorEnd}
-				dot.X = ring.CX + ring.Ring2X*float32(math.Cos(dotAngle)) - size/2
-				dot.Y = ring.CY + ring.Ring2Y*float32(math.Sin(dotAngle)) - size/2
-				ring.Nodes = append(ring.Nodes, dot)
-				ring.Edges = append(ring.Edges, fleetRingEdgeOf(parent.ID, dot.ID, parent.Center(), dot.Center()))
-			}
+		}
+		if count > 0 {
+			unit := fleetGraphUnit{TaskID: "aggregate", Title: "其他 " + formatFleetCount(len(units)-fleetRingGraphLimit) + " 个图", NodeCount: count, Tokens: tokens, Cost: cost, Aggregate: true, Detail: joinFleetMeta(titles)}
+			angle := threadArc.angleAt(fleetRingSectorMid(threadArc, aggregateThread))
+			node := fleetRingGraphNode(ring, "aggregate", unit, angle)
+			node.Kind = "graph-aggregate"
+			ring.Nodes = append(ring.Nodes, node)
+			ring.Edges = append(ring.Edges, fleetRingEdgeOf(aggregateThread.ID, "graph:aggregate", aggregateThread.Center(), node.Center()))
 		}
 	}
 	return ring
 }
 
-func fleetRingItems(groups []fleetGroup) []fleetRingItem {
+func fleetRingGraphNode(ring fleetRing, id string, unit fleetGraphUnit, angle float64) fleetRingNode {
+	node := fleetRingNode{
+		Kind: "graph-unit", ID: "graph:" + id, Unit: unit, Group: -1,
+		W: fleetRingGraphW, H: fleetRingGraphH,
+	}
+	node.X = ring.CX + ring.Ring2X*float32(math.Cos(angle)) - node.W/2
+	node.Y = ring.CY + ring.Ring2Y*float32(math.Sin(angle)) - node.H/2
+	return node
+}
+
+func fleetRingSectorMid(arc fleetEllipseArc, thread fleetRingNode) float64 {
+	start := float64(thread.SectorStart)
+	end := float64(thread.SectorEnd)
+	distanceStart := arc.distanceAt(start)
+	distanceEnd := arc.distanceAt(end)
+	return arc.angleAt((distanceStart + distanceEnd) / 2)
+}
+
+func fleetRingItems(groups []fleetGroup, totals map[string]int, units []fleetGraphUnit) []fleetRingItem {
+	current := map[string]fleetGraphUnit{}
+	for _, unit := range units {
+		current[unit.ThreadID] = unit
+	}
 	items := []fleetRingItem{}
 	hidden := []fleetGroup{}
 	for _, group := range groups {
@@ -233,107 +198,76 @@ func fleetRingItems(groups []fleetGroup) []fleetRingItem {
 			continue
 		}
 		if group.Orphan {
-			items = append(items, fleetRingItem{Name: "未归属", Orphan: true, GraphAgents: group.Agents, GraphCount: len(group.Agents), Weight: max(1, len(group.Agents))})
+			unit, ok := current["orphan"]
+			items = append(items, fleetRingItem{Name: "未归属", Orphan: true, Weight: max(1, totals["orphan"]), GraphTotal: totals["orphan"], Current: fleetRingUnitPointer(ok, unit)})
 			continue
 		}
+		unit, ok := current[group.Project.ID]
 		items = append(items, fleetRingItem{
 			Agent: group.Project, Name: fleetAgentLabel(group.Project),
-			GraphAgents: group.Agents, GraphCount: len(group.Agents), Weight: max(1, len(group.Agents)),
+			Weight: max(1, totals[group.Project.ID]), GraphTotal: totals[group.Project.ID],
+			Current: fleetRingUnitPointer(ok, unit),
 		})
 	}
-	if len(hidden) == 0 {
-		return items
-	}
-	aggregate := fleetRingItem{Aggregate: true, Name: "其他 " + formatFleetCount(len(hidden)) + " 个项目", Weight: max(1, len(hidden))}
-	names := []string{}
-	for _, group := range hidden {
-		aggregate.GraphAgents = append(aggregate.GraphAgents, group.Agents...)
-		aggregate.GraphCount += len(group.Agents)
-		if !group.Orphan {
-			names = append(names, fleetAgentLabel(group.Project))
+	if len(hidden) > 0 {
+		count := 0
+		for _, group := range hidden {
+			if group.Orphan {
+				count += totals["orphan"]
+				continue
+			}
+			count += totals[group.Project.ID]
 		}
+		items = append(items, fleetRingItem{
+			Name: "其他 " + formatFleetCount(len(hidden)) + " 个项目", Detail: "其他 " + formatFleetCount(len(hidden)) + " 个项目",
+			Aggregate: true, Weight: max(1, count), GraphTotal: count,
+		})
 	}
-	if len(names) > 4 {
-		names = append(names[:4], "…")
-	}
-	aggregate.Detail = "其他 " + formatFleetCount(len(hidden)) + " 个项目 · " + joinFleetMeta(names) + " · 共 " + formatFleetCount(aggregate.GraphCount) + " 个 Graph Agent"
-	items = append(items, aggregate)
 	return items
 }
 
-func fleetRingFitCandidates(count int) ([]float32, []float32) {
-	if count > 8 && count <= 12 {
-		return []float32{132}, []float32{56}
+func fleetRingUnitPointer(ok bool, unit fleetGraphUnit) *fleetGraphUnit {
+	if !ok {
+		return nil
 	}
-	if count > 12 {
-		return []float32{132, 120, 108, 96}, []float32{56, 50, 46, 40}
-	}
-	return []float32{200, 180, 160, 150, 144, 132}, []float32{112, 104, 104, 104, 104, 56}
+	return &unit
 }
 
-func fleetRingFitCandidate(count int, dotsMode bool, width, height float32) (float32, float32, float32, float32, float32, float32, bool) {
-	ring2CapX, ring2CapY := float32(fleetRingMaxW/2-24), float32(fleetRingMaxH/2-24)
-	neighbor := float32(fleetRingDotSize / 2)
-	if !dotsMode {
-		ring2CapX, ring2CapY = fleetRingMaxW/2-70, fleetRingMaxH/2-48
-		neighbor = fleetRingClusterW / 2
+func fleetRingThreadFit(count int) (float32, float32, float32, float32, float32, float32) {
+	if count > 8 {
+		widths := []float32{132, 120, 108, 96}
+		heights := []float32{56, 50, 46, 40}
+		return fleetRingThreadCandidate(count, widths, heights)
 	}
+	widths := []float32{200, 180, 160, 150, 144, 132}
+	heights := []float32{112, 104, 104, 104, 104, 56}
+	return fleetRingThreadCandidate(count, widths, heights)
+}
+
+func fleetRingThreadCandidate(count int, widths, heights []float32) (float32, float32, float32, float32, float32, float32) {
+	ring1CapX, ring1CapY := float32(fleetRingMaxW/2-70), float32(fleetRingMaxH/2-48)
+	neighbor := float32(fleetRingGraphW / 2)
+	for index, width := range widths {
+		height := heights[index]
+		half := max(width, height) / 2
+		clearance := half + neighbor + 24
+		ring1X := ring1CapX - clearance
+		ring1Y := ring1CapY - clearance
+		if ring1X < fleetRingGlobalW/2+half+20 || ring1Y < fleetRingGlobalH/2+half+20 {
+			continue
+		}
+		usable := fleetEllipsePerimeter(ring1X, ring1Y) - fleetRingSectorGap*float64(count)
+		if usable < float64(count)*float64(width+1) {
+			continue
+		}
+		return width, height, ring1X, ring1Y, ring1X + clearance, ring1Y + clearance
+	}
+	width, height := widths[len(widths)-1], heights[len(heights)-1]
 	half := max(width, height) / 2
 	clearance := half + neighbor + 24
-	ring1X := ring2CapX - clearance
-	ring1Y := ring2CapY - clearance
-	if ring1X < fleetRingGlobalW/2+half+20 || ring1Y < fleetRingGlobalH/2+half+20 {
-		return 0, 0, 0, 0, 0, 0, false
-	}
-	usable := fleetEllipsePerimeter(ring1X, ring1Y) - fleetRingSectorGap*float64(count)
-	if usable < float64(count)*float64(width+1) {
-		return 0, 0, 0, 0, 0, 0, false
-	}
-	return width, height, ring1X, ring1Y, ring1X + clearance, ring1Y + clearance, true
-}
-
-func (s *shellState) unusedFleetRingFit(count int, dotsMode bool) {
-	_, _, _, _, _, _ = 0, 0, 0, 0, 0, 0
-}
-
-func fleetRingThreadBBoxes(items []fleetRingItem, rx, ry, ring2X, ring2Y, width, height float32) []fleetRingNode {
-	arc := newFleetEllipseArc(ring2X, ring2Y)
-	totalWeight := 0
-	for _, item := range items {
-		totalWeight += max(1, item.Weight)
-	}
-	usable := arc.total - fleetRingSectorGap*float64(len(items))
-	floorArc := float64(width + 1)
-	extra := usable - floorArc*float64(len(items))
-	if extra < 0 {
-		extra = 0
-	}
-	cursor := 0.0
-	boxes := make([]fleetRingNode, 0, len(items))
-	for index, item := range items {
-		arcLen := floorArc + extra*float64(max(1, item.Weight))/float64(totalWeight)
-		angle := arc.angleAt(cursor + arcLen/2)
-		cursor += arcLen
-		boxes = append(boxes, fleetRingNode{
-			Kind: "thread", ID: item.Name, Group: index,
-			X: rx*float32(math.Cos(angle)) - width/2, Y: ry*float32(math.Sin(angle)) - height/2,
-			W: width, H: height,
-		})
-	}
-	return boxes
-}
-
-func fleetRingCardsOverlap(items []fleetRingItem, rx, ry, ring2X, ring2Y, width, height float32) bool {
-	boxes := fleetRingThreadBBoxes(items, rx, ry, ring2X, ring2Y, width, height)
-	for first := 0; first < len(boxes); first++ {
-		for second := first + 1; second < len(boxes); second++ {
-			if boxes[first].X < boxes[second].X+boxes[second].W && boxes[second].X < boxes[first].X+boxes[first].W &&
-				boxes[first].Y < boxes[second].Y+boxes[second].H && boxes[second].Y < boxes[first].Y+boxes[first].H {
-				return true
-			}
-		}
-	}
-	return false
+	ring1X := max(float32(fleetRingGlobalW/2+half+20), ring1CapX-clearance)
+	ring1Y := max(float32(fleetRingGlobalH/2+half+20), ring1CapY-clearance)
+	return width, height, ring1X, ring1Y, ring1X + clearance, ring1Y + clearance
 }
 
 func fleetEllipsePerimeter(rx, ry float32) float64 {
@@ -377,6 +311,19 @@ func (arc fleetEllipseArc) angleAt(distance float64) float64 {
 	}
 	fraction := (distance - arc.lengths[low]) / span
 	return 2 * math.Pi * (float64(low) + fraction) / float64(len(arc.lengths)-1)
+}
+
+func (arc fleetEllipseArc) distanceAt(angle float64) float64 {
+	target := angle * float64(len(arc.lengths)-1) / (2 * math.Pi)
+	index := int(target)
+	if index < 0 {
+		return 0
+	}
+	if index >= len(arc.lengths)-1 {
+		return arc.total
+	}
+	fraction := target - float64(index)
+	return arc.lengths[index] + (arc.lengths[index+1]-arc.lengths[index])*fraction
 }
 
 func fleetRingEdgeOf(fromID, toID string, from, to [2]float32) fleetRingEdge {

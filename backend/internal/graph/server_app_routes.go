@@ -114,6 +114,7 @@ func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/tasks/{taskId}/graph/edges/{edgeId}", app.serveGraphEdge)
 	mux.HandleFunc("GET /api/tasks/{taskId}/graph/edges/{edgeId}/deliveries/{deliveryId}", app.serveGraphEdgeDelivery)
 	mux.HandleFunc("GET /api/tasks/{taskId}/graph", app.serveGraph)
+	mux.HandleFunc("GET /api/tasks/{taskId}/graph/topology", app.serveGraphTopology)
 	mux.HandleFunc("POST /api/layout/routes", app.serveLayoutRoutes)
 	mux.HandleFunc("GET /api/tasks/{taskId}/artifacts", app.serveTaskArtifacts)
 	mux.HandleFunc("GET /api/projects/{projectId}/artifacts", app.serveProjectArtifacts)

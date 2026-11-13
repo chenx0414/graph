@@ -172,6 +172,8 @@ func boardPanelTitle(kind string) string {
 		return "共享产物"
 	case "agent-detail":
 		return "Agent 详情"
+	case "graph-dag":
+		return "Graph 编队"
 	}
 	return kind
 }
@@ -469,6 +471,8 @@ func (s *shellState) ensureBoardPageData() {
 		s.ensureInsights()
 	case "fleet", "agent":
 		s.ensureFleet()
+	case "fleet-graph":
+		s.ensureFleetGraph()
 	}
 }
 
