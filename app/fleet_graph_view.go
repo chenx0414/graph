@@ -181,13 +181,16 @@ func (s *shellState) panelFleetGraphHeader(ctx *ui.Context, data *fleetTopologyD
 	if threadName != "" {
 		meta = "线程 " + threadName + " · " + meta
 	}
-	ui.Column(ctx).FillWidth().Padding(th.Space(1.5), th.Space(2)).Gap(th.Space(0.5)).
+	ui.Row(ctx).FillWidth().Padding(th.Space(1.5), th.Space(2)).Gap(th.Space(2)).AlignItems(ui.Center).
 		Radius(t.Radius.Lg).Background(t.Card).Border(gwtheme.Hairline, t.Border).Children(func() {
-		kit.Text(ctx, unit.Title, t.Text.Lg).FontWeight(650).TextColor(t.Foreground).MaxWidth(560).SingleLine().Ellipsis("…")
-		kit.Text(ctx, meta+" · "+fleetStatusLabel(status), t.Text.Xs).TextColor(t.Muted).MaxWidth(700).SingleLine().Ellipsis("…")
+		ui.Column(ctx).Grow(1).Gap(th.Space(0.5)).Children(func() {
+			kit.Text(ctx, unit.Title, t.Text.Lg).FontWeight(650).TextColor(t.Foreground).SingleLine().Ellipsis("…")
+			kit.Text(ctx, meta+" · "+fleetStatusLabel(status), t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
+		})
 		if threadAgent != nil {
 			selected := *threadAgent
-			kit.Button(ctx, "打开线程详情", kit.ButtonOpts{Variant: kit.Outline, Size: kit.SizeSm}).OnClick(func() { _ = s.openFleetAgentPage(selected) })
+			kit.Button(ctx, "打开线程详情", kit.ButtonOpts{Variant: kit.Outline, Size: kit.SizeSm}).Width(th.Space(20)).
+				OnClick(func() { _ = s.openFleetAgentPage(selected) })
 		}
 	})
 }

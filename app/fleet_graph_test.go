@@ -183,3 +183,15 @@ func TestGraphPageEmptyTopology(t *testing.T) {
 		t.Fatalf("the empty graph explains itself, texts %q", tester.Texts())
 	}
 }
+
+func TestFleetTopologyLayoutTerminatesOnCycles(t *testing.T) {
+	data := &fleetTopologyData{Nodes: []fleetTopologyNode{{ID: "a"}, {ID: "b"}, {ID: "c"}}, Levels: map[string]int{}}
+	data.Edges = []fleetTopologyEdge{{ID: "ab", From: "a", To: "b"}, {ID: "bc", From: "b", To: "c"}, {ID: "ca", From: "c", To: "a"}}
+	fleetTopologyLayout(data)
+	if data.Width <= 0 || data.Height <= 0 || len(data.Edges) != 3 {
+		t.Fatalf("cyclic topology layout = %+v", data)
+	}
+	if data.Nodes[0].X == data.Nodes[1].X && data.Nodes[1].X == data.Nodes[2].X {
+		t.Fatalf("cycle nodes should still lay out: %+v", data.Nodes)
+	}
+}

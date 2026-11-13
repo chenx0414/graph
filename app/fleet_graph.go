@@ -150,9 +150,6 @@ func fleetTopologyLayout(data *fleetTopologyData) {
 
 func fleetTopologyLevels(count int, byID map[string]int, edges []fleetTopologyEdge) []int {
 	levels := make([]int, count)
-	for index := range levels {
-		levels[index] = -1
-	}
 	if len(edges) == 0 {
 		rows := (count + fleetGraphColsMax - 1) / fleetGraphColsMax
 		for index := range levels {
@@ -160,49 +157,41 @@ func fleetTopologyLevels(count int, byID map[string]int, edges []fleetTopologyEd
 		}
 		return levels
 	}
-	incoming := map[string]bool{}
-	outgoing := map[string][]string{}
-	indegree := make([]int, count)
+	preds := make([][]int, count)
 	for _, edge := range edges {
-		if edge.From == edge.To {
+		from, fromOK := byID[edge.From]
+		to, toOK := byID[edge.To]
+		if !fromOK || !toOK || edge.From == edge.To {
 			continue
 		}
-		outgoing[edge.From] = append(outgoing[edge.From], edge.To)
-		incoming[edge.To] = true
-		if target, ok := byID[edge.To]; ok {
-			indegree[target]++
-		}
+		preds[to] = append(preds[to], from)
 	}
-	queue := []int{}
 	for index := range levels {
-		id := nodeIDAt(byID, index)
-		if indegree[index] == 0 && !incoming[id] {
-			levels[index] = 0
-			queue = append(queue, index)
-		}
+		levels[index] = -1
 	}
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		currentID := nodeIDAt(byID, current)
-		for _, targetID := range outgoing[currentID] {
-			target, ok := byID[targetID]
-			if !ok {
+	state := make([]int, count)
+	var visit func(int) int
+	visit = func(index int) int {
+		if state[index] == 2 {
+			return levels[index]
+		}
+		state[index] = 1
+		best := 0
+		for _, predecessor := range preds[index] {
+			if state[predecessor] == 1 {
 				continue
 			}
-			if levels[target] < levels[current]+1 {
-				levels[target] = levels[current] + 1
-				queue = append(queue, target)
+			if candidate := visit(predecessor) + 1; candidate > best {
+				best = candidate
 			}
 		}
+		levels[index] = best
+		state[index] = 2
+		return best
 	}
-	fallback := 0
 	for index := range levels {
-		if levels[index] == -1 {
-			levels[index] = fallback
-		}
-		if levels[index] > fallback {
-			fallback = levels[index]
+		if state[index] == 0 {
+			visit(index)
 		}
 	}
 	return levels
