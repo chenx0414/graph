@@ -248,3 +248,28 @@ func TestGraphPageInitializesTheFleetAccentsItPaintsWith(t *testing.T) {
 		t.Fatal("opening the graph page must initialize the accents used by its cards and edges")
 	}
 }
+
+func TestRightClickingAGraphNodeOpensItsDetailPage(t *testing.T) {
+	mock := &fleetGraphMock{topology: fleetTopologySample, fleet: ringGraphFleet()}
+	state, tester := fleetGraphTester(t, mock, ringGraphFleet())
+	if err := tester.RightClick("图节点 Research"); err != nil {
+		t.Fatalf("open the graph node menu: %v", err)
+	}
+	menu := tester.Menu()
+	found := false
+	for _, item := range menu {
+		if item == "查看详情" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the graph node menu misses the detail entry, menu %q", menu)
+	}
+	if err := tester.ChooseMenuItem("查看详情"); err != nil {
+		t.Fatalf("choose detail: %v", err)
+	}
+	frames(tester)
+	if page := state.boardPage(); page.Kind != "agent" {
+		t.Fatalf("the graph node detail entry opens an agent page, page %+v", page)
+	}
+}

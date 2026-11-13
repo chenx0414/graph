@@ -124,6 +124,11 @@ func (s *shellState) fleetTopologyCard(ctx *ui.Context, data *fleetTopologyData,
 	if agent != nil {
 		selected := *agent
 		card.OnClick(func() { s.openFleetAgentChat(selected) })
+		card.ContextMenu(func(m *ui.Menu) {
+			if m.Item("查看详情").Chosen() {
+				_ = s.openFleetAgentPage(selected)
+			}
+		})
 	}
 	share, second := s.graphTokenShare(data, agent)
 	steps := 0
