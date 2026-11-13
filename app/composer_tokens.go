@@ -19,6 +19,7 @@ var (
 	composerSkillToken   = regexp.MustCompile(`(^|[\s])\$([a-zA-Z0-9][a-zA-Z0-9:_-]*)([\s]|$)`)
 	composerMentionToken = regexp.MustCompile(`(^|[\s])@[^\s]+`)
 	composerCommandToken = regexp.MustCompile(`(?m)^/[a-zA-Z][a-zA-Z0-9_-]*$`)
+	composerKernelSkill  = regexp.MustCompile(`/skill:[A-Za-z0-9._-]+`)
 )
 
 var (
@@ -56,6 +57,9 @@ func composerTokens(draft string, skills map[string]bool) []composerToken {
 			continue
 		}
 		add("mention", composerRuneIndex(draft, start), composerRuneIndex(draft, match[1]))
+	}
+	for _, match := range composerKernelSkill.FindAllStringIndex(draft, -1) {
+		add("skill", composerRuneIndex(draft, match[0]), composerRuneIndex(draft, match[1]))
 	}
 	for _, match := range composerCommandToken.FindAllStringIndex(draft, -1) {
 		command := draft[match[0]+1 : match[1]]

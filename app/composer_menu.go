@@ -117,7 +117,11 @@ func (c *chatState) composerMenuItems(trigger *composerTrigger) []composerMenuIt
 			if strings.Contains(skill.Source, "/agents/") {
 				badge = "项目技能"
 			}
-			items = append(items, composerMenuItem{id: skill.ID, label: "$" + label, description: description, badge: badge, icon: iconSpark, value: "$" + skill.ID + " "})
+			name := skill.Name
+			if name == "" {
+				name = skill.ID
+			}
+			items = append(items, composerMenuItem{id: skill.ID, label: "$" + label, description: description, badge: badge, icon: iconSpark, value: "/skill:" + name + " "})
 		}
 		return items
 	case "command":

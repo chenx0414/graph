@@ -41,6 +41,17 @@ func TestComposerTokensSkipMoneyUnknownSkillsAndPlainSlashWords(t *testing.T) {
 	}
 }
 
+func TestComposerTokensReadKernelSkillTokens(t *testing.T) {
+	tokens := composerTokens("用 /skill:tdd-workflow 干活", nil)
+	if len(tokens) != 1 || tokens[0].kind != "skill" {
+		t.Fatalf("the kernel skill token is a skill chip, tokens %+v", tokens)
+	}
+	runes := []rune("用 /skill:tdd-workflow 干活")
+	if got := string(runes[tokens[0].start:tokens[0].end]); got != "/skill:tdd-workflow" {
+		t.Fatalf("the token covers %q", got)
+	}
+}
+
 func TestComposerTokensColorByKind(t *testing.T) {
 	draft := "看 [graph.go](app/graph.go) 和 $tdd-workflow 还有 @app/g\n/clear"
 	ranges := composerTextRanges(composerTokens(draft, map[string]bool{"tdd-workflow": true}))

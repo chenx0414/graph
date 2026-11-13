@@ -93,8 +93,8 @@ func TestTypingADollarListsSkillsAndSkipsMoney(t *testing.T) {
 		t.Fatalf("pick the skill: %v", err)
 	}
 	frames(tester)
-	if !strings.Contains(state.draft, "$tdd-workflow") {
-		t.Fatalf("picking a skill writes its token, draft %q", state.draft)
+	if !strings.Contains(state.draft, "/skill:tdd-workflow") {
+		t.Fatalf("picking a skill writes the kernel skill token, draft %q", state.draft)
 	}
 	state.draft = ""
 	tester.Type("$5")
