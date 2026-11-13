@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -192,5 +193,69 @@ func TestAttachingAFileReadsItsText(t *testing.T) {
 	}
 	if _, err := composerAttachmentFromPath(t.TempDir()); err == nil {
 		t.Fatal("a directory is not attachable")
+	}
+}
+
+const composerTinyPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+
+func TestAttachingAnImageKeepsItsBytes(t *testing.T) {
+	path := t.TempDir() + "/photo.png"
+	data, err := base64.StdEncoding.DecodeString(composerTinyPNG)
+	if err != nil {
+		t.Fatalf("decode the fixture: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write the image: %v", err)
+	}
+	attachment, err := composerAttachmentFromPath(path)
+	if err != nil {
+		t.Fatalf("read the image: %v", err)
+	}
+	if !attachment.isImage() || attachment.Type != "image/png" || attachment.Text != "" || attachment.Data == "" {
+		t.Fatalf("the image attachment carries its bytes, got %+v", attachment)
+	}
+}
+
+func TestSendingAnImageCarriesItsBase64Data(t *testing.T) {
+	server, posted := composerServer(t)
+	state := newChatState(server.URL, "tok")
+	state.open("c1")
+	tester := frames(ui.NewTester(state.view, 760, 620))
+	deadline := time.Now().Add(2 * time.Second)
+	for len(state.messages) == 0 && time.Now().Before(deadline) {
+		tester.Frame()
+	}
+	state.draft = "看这张图"
+	state.attachments = []composerAttachment{{Name: "photo.png", Type: "image/png", Size: 70, Data: composerTinyPNG}}
+	tester.Frame()
+	if err := tester.Click("发送"); err != nil {
+		t.Fatalf("send the message: %v", err)
+	}
+	body := ""
+	select {
+	case body = <-posted:
+	case <-time.After(2 * time.Second):
+	}
+	var payload struct {
+		Attachments []struct {
+			Name string `json:"name"`
+			Type string `json:"type"`
+			Data string `json:"data"`
+		} `json:"attachments"`
+	}
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatalf("the message body is JSON: %v (%q)", err, body)
+	}
+	if len(payload.Attachments) != 1 || payload.Attachments[0].Data != composerTinyPNG || payload.Attachments[0].Type != "image/png" {
+		t.Fatalf("the image rides the message as base64, body %+v", payload)
+	}
+}
+
+func TestAnImageAttachmentRendersItsThumbnail(t *testing.T) {
+	state, tester := composerShell(t)
+	state.attachments = []composerAttachment{{Name: "photo.png", Type: "image/png", Size: 70, Data: composerTinyPNG}}
+	tester.Frame()
+	if !tester.HasText("photo.png") || !tester.HasText("附件图片 photo.png") {
+		t.Fatalf("the image chip shows its thumbnail and name, texts %q", tester.Texts())
 	}
 }

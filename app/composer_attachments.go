@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -20,6 +21,21 @@ type composerAttachment struct {
 	Type string
 	Size int64
 	Text string
+	Data string
+}
+
+const composerImageLimit = 5 * 1024 * 1024
+
+func composerAttachmentIsImageType(mime string) bool {
+	switch mime {
+	case "image/png", "image/jpeg", "image/webp", "image/gif":
+		return true
+	}
+	return false
+}
+
+func (a composerAttachment) isImage() bool {
+	return a.Data != "" && composerAttachmentIsImageType(a.Type)
 }
 
 func composerAttachmentType(name string) string {
@@ -49,6 +65,17 @@ func composerAttachmentFromPath(path string) (composerAttachment, error) {
 	if info.IsDir() {
 		return composerAttachment{}, fmt.Errorf("不能附加目录")
 	}
+	mime := composerAttachmentType(path)
+	if composerAttachmentIsImageType(mime) {
+		if info.Size() > composerImageLimit {
+			return composerAttachment{}, fmt.Errorf("图片超过 5MB")
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return composerAttachment{}, err
+		}
+		return composerAttachment{Name: filepath.Base(path), Type: mime, Size: info.Size(), Data: base64.StdEncoding.EncodeToString(data)}, nil
+	}
 	if info.Size() > composerAttachmentLimit {
 		return composerAttachment{}, fmt.Errorf("文件超过 512KB")
 	}
@@ -57,9 +84,9 @@ func composerAttachmentFromPath(path string) (composerAttachment, error) {
 		return composerAttachment{}, err
 	}
 	if !utf8.Valid(data) {
-		return composerAttachment{}, fmt.Errorf("只支持文本文件")
+		return composerAttachment{}, fmt.Errorf("只支持文本或图片文件")
 	}
-	return composerAttachment{Name: filepath.Base(path), Type: composerAttachmentType(path), Size: info.Size(), Text: string(data)}, nil
+	return composerAttachment{Name: filepath.Base(path), Type: mime, Size: info.Size(), Text: string(data)}, nil
 }
 
 func (c *chatState) attachFile(path string) {
@@ -118,7 +145,7 @@ func (c *chatState) attachmentStrip(ctx *ui.Context) {
 			chip := ui.Row(ctx).Padding(th.Space(1), th.Space(1.5), th.Space(1), th.Space(2)).
 				Radius(t.Radius.Md).Background(t.Hover).AlignItems(ui.Center).Gap(th.Space(1.5)).Label(attachment.Name)
 			chip.Children(func() {
-				ui.Icon(ctx, iconDoc).Size(gwtheme.IconSm, gwtheme.IconSm).TextColor(t.Muted)
+				c.composerAttachmentGlyph(ctx, current)
 				kit.Text(ctx, current.Name, t.Text.Xs).FontWeight(500).SingleLine().Ellipsis("…")
 				kit.Text(ctx, formatComposerAttachmentSize(current.Size), t.Text.Xs).TextColor(t.Muted).SingleLine()
 				close := ui.Box(ctx).Size(th.Space(4), th.Space(4)).Radius(t.Radius.Full).Center().
@@ -130,6 +157,20 @@ func (c *chatState) attachmentStrip(ctx *ui.Context) {
 			})
 		}
 	})
+}
+
+func (c *chatState) composerAttachmentGlyph(ctx *ui.Context, attachment composerAttachment) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	if attachment.isImage() {
+		if data, err := base64.StdEncoding.DecodeString(attachment.Data); err == nil {
+			if source, err := ui.DecodeImage(data); err == nil {
+				ui.Image(ctx, source).Size(th.Space(7), th.Space(7)).Radius(t.Radius.Sm).Clip().
+					Label("附件图片 " + attachment.Name)
+				return
+			}
+		}
+	}
+	ui.Icon(ctx, iconDoc).Size(gwtheme.IconSm, gwtheme.IconSm).TextColor(t.Muted)
 }
 
 func (c *chatState) attachmentButton(ctx *ui.Context) {

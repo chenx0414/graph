@@ -336,8 +336,12 @@ func (c *chatState) composer(ctx *ui.Context) {
 			if len(c.attachments) > 0 {
 				c.attachmentStrip(ctx)
 			}
+			if strings.Contains(c.draft, "$") {
+				c.ensureComposerSkills()
+			}
 			field := kit.TextArea(ctx, &c.draft, kit.InputOpts{Placeholder: "想问什么？  @ 文件，$ 技能，/ 命令", Bare: true})
 			field.Label("消息").FillWidth().PaddingX(th.Space(0.5)).Lines(1, 6)
+			field.TextRanges(composerTextRanges(composerTokens(c.draft, c.composerSkillNames()))...)
 			if c.focusComposer {
 				field.Focus()
 				c.focusComposer = false

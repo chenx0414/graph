@@ -175,12 +175,16 @@ func (source *conversationChatSource) Send(c *chatState, text string) error {
 	if len(c.attachments) > 0 {
 		attachments := make([]map[string]any, 0, len(c.attachments))
 		for _, attachment := range c.attachments {
-			attachments = append(attachments, map[string]any{
+			record := map[string]any{
 				"name": attachment.Name,
 				"type": attachment.Type,
 				"size": attachment.Size,
 				"text": attachment.Text,
-			})
+			}
+			if attachment.isImage() {
+				record["data"] = attachment.Data
+			}
+			attachments = append(attachments, record)
 		}
 		body["attachments"] = attachments
 	}
