@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -113,7 +114,11 @@ func (m *fleetGraphMock) server(t *testing.T) *httptest.Server {
 			w.WriteHeader(m.status)
 			return
 		}
-		_, _ = w.Write([]byte(m.topology))
+		if strings.Contains(r.URL.Path, "/graph/topology") {
+			_, _ = w.Write([]byte(m.topology))
+			return
+		}
+		_, _ = w.Write([]byte(`{"entries":[{"seq":1,"id":"e1","role":"system","kind":"note","text":"节点已启动","createdAt":1},{"seq":2,"id":"e2","role":"assistant","kind":"message","text":"正在实现编队图","createdAt":2}]}`))
 	})
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
@@ -170,9 +175,12 @@ func TestGraphPageRendersNodesAndOpensTheAgent(t *testing.T) {
 		t.Fatalf("click the ship node: %v", err)
 	}
 	tester = frames(tester)
-	page := state.boardPage()
-	if page.ID != "agent:p1-n2" {
-		t.Fatalf("a matched node opens its agent page, page %+v", page)
+	active := state.active()
+	if active == nil || active.active != "node:tA/n2" {
+		t.Fatalf("a matched node opens its node chat, active %+v", active)
+	}
+	if !tester.HasText("正在实现编队图") || !tester.HasText("节点已启动") {
+		t.Fatalf("the node chat renders its entries, texts %q", tester.Texts())
 	}
 }
 

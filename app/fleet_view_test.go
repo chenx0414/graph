@@ -272,17 +272,15 @@ func TestClickingAGraphUnitOpensItsGraphPage(t *testing.T) {
 
 func TestTheAgentPageClosesLikeAModulePage(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
-	state.fleet = fleetState{conversationID: "g1", data: &fleetSnapshot{RootID: "g1", Stats: fleetStats{Agents: 2}, Agents: []fleetAgent{
+	data := &fleetSnapshot{RootID: "g1", Stats: fleetStats{Agents: 2}, Agents: []fleetAgent{
 		{ID: "g1", Kind: "global", Name: "Main", Status: "running"},
 		{ID: "p1", ParentID: "g1", Kind: "project", Name: "13-Graph", ConversationID: "p1", Status: "running"},
-	}}}
-	state.selectBoardPage(1)
-	state.openModule("fleet-network")
-	tester := frames(ui.NewTester(state.view, 1440, 900))
-	if err := tester.Click("编队 Agent 13-Graph"); err != nil {
+	}}
+	state.fleet = fleetState{conversationID: "g1", data: data}
+	if err := state.openFleetAgentPage(data.Agents[1]); err != nil {
 		t.Fatalf("open the agent page: %v", err)
 	}
-	frames(tester)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
 	if err := tester.Click("关闭 13-Graph"); err != nil {
 		t.Fatalf("close the agent page: %v", err)
 	}

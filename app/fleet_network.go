@@ -140,7 +140,7 @@ func (s *shellState) fleetAgentCard(ctx *ui.Context, agent fleetAgent, width, he
 	card.Width(width).Height(height)
 	card.Label("编队 Agent " + fleetAgentLabel(agent))
 	s.fleetHoverCard(card, agent.ID, accent, t)
-	card.OnClick(func() { _ = s.openFleetAgentPage(agent) })
+	card.OnClick(func() { s.openFleetAgentChat(agent) })
 	card.Children(func() {
 		s.fleetAgentCardHead(ctx, agent, accent)
 		fleetEllipsis(ctx, fleetAgentRole(agent), t.Text.Xs, accent)
@@ -172,7 +172,7 @@ func (s *shellState) fleetThreadCard(ctx *ui.Context, node fleetRingNode) ui.Ele
 		card.Tooltip(node.Detail)
 	} else {
 		card.Label("编队 Agent " + fleetAgentLabel(agent))
-		card.OnClick(func() { _ = s.openFleetAgentPage(agent) })
+		card.OnClick(func() { s.openFleetAgentChat(agent) })
 	}
 	s.fleetHoverCard(card, node.ID, accent, t)
 	card.Children(func() {

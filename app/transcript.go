@@ -143,10 +143,6 @@ type chatState struct {
 	modelsLoading   bool
 	currentModel    string
 	currentThinking string
-	graph           taskGraph
-	graphTaskID     string
-	graphLoading    bool
-	graphError      string
 	oldestSeq       int64
 	runBoundaries   map[string]bool
 	historySettle   int
@@ -160,6 +156,12 @@ type chatState struct {
 	draft           string
 	focusComposer   bool
 	active          string
+	nodeMode        bool
+	nodeTaskID      string
+	nodeID          string
+	agentTitle      string
+	agentStatus     string
+	agentDetail     func()
 	status          string
 	messages        []transcriptMessage
 	list            ui.ListState

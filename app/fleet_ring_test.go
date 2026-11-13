@@ -9,9 +9,9 @@ import (
 func ringGraphFleet() *fleetSnapshot {
 	data := &fleetSnapshot{RootID: "g1", Stats: fleetStats{Agents: 10}}
 	data.Agents = []fleetAgent{
-		{ID: "g1", Kind: "global", Name: "Main", Status: "running"},
-		{ID: "p1", ParentID: "g1", Kind: "project", Name: "项目 A", Status: "running"},
-		{ID: "p2", ParentID: "g1", Kind: "project", Name: "项目 B", Status: "idle"},
+		{ID: "g1", Kind: "global", Name: "Main", Status: "running", ConversationID: "g1"},
+		{ID: "p1", ParentID: "g1", Kind: "project", Name: "项目 A", Status: "running", ConversationID: "p1"},
+		{ID: "p2", ParentID: "g1", Kind: "project", Name: "项目 B", Status: "idle", ConversationID: "p2"},
 	}
 	for index := 0; index < 4; index++ {
 		data.Agents = append(data.Agents,

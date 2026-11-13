@@ -259,17 +259,8 @@ func (s *shellState) agentDetailHeader(ctx *ui.Context, agent fleetAgent, data *
 			})
 			actions := ui.Row(ctx).Gap(th.Space(1)).AlignItems(ui.Center)
 			actions.Children(func() {
-				if agent.Kind == "node" {
-					button := kit.Button(ctx, "打开节点窗口", kit.ButtonOpts{Variant: kit.Outline, Size: kit.SizeSm})
-					button.OnClick(func() { s.openModule("graph") })
-					return
-				}
-				if agent.ConversationID != "" {
-					button := kit.Button(ctx, "打开会话", kit.ButtonOpts{Variant: kit.Outline, Size: kit.SizeSm})
-					button.Label("打开 Agent 会话")
-					id := agent.ConversationID
-					button.OnClick(func() { go s.selectConversation(id) })
-				}
+				button := kit.Button(ctx, "打开聊天", kit.ButtonOpts{Variant: kit.Outline, Size: kit.SizeSm})
+				button.OnClick(func() { go s.openFleetAgentChat(agent) })
 			})
 		})
 	})
@@ -435,7 +426,7 @@ func (s *shellState) agentDetailRelations(ctx *ui.Context, data *fleetSnapshot, 
 			row := parent
 			button := kit.Button(ctx, "父级 "+fleetAgentLabel(row), kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeXs})
 			button.Label("关系 Agent " + fleetAgentLabel(row))
-			button.Justify(ui.Start).FillWidth().OnClick(func() { go s.openFleetAgentPage(row) })
+			button.Justify(ui.Start).FillWidth().OnClick(func() { go s.openFleetAgentChat(row) })
 		} else {
 			kit.Text(ctx, "它是编队的根。", t.Text.Xs).TextColor(t.Muted)
 		}
@@ -444,7 +435,7 @@ func (s *shellState) agentDetailRelations(ctx *ui.Context, data *fleetSnapshot, 
 			member := child
 			button := kit.Button(ctx, "下级 "+fleetAgentLabel(member), kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeXs})
 			button.Label("关系 Agent " + fleetAgentLabel(member))
-			button.Justify(ui.Start).FillWidth().OnClick(func() { go s.openFleetAgentPage(member) })
+			button.Justify(ui.Start).FillWidth().OnClick(func() { go s.openFleetAgentChat(member) })
 		}
 		if len(children) > 0 {
 			kit.Text(ctx, formatFleetCount(len(children))+" 个直接下级", t.Text.Xs).TextColor(t.Muted)

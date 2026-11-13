@@ -19,7 +19,6 @@ var railItems = []railItem{
 	{"trajectory", "轨迹", iconActivity},
 	{"insights", "洞察", iconTrend},
 	{"tasks", "任务", iconDoc},
-	{"graph", "图谱", iconGraph},
 	{"capabilities", "能力", iconShare},
 	{"settings", "设置", iconGear},
 }

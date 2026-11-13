@@ -123,7 +123,7 @@ func (s *shellState) fleetTopologyCard(ctx *ui.Context, data *fleetTopologyData,
 	})
 	if agent != nil {
 		selected := *agent
-		card.OnClick(func() { _ = s.openFleetAgentPage(selected) })
+		card.OnClick(func() { s.openFleetAgentChat(selected) })
 	}
 	share, second := s.graphTokenShare(data, agent)
 	steps := 0

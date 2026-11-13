@@ -156,6 +156,9 @@ func (s *shellState) ensureResources() {
 }
 
 func (s *shellState) titleOf(id string) string {
+	if chat := s.active(); chat != nil && id == s.activeID && chat.agentTitle != "" {
+		return chat.agentTitle
+	}
 	if id != "" && id == s.supervisorID {
 		return "Main Agent"
 	}

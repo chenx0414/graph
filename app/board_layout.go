@@ -146,8 +146,6 @@ func boardPanelTitle(kind string) string {
 		return "会话排行"
 	case "tasks":
 		return "任务清单"
-	case "graph":
-		return "图谱画布"
 	case "capabilities":
 		return "能力库"
 	case "settings":
@@ -463,8 +461,6 @@ func (s *shellState) ensureBoardPageData() {
 		if active := s.active(); active != nil {
 			go active.loadModels()
 		}
-	case "graph":
-		s.ensureGraph()
 	case "trajectory":
 		s.ensureTrajectory()
 	case "insights":

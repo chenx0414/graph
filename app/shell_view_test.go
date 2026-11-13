@@ -122,13 +122,6 @@ func TestTheAppFocusesTheComposerOnOpen(t *testing.T) {
 func TestTheRailOpensATabForTheModule(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
-	if err := tester.Click("图谱"); err != nil {
-		t.Fatalf("click 图谱: %v", err)
-	}
-	frames(tester)
-	if kind := state.activeBoardKind(); kind != "graph" || !tester.HasText("图谱画布") {
-		t.Fatalf("the rail must open the graph tab: kind %q texts %q", kind, tester.Texts())
-	}
 	if err := tester.Click("设置"); err != nil {
 		t.Fatalf("click 设置: %v", err)
 	}
@@ -235,50 +228,22 @@ func TestTheComposerFitsTheMinimumWindow(t *testing.T) {
 	}
 }
 
-func TestTheGraphPanelDrawsTheTaskGraph(t *testing.T) {
-	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
-	if err := tester.Click("图谱"); err != nil {
-		t.Fatalf("click 图谱: %v", err)
-	}
-	deadline := time.Now().Add(2 * time.Second)
-	for state.active() == nil || len(state.active().graph.nodes) == 0 {
-		if !time.Now().Before(deadline) {
-			t.Fatalf("the graph did not load, texts %q", tester.Texts())
-		}
-		time.Sleep(time.Millisecond)
-	}
-	tester = frames(tester)
-	if graph := state.active().graph; len(graph.nodes) != 2 || len(graph.edges) != 1 {
-		t.Fatalf("graph %+v", graph)
-	}
-	if !tester.HasText("2 个节点 · 1 条连接") {
-		t.Fatalf("the graph panel must caption the graph, texts %q", tester.Texts())
-	}
-	if countColor(tester.Image(), gwtheme.Light().Success) == 0 {
-		t.Fatal("the succeeded node must paint its status color")
-	}
-	if countColor(tester.Image(), gwtheme.Light().Unread) == 0 {
-		t.Fatal("the running node must paint its status color")
-	}
-}
-
 func TestTabsSwitchAndCloseWithoutLosingTheBoard(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
-	if err := tester.Click("图谱"); err != nil {
-		t.Fatalf("open the graph tab: %v", err)
+	if err := tester.Click("设置"); err != nil {
+		t.Fatalf("open the settings tab: %v", err)
 	}
 	frames(tester)
-	if err := tester.Click("图谱"); err != nil {
-		t.Fatalf("reopen the graph tab: %v", err)
+	if err := tester.Click("设置"); err != nil {
+		t.Fatalf("reopen the settings tab: %v", err)
 	}
 	frames(tester)
 	if len(state.board.pages) != 3 {
 		t.Fatalf("one rail entry owns one tab, pages %d", len(state.board.pages))
 	}
-	if err := tester.Click("关闭 图谱画布"); err != nil {
-		t.Fatalf("close the graph tab: %v", err)
+	if err := tester.Click("关闭 运行设置"); err != nil {
+		t.Fatalf("close the settings tab: %v", err)
 	}
 	frames(tester)
 	if len(state.board.pages) != 2 || state.activeBoardKind() != "" {
@@ -309,7 +274,7 @@ func TestTheFunctionRailStaysCompactAndCentered(t *testing.T) {
 		t.Fatalf("the rail must stay compact, width %.1f", railWidth)
 	}
 	center := float32(trafficLightPosition().X) + 6.5
-	for _, label := range []string{"轨迹", "洞察", "图谱", "能力", "设置"} {
+	for _, label := range []string{"轨迹", "洞察", "任务", "能力", "设置"} {
 		rect, ok := tester.Find(label)
 		if !ok {
 			t.Fatalf("the rail lost %q, texts %q", label, tester.Texts())
@@ -324,7 +289,7 @@ func TestTheFunctionRailSpacesItsIconsApart(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 	previousBottom := float32(-1)
-	for _, label := range []string{"轨迹", "洞察", "图谱", "能力", "设置"} {
+	for _, label := range []string{"轨迹", "洞察", "任务", "能力", "设置"} {
 		rect, ok := tester.Find(label)
 		if !ok {
 			t.Fatalf("the rail lost %q, texts %q", label, tester.Texts())

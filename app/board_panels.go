@@ -53,8 +53,6 @@ func (s *shellState) boardPanelBody(ctx *ui.Context, panel *boardPanel) {
 		s.insightsSessionsCard(ctx)
 	case "tasks":
 		s.panelTasks(ctx)
-	case "graph":
-		s.panelGraph(ctx, s.boardPage().Kind != "")
 	case "artifacts":
 		s.panelArtifacts(ctx)
 	case "models":
@@ -182,46 +180,6 @@ func (s *shellState) panelTasks(ctx *ui.Context) {
 			kit.Text(ctx, "  "+nodeLabel(node), t.Text.Xs).TextColor(t.Muted)
 		}
 	}
-}
-
-func (s *shellState) ensureGraph() {
-	active := s.active()
-	if active == nil || len(active.tasks) == 0 || active.graphLoading {
-		return
-	}
-	taskID := active.tasks[0].id
-	if active.graphTaskID == taskID && len(active.graph.nodes) > 0 {
-		return
-	}
-	active.graphLoading = true
-	go active.loadGraph(taskID)
-}
-
-func (s *shellState) panelGraph(ctx *ui.Context, expanded bool) {
-	t, th := gwtheme.Of(ctx), ctx.Theme()
-	active := s.active()
-	if active == nil || len(active.tasks) == 0 {
-		s.boardNote(ctx, "图谱会在任务启动后出现：节点是 Agent，连线是接口投递。")
-		return
-	}
-	if len(active.graph.nodes) == 0 {
-		s.ensureGraph()
-		s.boardNote(ctx, "正在读取图谱…")
-		return
-	}
-	if active.graphError != "" {
-		s.boardNote(ctx, active.graphError)
-		return
-	}
-	caption := strconv.Itoa(len(active.graph.nodes)) + " 个节点 · " + strconv.Itoa(len(active.graph.edges)) + " 条连接"
-	kit.Text(ctx, caption, t.Text.Xs).TextColor(t.Muted)
-	height := th.Space(55)
-	if expanded {
-		height = th.Space(150)
-	}
-	ui.Box(ctx).FillWidth().Height(height).Clip().Draw(func(p *ui.Painter, r ui.Rect) {
-		drawBoardGraph(p, r, active.graph, t)
-	})
 }
 
 func (s *shellState) panelArtifacts(ctx *ui.Context) {

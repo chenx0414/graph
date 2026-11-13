@@ -41,6 +41,10 @@ func mergeMessages(older, newer []transcriptMessage) []transcriptMessage {
 }
 
 func (c *chatState) ensureHistory() {
+	if c.nodeMode {
+		c.noMoreHistory = true
+		return
+	}
 	if c.historyLoading || c.noMoreHistory || c.oldestSeq <= 0 || c.active == "" {
 		return
 	}

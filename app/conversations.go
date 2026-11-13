@@ -145,6 +145,10 @@ func (c *chatState) sendText(text string) {
 	if text == "" || c.active == "" {
 		return
 	}
+	if c.nodeMode {
+		c.sendNode(text)
+		return
+	}
 	body := map[string]string{"text": text, "requestId": "native-" + time.Now().Format("150405.000000")}
 	if _, err := c.api.post("/api/conversations/"+c.active+"/messages", body); err != nil {
 		c.status = "发送失败：" + err.Error()
@@ -171,6 +175,10 @@ func (c *chatState) follow() {
 }
 
 func (c *chatState) refresh() {
+	if c.nodeMode {
+		c.refreshNode()
+		return
+	}
 	payload, err := c.api.get("/api/conversations/" + c.active)
 	if err != nil {
 		c.status = "读不到这个会话：" + err.Error()
@@ -255,6 +263,7 @@ func (c *chatState) frame() {
 func (c *chatState) view(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	ui.Column(ctx).Fill().Children(func() {
+		c.agentHeader(ctx)
 		c.transcript(ctx)
 		if c.status != "" {
 			ui.Text(ctx, c.status).FontSize(12).TextColor(th.TextMuted).Padding(16, 4, 16, 0)
@@ -334,6 +343,9 @@ const (
 )
 
 func (c *chatState) composerMode() composerMode {
+	if c.nodeMode {
+		return composerSend
+	}
 	if c.busy() && !c.paused {
 		return composerPause
 	}
@@ -371,7 +383,9 @@ func (c *chatState) composer(ctx *ui.Context) {
 			ui.Row(ctx).FillWidth().AlignItems(ui.Center).Gap(th.Space(1.5)).Children(func() {
 				composerPlaceholder(ctx, iconClip, "附件")
 				ui.Spacer(ctx)
-				c.modelChip(ctx)
+				if !c.nodeMode {
+					c.modelChip(ctx)
+				}
 				composerPlaceholder(ctx, iconMic, "语音")
 				c.composerButton(ctx)
 			})

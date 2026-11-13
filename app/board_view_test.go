@@ -168,7 +168,13 @@ func TestTheBoardRemembersItsLayout(t *testing.T) {
 }
 
 func TestTheRailNoLongerOffersHistoryOrConversationPages(t *testing.T) {
+	if len(railItems) != 5 {
+		t.Fatalf("the rail keeps five module entries, got %d", len(railItems))
+	}
 	for _, item := range railItems {
+		if item.kind == "graph" {
+			t.Fatal("the rail no longer offers the graph canvas")
+		}
 		if item.kind == "history" || item.kind == "conversation" || item.kind == "overview" {
 			t.Fatalf("the rail still offers %q", item.kind)
 		}

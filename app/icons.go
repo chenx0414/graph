@@ -30,7 +30,6 @@ var (
 	iconVolume    = svgIcon(`<path d="M11 5 6.5 9H3v6h3.5L11 19Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18 6a8.5 8.5 0 0 1 0 12"/>`)
 	iconMore      = svgIcon(`<circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"/>`)
 	iconSpark     = svgIcon(`<path d="M12 3.5l1.7 4.9 4.8 1.6-4.8 1.7L12 16.5l-1.7-4.8-4.8-1.7 4.8-1.6Z" fill="currentColor" stroke="none"/><path d="M18.5 14.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8Z" fill="currentColor" stroke="none"/>`)
-	iconGraph     = svgIcon(`<path d="M5 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z"/><path d="M19 13.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z"/><path d="M19 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z"/><path d="m7.2 9.4 9.6 5.2"/><path d="M7.5 8h9"/>`)
 	iconFolder    = svgIcon(`<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>`)
 	iconCopy      = svgIcon(`<path d="M9 9h11v11H9Z"/><path d="M5 15H4V4h11v1"/>`)
 	iconArchive   = svgIcon(`<path d="M4 7h16v13H4Z"/><path d="M2 3h20v4H2Z"/><path d="M10 12h4"/>`)
