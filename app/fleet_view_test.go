@@ -95,7 +95,7 @@ func TestTheFleetPageSaysItIsLoadingAndThenLands(t *testing.T) {
 		<-release
 		fleetSampleServer(w, r)
 	})
-	state.selectBoardPage(1)
+	state.openModule("fleet")
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 	if !tester.HasText("正在读取编队…") {
 		t.Fatalf("the fleet page must say it is loading, texts %q", tester.Texts())
@@ -118,7 +118,7 @@ func TestTheFleetPageExplainsAFailedRead(t *testing.T) {
 	state := fleetServerShell(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	})
-	state.selectBoardPage(1)
+	state.openModule("fleet")
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 	deadline := time.Now().Add(2 * time.Second)
 	for state.fleet.failed == "" {
@@ -169,7 +169,7 @@ func thousandAgentFleet() *fleetSnapshot {
 func TestTheFleetNetworkAggregatesAThousandAgents(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
 	state.fleet = fleetState{conversationID: "g1", data: thousandAgentFleet()}
-	state.selectBoardPage(1)
+	state.openModule("fleet")
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 	if !tester.HasText("1,000 个 Agent") {
 		t.Fatalf("the network must caption the thousand agents, texts %q", tester.Texts())
@@ -241,7 +241,7 @@ func sameStrings(a, b []string) bool {
 
 func TestClickingAGraphUnitOpensItsGraphPage(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
-	state.selectBoardPage(1)
+	state.openModule("fleet")
 	state.openModuleWithScope("agent-network", "fleet")
 	tester := frames(ui.NewTester(state.view, 1880, 900))
 	if err := tester.Click("编队图 实现四栏页面"); err != nil {
@@ -406,7 +406,7 @@ func TestFleetEventCategoriesCoverTheLedgerEvents(t *testing.T) {
 
 func TestTheFleetNetworkStartsAtTheWorldOrigin(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
-	state.selectBoardPage(1)
+	state.openModule("fleet")
 	state.openModuleWithScope("agent-network", "fleet")
 	frames(ui.NewTester(state.view, 1440, 900))
 	if state.boardNet.view.x != 0 && state.boardNet.view.zoom == 0 {
@@ -416,7 +416,7 @@ func TestTheFleetNetworkStartsAtTheWorldOrigin(t *testing.T) {
 
 func TestTheFleetTabResetsFromItsContextMenu(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
-	state.selectBoardPage(1)
+	state.openModule("fleet")
 	state.board.pages[1].Panels = state.board.pages[1].Panels[:2]
 	state.board.pages[1].Layout = layoutFromPanels(state.board.pages[1].Panels)
 	tester := frames(ui.NewTester(state.view, 1440, 900))

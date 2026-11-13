@@ -49,7 +49,7 @@ func defaultBoardPage() boardPage {
 }
 
 func boardPageClosable(page boardPage) bool {
-	return page.ID != fleetPageID && page.Kind != fleetPageID
+	return page.ID != "board"
 }
 
 func (s *shellState) pinBoardPages() {
@@ -59,36 +59,28 @@ func (s *shellState) pinBoardPages() {
 	}
 	pinned := defaultBoardPage()
 	pinnedSet := false
-	fleet := defaultFleetPage()
-	fleetSet := false
 	modules := []boardPage{}
 	for _, page := range s.board.pages {
-		switch {
-		case page.ID == fleetPageID || page.Kind == fleetPageID:
-			if !fleetSet {
-				fleet = page
-				fleetSet = true
-			}
-		case page.Kind == "":
+		if page.Kind == "" {
 			if pinnedSet {
 				continue
 			}
 			pinned = page
 			pinnedSet = true
-		default:
-			modules = append(modules, page)
+			continue
 		}
+		if page.ID == fleetPageID || page.Kind == fleetPageID {
+			page.ID, page.Kind, page.Title = fleetPageID, fleetPageID, fleetPageTitle
+			normalizeBoardLayout(&page.Layout)
+			if page.Layout.Kind == "" || len(page.Panels) == 0 {
+				page = defaultFleetPage()
+			}
+		}
+		modules = append(modules, page)
 	}
 	pinned.ID, pinned.Kind, pinned.Title = "board", "", boardDefaultTitle
-	fleet.ID, fleet.Kind, fleet.Title = fleetPageID, fleetPageID, fleetPageTitle
-	if fleetSet {
-		normalizeBoardLayout(&fleet.Layout)
-		if fleet.Layout.Kind == "" || len(fleet.Panels) == 0 {
-			fleet = defaultFleetPage()
-		}
-	}
-	pages := make([]boardPage, 0, len(modules)+2)
-	pages = append(pages, pinned, fleet)
+	pages := make([]boardPage, 0, len(modules)+1)
+	pages = append(pages, pinned)
 	pages = append(pages, modules...)
 	s.board.pages = pages
 	s.board.active = 0

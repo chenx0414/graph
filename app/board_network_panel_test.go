@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -230,29 +231,42 @@ func TestFullScreeningTheNetworkReusesOnePage(t *testing.T) {
 
 func TestLoadingAnOldBoardRenamesTheNetworkToTheSharedPanel(t *testing.T) {
 	dir := t.TempDir()
-	saved := `{"version":9,"active":1,"pages":[
-		{"id":"board","title":"白板","panels":[{"id":"agent","kind":"agent"},{"id":"agent-network","kind":"agent-network"}],
-		 "layout":{"kind":"split","axis":"row","children":[
-			{"weight":1,"node":{"kind":"panel","panelId":"agent"}},
-			{"weight":1,"node":{"kind":"panel","panelId":"agent-network"}}]}},
-		{"id":"fleet","title":"编队","kind":"fleet","panels":[
-			{"id":"fleet-kpi","kind":"fleet-kpi"},
-			{"id":"fleet-network","kind":"fleet-network"}],
-		 "layout":{"kind":"split","axis":"row","children":[
-			{"weight":1,"node":{"kind":"panel","panelId":"fleet-kpi"}},
-			{"weight":1,"node":{"kind":"panel","panelId":"fleet-network"}}]}},
-		{"id":"tab-old","title":"Agent 网络","kind":"fleet-network","panels":[{"id":"fleet-network","kind":"fleet-network"}],
-		 "layout":{"kind":"panel","panelId":"fleet-network"}},
-		{"id":"tab-new","title":"Agent 网络","kind":"agent-network","panels":[{"id":"agent-network","kind":"agent-network"}],
-		 "layout":{"kind":"panel","panelId":"agent-network"}}]}`
-	if err := os.WriteFile(filepath.Join(dir, "whiteboard.json"), []byte(saved), 0o600); err != nil {
+	pages := []boardPage{
+		{ID: "board", Title: "白板", Panels: []boardPanel{
+			{ID: "agent", Kind: "agent"},
+			{ID: "agent-network", Kind: "agent-network"},
+		}, Layout: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
+			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "agent"}},
+			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "agent-network"}},
+		}}},
+		{ID: "fleet", Title: "编队", Kind: "fleet", Panels: []boardPanel{
+			{ID: "fleet-kpi", Kind: "fleet-kpi"},
+			{ID: "fleet-network", Kind: "fleet-network"},
+		}, Layout: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
+			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "fleet-kpi"}},
+			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "fleet-network"}},
+		}}},
+		{ID: "tab-old", Title: "Agent 网络", Kind: "fleet-network", Panels: []boardPanel{
+			{ID: "fleet-network", Kind: "fleet-network"},
+		}, Layout: boardNode{Kind: "panel", PanelID: "fleet-network"}},
+		{ID: "tab-new", Title: "Agent 网络", Kind: "agent-network", Panels: []boardPanel{
+			{ID: "agent-network", Kind: "agent-network"},
+		}, Layout: boardNode{Kind: "panel", PanelID: "agent-network"}},
+	}
+	payload, err := json.Marshal(boardFile{Version: boardLayoutVersion, Pages: pages, Active: 1})
+	if err != nil {
+		t.Fatalf("encode the board: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "whiteboard.json"), payload, 0o600); err != nil {
 		t.Fatalf("write whiteboard: %v", err)
 	}
 	state := newShellState("http://127.0.0.1:1", "")
 	state.loadBoard(dir)
-	fleet := state.board.pages[1]
-	if fleet.ID != "fleet" {
-		t.Fatalf("the fleet page stays first after the board, pages %+v", state.board.pages)
+	fleet := boardPage{}
+	for _, page := range state.board.pages {
+		if page.ID == "fleet" {
+			fleet = page
+		}
 	}
 	networkPanel := boardPanel{}
 	for _, panel := range fleet.Panels {
@@ -271,6 +285,29 @@ func TestLoadingAnOldBoardRenamesTheNetworkToTheSharedPanel(t *testing.T) {
 	}
 	if modulePages != 1 {
 		t.Fatalf("the old network tabs collapse into one page, pages %+v", state.board.pages)
+	}
+}
+
+func TestLoadingAnOldBoardDropsThePinnedFleetPage(t *testing.T) {
+	dir := t.TempDir()
+	payload, err := json.Marshal(boardFile{Version: 10, Pages: []boardPage{
+		{ID: "board", Title: "白板", Panels: defaultBoardPanels(), Layout: defaultBoardLayout()},
+		{ID: "fleet", Title: "编队", Kind: "fleet", Panels: defaultFleetPanels(), Layout: defaultFleetLayout()},
+	}, Active: 1})
+	if err != nil {
+		t.Fatalf("encode the board: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "whiteboard.json"), payload, 0o600); err != nil {
+		t.Fatalf("write whiteboard: %v", err)
+	}
+	state := newShellState("http://127.0.0.1:1", "")
+	state.loadBoard(dir)
+	if len(state.board.pages) != 1 || state.board.pages[0].ID != "board" {
+		t.Fatalf("the fleet page is no longer pinned, pages %+v", state.board.pages)
+	}
+	state.openModule("fleet")
+	if page := state.boardPage(); page.ID != "fleet" {
+		t.Fatalf("the rail brings the fleet page back, page %+v", page)
 	}
 }
 

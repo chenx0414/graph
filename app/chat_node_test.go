@@ -110,7 +110,7 @@ func TestOpeningAgentChatReusesConversation(t *testing.T) {
 		},
 	}
 	state, tester := nodeChatShell(t, mock)
-	state.selectBoardPage(1)
+	state.openModule("fleet")
 	frames(tester)
 	if err := tester.Click("编队 Agent Main"); err != nil {
 		t.Fatalf("click the main card: %v", err)

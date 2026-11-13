@@ -43,7 +43,7 @@ type boardFile struct {
 	Active  int          `json:"active"`
 }
 
-const boardLayoutVersion = 10
+const boardLayoutVersion = 11
 
 const boardDefaultTitle = "白板"
 
@@ -101,7 +101,7 @@ func layoutFromPanels(panels []boardPanel) boardNode {
 }
 
 func defaultBoardPages() []boardPage {
-	return []boardPage{defaultBoardPage(), defaultFleetPage()}
+	return []boardPage{defaultBoardPage()}
 }
 
 func boardPanelTitle(kind string) string {
@@ -213,6 +213,16 @@ func (s *shellState) loadBoard(stateDir string) {
 			s.board.pages[index].Kind = "agent-network"
 			s.board.pages[index].Scope = "fleet"
 		}
+	}
+	if file.Version < boardLayoutVersion {
+		kept := make([]boardPage, 0, len(s.board.pages))
+		for _, page := range s.board.pages {
+			if page.ID == fleetPageID || page.Kind == fleetPageID {
+				continue
+			}
+			kept = append(kept, page)
+		}
+		s.board.pages = kept
 	}
 	s.board.pages = dedupeBoardModulePages(s.board.pages)
 	for index := range s.board.pages {
@@ -425,6 +435,10 @@ func (s *shellState) openModuleWithScope(kind, scope string) {
 		if s.board.pages[index].Kind != kind {
 			continue
 		}
+		if kind == fleetPageID {
+			s.selectBoardPage(index)
+			return
+		}
 		s.board.pages[index].Scope = scope
 		for panel := range s.board.pages[index].Panels {
 			if s.board.pages[index].Panels[panel].Kind == kind {
@@ -432,6 +446,14 @@ func (s *shellState) openModuleWithScope(kind, scope string) {
 			}
 		}
 		s.selectBoardPage(index)
+		return
+	}
+	if kind == fleetPageID {
+		s.board.pages = append(s.board.pages, defaultFleetPage())
+		s.board.active = len(s.board.pages) - 1
+		s.ensureBoardPageData()
+		s.saveBoard()
+		s.frame()
 		return
 	}
 	title := boardPanelTitle(kind)

@@ -209,8 +209,8 @@ func TestTheWhiteboardHasTabsAndNoFloatingToolbar(t *testing.T) {
 	if !tester.HasText("白板") || tester.HasText("新建标签页") {
 		t.Fatalf("the board keeps one tab and no plus, texts %q", tester.Texts())
 	}
-	if len(state.board.pages) != 2 || state.board.active != 0 || state.board.pages[0].Title != "白板" || state.board.pages[1].ID != "fleet" {
-		t.Fatalf("the whiteboard and the fleet page are the only fixed tabs, pages %d active %d", len(state.board.pages), state.board.active)
+	if len(state.board.pages) != 1 || state.board.active != 0 || state.board.pages[0].Title != "白板" {
+		t.Fatalf("the whiteboard is the only tab until a rail entry opens another, pages %d active %d", len(state.board.pages), state.board.active)
 	}
 }
 
@@ -239,14 +239,14 @@ func TestTabsSwitchAndCloseWithoutLosingTheBoard(t *testing.T) {
 		t.Fatalf("reopen the settings tab: %v", err)
 	}
 	frames(tester)
-	if len(state.board.pages) != 3 {
+	if len(state.board.pages) != 2 {
 		t.Fatalf("one rail entry owns one tab, pages %d", len(state.board.pages))
 	}
 	if err := tester.Click("关闭 运行设置"); err != nil {
 		t.Fatalf("close the settings tab: %v", err)
 	}
 	frames(tester)
-	if len(state.board.pages) != 2 || state.activeBoardKind() != "" {
+	if len(state.board.pages) != 1 || state.activeBoardKind() != "" {
 		t.Fatalf("closing a tab returns to the board, pages %d kind %q", len(state.board.pages), state.activeBoardKind())
 	}
 	if !tester.HasText("Agent 面板窗口") {
@@ -274,7 +274,7 @@ func TestTheFunctionRailStaysCompactAndCentered(t *testing.T) {
 		t.Fatalf("the rail must stay compact, width %.1f", railWidth)
 	}
 	center := float32(trafficLightPosition().X) + 6.5
-	for _, label := range []string{"轨迹", "洞察", "任务", "能力", "设置"} {
+	for _, label := range []string{"轨迹", "洞察", "编队", "能力", "设置"} {
 		rect, ok := tester.Find(label)
 		if !ok {
 			t.Fatalf("the rail lost %q, texts %q", label, tester.Texts())
@@ -289,7 +289,7 @@ func TestTheFunctionRailSpacesItsIconsApart(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 	previousBottom := float32(-1)
-	for _, label := range []string{"轨迹", "洞察", "任务", "能力", "设置"} {
+	for _, label := range []string{"轨迹", "洞察", "编队", "能力", "设置"} {
 		rect, ok := tester.Find(label)
 		if !ok {
 			t.Fatalf("the rail lost %q, texts %q", label, tester.Texts())

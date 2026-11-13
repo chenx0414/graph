@@ -54,7 +54,7 @@ func TestTheAgentPageLoadsNodeRunEntries(t *testing.T) {
 		{ID: "p1", Kind: "project", Name: "13-Graph", ConversationID: "p1", Status: "running"},
 		{ID: "n2", ParentID: "p1", Kind: "node", Name: "worker", TaskID: "t1", NodeID: "worker", Status: "running"},
 	}}}
-	state.selectBoardPage(1)
+	state.openModule("fleet")
 	if err := state.openFleetAgentPageForTest("n2"); err != nil {
 		t.Fatalf("open the agent page: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestTheAgentPageReusesItsTabAndKeepsLongTitlesShort(t *testing.T) {
 	state.fleet = fleetState{conversationID: "g1", data: &fleetSnapshot{RootID: "g1", Agents: []fleetAgent{
 		{ID: "p1", Kind: "project", Name: long, ConversationID: "p1", Status: "running"},
 	}}}
-	state.selectBoardPage(1)
+	state.openModule("fleet")
 	if err := state.openFleetAgentPageForTest("p1"); err != nil {
 		t.Fatalf("open the agent page: %v", err)
 	}

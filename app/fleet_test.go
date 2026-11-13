@@ -21,33 +21,36 @@ var fleetPanelKinds = []string{
 	"fleet-artifacts",
 }
 
-func TestTheBoardRegistersAFixedFleetPage(t *testing.T) {
+func TestTheRailOpensTheFleetPage(t *testing.T) {
 	pages := defaultBoardPages()
-	if len(pages) != 2 {
-		t.Fatalf("the board must carry the whiteboard and the fleet page, pages %+v", pages)
+	if len(pages) != 1 || pages[0].ID != "board" || pages[0].Kind != "" {
+		t.Fatalf("the board starts with the whiteboard alone, pages %+v", pages)
 	}
-	if pages[0].ID != "board" || pages[0].Kind != "" || pages[0].Title != boardDefaultTitle {
-		t.Fatalf("the whiteboard must stay first and pinned, page %+v", pages[0])
+	state := newShellState("http://127.0.0.1:1", "tok")
+	state.openModule("fleet")
+	page := state.boardPage()
+	if page.ID != "fleet" || page.Kind != "fleet" || page.Title != "编队" {
+		t.Fatalf("the rail opens the fleet page, page %+v", page)
 	}
-	fleet := pages[1]
-	if fleet.ID != "fleet" || fleet.Kind != "fleet" || fleet.Title != "编队" {
-		t.Fatalf("the fleet page is fixed at 编队, page %+v", fleet)
-	}
-	if len(fleet.Panels) != len(fleetPanelKinds) {
-		t.Fatalf("the fleet page carries %d panels, want %d: %+v", len(fleet.Panels), len(fleetPanelKinds), fleet.Panels)
+	if len(page.Panels) != len(fleetPanelKinds) {
+		t.Fatalf("the fleet page carries %d panels, want %d: %+v", len(page.Panels), len(fleetPanelKinds), page.Panels)
 	}
 	for index, kind := range fleetPanelKinds {
 		wantKind := kind
 		if kind == "fleet-network" {
 			wantKind = "agent-network"
 		}
-		if fleet.Panels[index].ID != kind || fleet.Panels[index].Kind != wantKind {
-			t.Fatalf("fleet panel %d is %+v, want kind %q", index, fleet.Panels[index], wantKind)
+		if page.Panels[index].ID != kind || page.Panels[index].Kind != wantKind {
+			t.Fatalf("fleet panel %d is %+v, want kind %q", index, page.Panels[index], wantKind)
 		}
+	}
+	state.openModule("fleet")
+	if len(state.board.pages) != 2 {
+		t.Fatalf("opening the rail twice reuses the page, pages %+v", state.board.pages)
 	}
 }
 
-func TestTheFleetPageLoadsFixedAndCannotClose(t *testing.T) {
+func TestTheFleetPageClosesLikeAnyModule(t *testing.T) {
 	directory := t.TempDir()
 	payload, err := json.Marshal(boardFile{
 		Version: boardLayoutVersion,
@@ -61,25 +64,27 @@ func TestTheFleetPageLoadsFixedAndCannotClose(t *testing.T) {
 	}
 	state := newShellState("http://127.0.0.1:1", "tok")
 	state.loadBoard(directory)
+	if len(state.board.pages) != 1 {
+		t.Fatalf("a board without the fleet page keeps the whiteboard alone, pages %+v", state.board.pages)
+	}
+	state.openModule("fleet")
 	if len(state.board.pages) != 2 || state.board.pages[1].ID != "fleet" {
-		t.Fatalf("an older board must gain the fixed fleet page, pages %+v", state.board.pages)
+		t.Fatalf("the rail adds the fleet page after the whiteboard, pages %+v", state.board.pages)
 	}
 	state.closeBoardPage(1)
-	if len(state.board.pages) != 2 || state.board.pages[1].ID != "fleet" {
-		t.Fatalf("the fleet page must not close, pages %+v", state.board.pages)
+	if len(state.board.pages) != 1 || state.activeBoardKind() != "" {
+		t.Fatalf("the fleet page closes like a module, pages %+v", state.board.pages)
 	}
 	state.openModule("models")
-	if len(state.board.pages) != 3 || state.board.pages[1].ID != "fleet" || state.board.pages[2].Kind != "models" {
-		t.Fatalf("module pages stay after the fleet page, pages %+v", state.board.pages)
-	}
-	state.closeBoardPage(2)
-	if len(state.board.pages) != 2 || state.activeBoardKind() != "" {
-		t.Fatalf("closing the module page returns to the whiteboard, pages %+v active %d", state.board.pages, state.board.active)
+	state.openModule("fleet")
+	if len(state.board.pages) != 3 || state.board.pages[1].Kind != "models" || state.board.pages[2].ID != "fleet" {
+		t.Fatalf("module pages keep their order, pages %+v", state.board.pages)
 	}
 }
 
-func TestTheFleetTabLooksLikeTheWhiteboardAndHasNoClose(t *testing.T) {
+func TestTheFleetTabLooksLikeTheWhiteboardAndCloses(t *testing.T) {
 	state := newShellState("http://127.0.0.1:1", "tok")
+	state.openModule("fleet")
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 	boardTab, ok := tester.Find("标签页 白板")
 	if !ok {
@@ -95,10 +100,9 @@ func TestTheFleetTabLooksLikeTheWhiteboardAndHasNoClose(t *testing.T) {
 	if fleetTab.X <= boardTab.X {
 		t.Fatalf("the fleet tab must come after the whiteboard, fleet %+v board %+v", fleetTab, boardTab)
 	}
-	state.selectBoardPage(1)
 	tester = frames(tester)
-	if tester.HasText("关闭 编队") {
-		t.Fatalf("the fleet tab offers a close button, texts %q", tester.Texts())
+	if !tester.HasText("关闭 编队") {
+		t.Fatalf("the fleet tab closes like a module, texts %q", tester.Texts())
 	}
 	if tester.HasText("新建标签页") || tester.HasText("添加") {
 		t.Fatalf("the fleet page adds no plus entry, texts %q", tester.Texts())
@@ -170,7 +174,7 @@ func fleetSampleServer(w http.ResponseWriter, r *http.Request) {
 
 func openFleetTester(t *testing.T, state *shellState) *ui.Tester {
 	t.Helper()
-	state.selectBoardPage(1)
+	state.openModule("fleet")
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 	deadline := time.Now().Add(2 * time.Second)
 	for state.fleet.data == nil && state.fleet.failed == "" {
