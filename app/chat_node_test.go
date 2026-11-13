@@ -358,3 +358,46 @@ func TestRightClickingAnAgentCardOpensItsDetailPage(t *testing.T) {
 		t.Fatalf("the detail entry opens the agent page, page %+v", page)
 	}
 }
+
+func TestNodeChatMarksFinishedToolRunsAsDone(t *testing.T) {
+	fleet := ringGraphFleet()
+	node := fleetAgent{ID: "p1-n2", ParentID: "p1", Kind: "node", Name: "fleet-ui", TaskID: "tA", NodeID: "n2", Status: "stopped"}
+	mock := &nodeChatMock{
+		fleet: fleet,
+		run: `{"entries":[
+			{"seq":1,"id":"c1","role":"tool","kind":"call","text":"{\"name\":\"bash\"}","createdAt":1,"data":{"toolCallId":"call-1","toolName":"bash"}},
+			{"seq":2,"id":"r1","role":"tool","kind":"result","text":"ok","createdAt":2,"data":{"toolCallId":"call-1","toolName":"bash","isError":false}}
+		],"hasOlder":false}`,
+	}
+	state, tester := nodeChatShell(t, mock)
+	state.openFleetAgentChat(node)
+	tester = frames(tester)
+	for _, text := range tester.Texts() {
+		if strings.HasPrefix(text, "▸") && strings.Contains(text, "进行中") {
+			t.Fatalf("a finished tool run must not read as running, texts %q", tester.Texts())
+		}
+	}
+}
+
+func TestNodeChatMarksAnUnansweredToolCallAsRunning(t *testing.T) {
+	fleet := ringGraphFleet()
+	node := fleetAgent{ID: "p1-n2", ParentID: "p1", Kind: "node", Name: "fleet-ui", TaskID: "tA", NodeID: "n2", Status: "running"}
+	mock := &nodeChatMock{
+		fleet: fleet,
+		run: `{"entries":[
+			{"seq":1,"id":"c1","role":"tool","kind":"call","text":"{\"name\":\"bash\"}","createdAt":1,"data":{"toolCallId":"call-1","toolName":"bash"}}
+		],"hasOlder":false}`,
+	}
+	state, tester := nodeChatShell(t, mock)
+	state.openFleetAgentChat(node)
+	tester = frames(tester)
+	found := false
+	for _, text := range tester.Texts() {
+		if strings.HasPrefix(text, "▸") && strings.Contains(text, "进行中") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("an unanswered tool call reads as running, texts %q", tester.Texts())
+	}
+}

@@ -16,10 +16,21 @@ func parseNodeRunEntries(payload []byte) ([]transcriptMessage, bool, error) {
 			Text      string `json:"text"`
 			State     string `json:"state"`
 			CreatedAt int64  `json:"createdAt"`
+			Data      struct {
+				ToolCallID string `json:"toolCallId"`
+				ToolName   string `json:"toolName"`
+				IsError    *bool  `json:"isError"`
+			} `json:"data"`
 		} `json:"entries"`
 	}
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		return nil, false, err
+	}
+	answered := map[string]bool{}
+	for _, entry := range raw.Entries {
+		if entry.Kind == "result" && entry.Data.ToolCallID != "" {
+			answered[entry.Data.ToolCallID] = true
+		}
 	}
 	messages := []transcriptMessage{}
 	for _, entry := range raw.Entries {
@@ -30,6 +41,14 @@ func parseNodeRunEntries(payload []byte) ([]transcriptMessage, bool, error) {
 		message := transcriptMessage{
 			ID: entry.ID, Seq: entry.Seq, Role: entry.Role, Kind: entry.Kind,
 			Text: text, State: entry.State, CreatedAt: entry.CreatedAt,
+		}
+		if message.Role == "tool" {
+			message.Data.Tool = entry.Data.ToolName
+			message.Data.ToolCallID = entry.Data.ToolCallID
+			message.State = "running"
+			if entry.Kind == "result" || answered[entry.Data.ToolCallID] {
+				message.State = "done"
+			}
 		}
 		if message.ID == "" {
 			message.ID = "entry-" + formatSeq(entry.Seq)
