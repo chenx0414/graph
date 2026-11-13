@@ -92,7 +92,12 @@ func ListNodeEntries(store *TaskStore, taskId, nodeId string, query NodeEntryQue
 		rows := kernelRows(store.Db, `SELECT `+columns+` FROM node_entries
       WHERE task_id=? AND node_id=? AND seq<? ORDER BY seq DESC LIMIT ?`, taskId, nodeId, *query.Before, limit)
 		reverseNodeEntries(rows)
-		return NodeEntryPage{Entries: nodeEntryMap(rows, full), EntryCount: entryCount, Limit: limit, HasOlder: true, HasNewer: false}
+		hasOlder := false
+		if len(rows) > 0 {
+			hasOlder = kernelRow(store.Db, "SELECT seq FROM node_entries WHERE task_id=? AND node_id=? AND seq<? LIMIT 1",
+				taskId, nodeId, kernelInt(rows[0]["seq"])) != nil
+		}
+		return NodeEntryPage{Entries: nodeEntryMap(rows, full), EntryCount: entryCount, Limit: limit, HasOlder: hasOlder, HasNewer: false}
 	}
 	if query.After != nil {
 		after := int64(0)
