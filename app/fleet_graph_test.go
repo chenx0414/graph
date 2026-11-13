@@ -228,3 +228,15 @@ func TestFleetTopologyLayoutTerminatesOnCycles(t *testing.T) {
 		t.Fatalf("cycle nodes should still lay out: %+v", data.Nodes)
 	}
 }
+
+func TestGraphPageInitializesTheFleetAccentsItPaintsWith(t *testing.T) {
+	mock := &fleetGraphMock{topology: fleetTopologySample, fleet: ringGraphFleet()}
+	state, tester := fleetGraphTester(t, mock, ringGraphFleet())
+	state.fleet.accents = nil
+	frames(tester)
+	state.openModule("graph:tA")
+	tester = frames(tester)
+	if state.fleet.accents == nil {
+		t.Fatal("opening the graph page must initialize the accents used by its cards and edges")
+	}
+}

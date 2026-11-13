@@ -63,6 +63,9 @@ func (s *shellState) fleetGraphMessage(ctx *ui.Context, text string, color ui.Co
 }
 
 func (s *shellState) fleetGraphCanvas(ctx *ui.Context, data *fleetTopologyData) {
+	if s.fleet.accents == nil && s.fleet.data != nil {
+		s.fleetNetworkModels(s.fleet.data)
+	}
 	s.fleetHoverScope(s.boardPage().ID)
 	world := ui.Box(ctx).Width(data.Width).Height(data.Height)
 	world.Draw(func(p *ui.Painter, r ui.Rect) {
