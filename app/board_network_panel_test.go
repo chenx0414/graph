@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -313,5 +314,36 @@ func TestTheFleetSceneCarriesColoredEdges(t *testing.T) {
 		if len(edge.Points) < 2 || edge.Color.A == 0 {
 			t.Fatalf("an edge needs points and a color, edge %+v", edge)
 		}
+	}
+}
+
+func TestTheGraphAgentNetworkPanelKeepsTheTopologyItLoaded(t *testing.T) {
+	node := fleetAgent{ID: "p1-n1", ParentID: "p1", Kind: "node", Name: "planner", TaskID: "tA", NodeID: "n2", Status: "running"}
+	mock := &nodeChatMock{
+		fleet:    networkPanelFleet(),
+		run:      `{"entries":[{"seq":1,"id":"a1","role":"assistant","kind":"message","text":"节点在干活","createdAt":1}],"hasOlder":false}`,
+		topology: `{"taskId":"tA","nodes":[{"id":"n2","kind":"task","status":"running","label":"planner"}],"edges":[]}`,
+	}
+	state, tester := nodeChatShell(t, mock)
+	state.openFleetAgentChat(node)
+	for index := 0; index < 12; index++ {
+		tester = frames(tester)
+	}
+	if state.boardNet.topology == nil {
+		t.Fatalf("the panel keeps the graph topology it loaded, state %+v", state.boardNet)
+	}
+	if !tester.HasText("图节点 planner") {
+		t.Fatalf("the graph agent network renders its graph, texts %q", tester.Texts())
+	}
+	mock.mu.Lock()
+	asked := 0
+	for _, path := range mock.asked {
+		if strings.HasSuffix(path, "/graph/topology") {
+			asked++
+		}
+	}
+	mock.mu.Unlock()
+	if asked > 2 {
+		t.Fatalf("the panel must not reload the same topology every frame, asked %d times", asked)
 	}
 }

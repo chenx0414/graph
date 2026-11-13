@@ -28,6 +28,7 @@ type netScene struct {
 
 type netPanelState struct {
 	key        string
+	topoKey    string
 	page       string
 	generation int
 	loading    bool
@@ -81,7 +82,7 @@ func (s *shellState) panelChatNetwork(ctx *ui.Context, scope string) {
 	}
 	key := networkSceneKey(scope)
 	if state.key != key || !sameNetScene(state.scene, scene) {
-		if state.key != key {
+		if state.key != key || state.scene.mode != scene.mode || state.scene.width != scene.width || state.scene.height != scene.height {
 			state.view = infiniteCanvas{}
 		}
 		state.key = key
@@ -277,8 +278,8 @@ func (s *shellState) graphNetScene(ctx *ui.Context, data *fleetTopologyData) net
 func (s *shellState) ensureNetGraph(scope chatScope) {
 	state := &s.boardNet
 	key := scope.key()
-	if state.key != key {
-		state.key = key
+	if state.topoKey != key {
+		state.topoKey = key
 		state.topology = nil
 		state.failed = ""
 		state.loading = false
@@ -301,7 +302,7 @@ func (s *shellState) ensureNetGraph(scope chatScope) {
 			}
 		}
 		s.updates.post(s.window, func() {
-			if s.boardNet.key != key || s.boardNet.generation != generation || s.api != api {
+			if s.boardNet.topoKey != key || s.boardNet.generation != generation || s.api != api {
 				return
 			}
 			s.boardNet.loading = false
@@ -317,7 +318,7 @@ func (s *shellState) ensureNetGraph(scope chatScope) {
 
 func (s *shellState) refreshNetGraph(scope chatScope) {
 	state := &s.boardNet
-	if state.key != scope.key() || state.loading || state.topology == nil {
+	if state.topoKey != scope.key() || state.loading || state.topology == nil {
 		return
 	}
 	state.generation++
@@ -334,7 +335,7 @@ func (s *shellState) refreshNetGraph(scope chatScope) {
 			}
 		}
 		s.updates.post(s.window, func() {
-			if err != nil || s.boardNet.key != scope.key() || s.boardNet.generation != generation || s.api != api {
+			if err != nil || s.boardNet.topoKey != scope.key() || s.boardNet.generation != generation || s.api != api {
 				return
 			}
 			s.boardNet.topology = data
