@@ -72,8 +72,8 @@ func TestTheWindowShowsFourPanesLeftToRight(t *testing.T) {
 	if !(rail.X < conversation.X && conversation.X+conversation.W <= composer.X && composer.X < board.X) {
 		t.Fatalf("panes out of order: rail %+v conversation %+v composer %+v board %+v", rail, conversation, composer, board)
 	}
-	if !tester.HasText("任务清单") || !tester.HasText("轨迹量化窗口") || !tester.HasText("洞察概览窗口") {
-		t.Fatalf("the whiteboard must present tasks, trajectory and insights, texts %q", tester.Texts())
+	if !tester.HasText("Agent 面板窗口") || !tester.HasText("轨迹量化窗口") || !tester.HasText("洞察概览窗口") {
+		t.Fatalf("the whiteboard must present the agent panel, trajectory and insights, texts %q", tester.Texts())
 	}
 	if !tester.HasText("来自主控") {
 		t.Fatalf("the chat pane must open the main agent conversation, texts %q", tester.Texts())
@@ -133,7 +133,7 @@ func TestTheRailOpensATabForTheModule(t *testing.T) {
 		t.Fatalf("click the board tab: %v", err)
 	}
 	frames(tester)
-	if kind := state.activeBoardKind(); kind != "" || !tester.HasText("任务清单") {
+	if kind := state.activeBoardKind(); kind != "" || !tester.HasText("Agent 面板窗口") {
 		t.Fatalf("the board tab must come back: kind %q texts %q", kind, tester.Texts())
 	}
 }
@@ -249,7 +249,7 @@ func TestTabsSwitchAndCloseWithoutLosingTheBoard(t *testing.T) {
 	if len(state.board.pages) != 2 || state.activeBoardKind() != "" {
 		t.Fatalf("closing a tab returns to the board, pages %d kind %q", len(state.board.pages), state.activeBoardKind())
 	}
-	if !tester.HasText("任务清单") {
+	if !tester.HasText("Agent 面板窗口") {
 		t.Fatalf("the board comes back with its modules, texts %q", tester.Texts())
 	}
 }

@@ -41,7 +41,7 @@ type boardFile struct {
 	Active  int          `json:"active"`
 }
 
-const boardLayoutVersion = 7
+const boardLayoutVersion = 8
 
 const boardDefaultTitle = "白板"
 
@@ -51,7 +51,7 @@ const boardMinPaneHeight = 90
 
 func defaultBoardPanels() []boardPanel {
 	return []boardPanel{
-		{ID: "tasks", Kind: "tasks"},
+		{ID: "agent", Kind: "agent"},
 		{ID: "artifacts", Kind: "artifacts"},
 		{ID: "trajectory", Kind: "trajectory"},
 		{ID: "insights", Kind: "insights"},
@@ -61,7 +61,7 @@ func defaultBoardPanels() []boardPanel {
 func defaultBoardLayout() boardNode {
 	return boardNode{Kind: "split", Axis: "column", Children: []boardSlot{
 		{Weight: 1, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
-			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "tasks"}},
+			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "agent"}},
 			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "artifacts"}},
 		}}},
 		{Weight: 1, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
@@ -146,6 +146,8 @@ func boardPanelTitle(kind string) string {
 		return "会话排行"
 	case "tasks":
 		return "任务清单"
+	case "agent":
+		return "Agent 面板"
 	case "capabilities":
 		return "能力库"
 	case "settings":
@@ -213,6 +215,9 @@ func (s *shellState) loadBoard(stateDir string) {
 					removeBoardPanelFromLayout(&page.Layout, panel.ID)
 					removedPanels = true
 					continue
+				}
+				if panel.Kind == "tasks" && file.Version < boardLayoutVersion {
+					panel.Kind = "agent"
 				}
 				kept = append(kept, panel)
 			}

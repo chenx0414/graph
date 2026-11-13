@@ -17,6 +17,8 @@ func (s *shellState) boardPanelBody(ctx *ui.Context, panel *boardPanel) {
 		s.panelConversation(ctx)
 	case "history":
 		s.panelHistory(ctx)
+	case "agent":
+		s.panelChatAgent(ctx)
 	case "trajectory":
 		s.panelTrajectory(ctx)
 	case "insights":

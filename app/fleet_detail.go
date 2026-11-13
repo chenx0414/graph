@@ -236,7 +236,7 @@ func (s *shellState) panelAgentDetail(ctx *ui.Context) {
 	}
 	s.ensureFleetDetail(*agent)
 	accent := fleetAccent(*agent, fleetGroupIndex(data, *agent))
-	s.agentDetailHeader(ctx, *agent, data, accent)
+	s.agentDetailHeader(ctx, *agent, data, accent, true)
 	s.agentDetailStats(ctx, *agent)
 	body := ui.Row(ctx).FillWidth().Gap(th.Space(2.5))
 	body.Children(func() {
@@ -252,7 +252,7 @@ func (s *shellState) panelAgentDetail(ctx *ui.Context) {
 	})
 }
 
-func (s *shellState) agentDetailHeader(ctx *ui.Context, agent fleetAgent, data *fleetSnapshot, accent ui.Color) {
+func (s *shellState) agentDetailHeader(ctx *ui.Context, agent fleetAgent, data *fleetSnapshot, accent ui.Color, withAction bool) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	card := ui.Column(ctx).FillWidth().Padding(th.Space(2)).Gap(th.Space(1)).
 		Radius(t.Radius.Lg).Background(t.Card).Border(gwtheme.Stroke, accent.Alpha(0.45))
@@ -287,11 +287,13 @@ func (s *shellState) agentDetailHeader(ctx *ui.Context, agent fleetAgent, data *
 				fleetEllipsis(ctx, joinFleetMeta(meta), t.Text.Sm, t.Muted)
 				fleetEllipsis(ctx, "当前操作 · "+fleetOperation(agent), t.Text.Sm, t.Muted)
 			})
-			actions := ui.Row(ctx).Gap(th.Space(1)).AlignItems(ui.Center)
-			actions.Children(func() {
-				button := kit.Button(ctx, "打开聊天", kit.ButtonOpts{Variant: kit.Outline, Size: kit.SizeSm})
-				button.OnClick(func() { go s.openFleetAgentChat(agent) })
-			})
+			if withAction {
+				actions := ui.Row(ctx).Gap(th.Space(1)).AlignItems(ui.Center)
+				actions.Children(func() {
+					button := kit.Button(ctx, "打开聊天", kit.ButtonOpts{Variant: kit.Outline, Size: kit.SizeSm})
+					button.OnClick(func() { go s.openFleetAgentChat(agent) })
+				})
+			}
 		})
 	})
 }
@@ -457,6 +459,8 @@ func (s *shellState) agentDetailRelations(ctx *ui.Context, data *fleetSnapshot, 
 			button := kit.Button(ctx, "父级 "+fleetAgentLabel(row), kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeXs})
 			button.Label("关系 Agent " + fleetAgentLabel(row))
 			button.Justify(ui.Start).FillWidth().OnClick(func() { go s.openFleetAgentChat(row) })
+		} else if agent.ParentID != "" {
+			kit.Text(ctx, "父级不在当前编队范围里。", t.Text.Xs).TextColor(t.Muted)
 		} else {
 			kit.Text(ctx, "它是编队的根。", t.Text.Xs).TextColor(t.Muted)
 		}

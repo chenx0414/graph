@@ -25,14 +25,14 @@ func TestTheBoardKeepsFixedNonOverlappingPartitions(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 	rects := map[string]ui.Rect{}
-	for _, kind := range []string{"tasks", "artifacts", "trajectory", "insights"} {
+	for _, kind := range []string{"agent", "artifacts", "trajectory", "insights"} {
 		rect, ok := tester.Find(boardPanelTitle(kind) + "窗口")
 		if !ok {
 			t.Fatalf("%s never rendered, texts %q", kind, tester.Texts())
 		}
 		rects[kind] = rect
 	}
-	names := []string{"tasks", "artifacts", "trajectory", "insights"}
+	names := []string{"agent", "artifacts", "trajectory", "insights"}
 	for first := 0; first < len(names); first++ {
 		for second := first + 1; second < len(names); second++ {
 			a, b := rects[names[first]], rects[names[second]]
@@ -41,13 +41,13 @@ func TestTheBoardKeepsFixedNonOverlappingPartitions(t *testing.T) {
 			}
 		}
 	}
-	if rects["tasks"].Y != rects["artifacts"].Y || rects["trajectory"].Y != rects["insights"].Y {
+	if rects["agent"].Y != rects["artifacts"].Y || rects["trajectory"].Y != rects["insights"].Y {
 		t.Fatalf("the board keeps two fixed rows: %+v", rects)
 	}
-	if rects["trajectory"].Y <= rects["tasks"].Y {
+	if rects["trajectory"].Y <= rects["agent"].Y {
 		t.Fatalf("trajectory and insights sit below tasks: %+v", rects)
 	}
-	if rects["tasks"].X != rects["trajectory"].X || rects["artifacts"].X != rects["insights"].X {
+	if rects["agent"].X != rects["trajectory"].X || rects["artifacts"].X != rects["insights"].X {
 		t.Fatalf("the board keeps two fixed columns: %+v", rects)
 	}
 }
@@ -55,7 +55,7 @@ func TestTheBoardKeepsFixedNonOverlappingPartitions(t *testing.T) {
 func TestDraggingAPanelBodySwapsItsPartition(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
-	tasks := state.board.rects["tasks"]
+	tasks := state.board.rects["agent"]
 	artifacts := state.board.rects["artifacts"]
 	if tasks.W <= 0 || artifacts.W <= 0 {
 		t.Fatalf("the board must know its partitions, rects %+v", state.board.rects)
@@ -70,7 +70,7 @@ func TestDraggingAPanelBodySwapsItsPartition(t *testing.T) {
 	tester.Release(endX, endY)
 	frames(tester)
 	page := state.boardPage()
-	if leaves := boardLeafIDs(&page.Layout); len(leaves) != 4 || leaves[0] != "artifacts" || leaves[1] != "tasks" || leaves[2] != "trajectory" || leaves[3] != "insights" {
+	if leaves := boardLeafIDs(&page.Layout); len(leaves) != 4 || leaves[0] != "artifacts" || leaves[1] != "agent" || leaves[2] != "trajectory" || leaves[3] != "insights" {
 		t.Fatalf("a center drop swaps the two partitions, leaves %v", leaves)
 	}
 }
@@ -78,7 +78,7 @@ func TestDraggingAPanelBodySwapsItsPartition(t *testing.T) {
 func TestDraggingToAPartitionEdgeSplitsIt(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
-	tasks := state.board.rects["tasks"]
+	tasks := state.board.rects["agent"]
 	artifacts := state.board.rects["artifacts"]
 	if tasks.W <= 0 || artifacts.W <= 0 {
 		t.Fatalf("the board must know its partitions, rects %+v", state.board.rects)
@@ -105,8 +105,8 @@ func TestDraggingToAPartitionEdgeSplitsIt(t *testing.T) {
 		seen[id] = true
 	}
 	after := state.board.rects
-	if after["tasks"].X >= after["artifacts"].X {
-		t.Fatalf("dropping on the left edge puts the dragged pane before the target: tasks %+v artifacts %+v", after["tasks"], after["artifacts"])
+	if after["agent"].X >= after["artifacts"].X {
+		t.Fatalf("dropping on the left edge puts the dragged pane before the target: tasks %+v artifacts %+v", after["agent"], after["artifacts"])
 	}
 }
 
@@ -117,7 +117,7 @@ func TestADividerDragResizesBothPartitions(t *testing.T) {
 	if !ok {
 		t.Fatalf("the split divider never rendered, texts %q", tester.Texts())
 	}
-	tasksBefore, _ := tester.Find(boardPanelTitle("tasks") + "窗口")
+	tasksBefore, _ := tester.Find(boardPanelTitle("agent") + "窗口")
 	x, y := divider.X+divider.W/2, divider.Y+divider.H/2
 	tester.Press(x, y)
 	for step := 1; step <= 10; step++ {
@@ -126,7 +126,7 @@ func TestADividerDragResizesBothPartitions(t *testing.T) {
 	}
 	tester.Release(x+80, y)
 	frames(tester)
-	tasksAfter, _ := tester.Find(boardPanelTitle("tasks") + "窗口")
+	tasksAfter, _ := tester.Find(boardPanelTitle("agent") + "窗口")
 	if tasksAfter.W <= tasksBefore.W {
 		t.Fatalf("dragging the divider right must widen the left partition: before %.1f after %.1f", tasksBefore.W, tasksAfter.W)
 	}
@@ -135,7 +135,7 @@ func TestADividerDragResizesBothPartitions(t *testing.T) {
 func TestAnOldFreeformBoardMigratesIntoPartitions(t *testing.T) {
 	directory := t.TempDir()
 	legacy := `{"version":3,"pages":[{"id":"board","title":"白板","panels":[
-		{"id":"tasks","kind":"tasks","slot":0},
+		{"id":"agent","kind":"agent","slot":0},
 		{"id":"artifacts","kind":"artifacts","slot":1}
 	]}]}`
 	if err := os.WriteFile(filepath.Join(directory, "whiteboard.json"), []byte(legacy), 0o600); err != nil {
@@ -144,7 +144,7 @@ func TestAnOldFreeformBoardMigratesIntoPartitions(t *testing.T) {
 	state := newShellState("http://127.0.0.1:1", "tok")
 	state.loadBoard(directory)
 	page := state.boardPage()
-	if leaves := boardLeafIDs(&page.Layout); len(leaves) != 4 || leaves[0] != "tasks" || leaves[1] != "artifacts" {
+	if leaves := boardLeafIDs(&page.Layout); len(leaves) != 4 || leaves[0] != "agent" || leaves[1] != "artifacts" {
 		t.Fatalf("a freeform board migrates into a partition tree and gains the dashboard cards, leaves %v", leaves)
 	}
 	if page.Kind != "" {
@@ -156,13 +156,13 @@ func TestTheBoardRemembersItsLayout(t *testing.T) {
 	directory := t.TempDir()
 	first := newShellState("http://127.0.0.1:1", "tok")
 	first.loadBoard(directory)
-	swapBoardPanels(&first.boardPage().Layout, "tasks", "artifacts")
+	swapBoardPanels(&first.boardPage().Layout, "agent", "artifacts")
 	first.saveBoard()
 
 	second := newShellState("http://127.0.0.1:1", "tok")
 	second.loadBoard(directory)
 	leaves := boardLeafIDs(&second.boardPage().Layout)
-	if len(leaves) != 4 || leaves[0] != "artifacts" || leaves[1] != "tasks" {
+	if len(leaves) != 4 || leaves[0] != "artifacts" || leaves[1] != "agent" {
 		t.Fatalf("saved partitions not restored: leaves %v", leaves)
 	}
 }
@@ -221,7 +221,7 @@ func TestLoadingAnOldBoardAddsTheTrajectoryAndInsightsCards(t *testing.T) {
 	state := fourPaneShell(t)
 	dir := t.TempDir()
 	legacy := `{"version":4,"pages":[{"id":"board","title":"白板","panels":[
-		{"id":"tasks","kind":"tasks","slot":0},
+		{"id":"agent","kind":"agent","slot":0},
 		{"id":"artifacts","kind":"artifacts","slot":1},
 		{"id":"overview","kind":"overview","slot":2}
 	]}]}`
@@ -239,8 +239,15 @@ func TestLoadingAnOldBoardAddsTheTrajectoryAndInsightsCards(t *testing.T) {
 	}
 }
 
+func showTaskListBoard(state *shellState) {
+	page := &state.board.pages[0]
+	page.Panels = []boardPanel{{ID: "tasks", Kind: "tasks"}}
+	page.Layout = boardNode{Kind: "panel", PanelID: "tasks"}
+}
+
 func TestTheWhiteboardHeaderSlidesOverItsContentWithoutMovingIt(t *testing.T) {
 	state := fourPaneShell(t)
+	showTaskListBoard(state)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 	card, ok := tester.Find(boardPanelTitle("tasks") + "窗口")
 	if !ok {
@@ -269,6 +276,7 @@ func TestTheWhiteboardHeaderSlidesOverItsContentWithoutMovingIt(t *testing.T) {
 
 func TestTheWhiteboardKeepsTheCardScrollWhenThePointerLeaves(t *testing.T) {
 	state := fourPaneShell(t)
+	showTaskListBoard(state)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 	card, ok := tester.Find(boardPanelTitle("tasks") + "窗口")
 	if !ok {
@@ -328,7 +336,7 @@ func TestTheWhiteboardTakesTheListBackgroundAndLiftsItsCards(t *testing.T) {
 	if !ok {
 		t.Fatalf("the whiteboard tab never rendered, texts %q", tester.Texts())
 	}
-	card, ok := tester.Find(boardPanelTitle("tasks") + "窗口")
+	card, ok := tester.Find(boardPanelTitle("agent") + "窗口")
 	if !ok {
 		t.Fatalf("the tasks card never rendered, texts %q", tester.Texts())
 	}
@@ -360,7 +368,7 @@ func TestTheWhiteboardTabIsPinnedAlignedAndLarger(t *testing.T) {
 	if !ok {
 		t.Fatalf("the whiteboard tab never rendered, texts %q", tester.Texts())
 	}
-	card, ok := tester.Find(boardPanelTitle("tasks") + "窗口")
+	card, ok := tester.Find(boardPanelTitle("agent") + "窗口")
 	if !ok {
 		t.Fatalf("the whiteboard card never rendered, texts %q", tester.Texts())
 	}
