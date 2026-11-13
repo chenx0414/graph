@@ -46,19 +46,31 @@ func (scene netScene) hit(x, y float32) bool {
 	return false
 }
 
-func (s *shellState) panelChatNetwork(ctx *ui.Context) {
-	t := gwtheme.Of(ctx)
-	scope := s.chatScope()
-	if scope.key() == "" {
-		s.boardNote(ctx, "先打开一个对话，这里会显示它所在的编队。")
-		return
+func (s *shellState) panelScope() string {
+	page := s.boardPage()
+	if page == nil {
+		return ""
 	}
-	scene, note := s.networkScene(scope)
+	for index := range page.Panels {
+		if page.Panels[index].Kind == "agent-network" {
+			return page.Panels[index].Scope
+		}
+	}
+	return page.Scope
+}
+
+func (s *shellState) panelChatNetwork(ctx *ui.Context, scope string) {
+	t := gwtheme.Of(ctx)
+	scene, note := s.networkScene(ctx, scope)
 	if note != "" {
 		kit.Text(ctx, note, t.Text.Sm).TextColor(t.Muted)
 		return
 	}
 	if len(scene.nodes) == 0 {
+		if scope == "fleet" {
+			s.boardNote(ctx, "编队还没有可展示的 Agent。")
+			return
+		}
 		s.boardNote(ctx, "这里还没有可展示的内容。")
 		return
 	}
@@ -67,14 +79,15 @@ func (s *shellState) panelChatNetwork(ctx *ui.Context) {
 		state.page = page.ID
 		state.view.fit = false
 	}
-	if state.key != scope.key() || !sameNetScene(state.scene, scene) {
-		if state.key != scope.key() {
+	key := networkSceneKey(scope)
+	if state.key != key || !sameNetScene(state.scene, scene) {
+		if state.key != key {
 			state.view = infiniteCanvas{}
 		}
-		state.key = scope.key()
+		state.key = key
 		state.scene = scene
 	}
-	s.networkCaption(ctx, scene)
+	s.networkCaption(ctx, scene, scope)
 	s.infiniteView(ctx, &state.view, scene.width, scene.height, scene.polylines, scene.hit, func(ctx *ui.Context, view *infiniteCanvas) {
 		s.networkCards(ctx, scene, view)
 	})
@@ -95,12 +108,16 @@ func sameNetScene(left, right netScene) bool {
 	return true
 }
 
-func (s *shellState) networkCaption(ctx *ui.Context, scene netScene) {
+func (s *shellState) networkCaption(ctx *ui.Context, scene netScene, scope string) {
 	t := gwtheme.Of(ctx)
 	label := scene.mode
 	switch scene.mode {
 	case "fleet":
-		label = "编队 · Main 中心 · Thread 环"
+		if scope == "fleet" && s.fleet.data != nil {
+			label = formatFleetCount(len(s.fleet.data.Agents)) + " 个 Agent · " + formatFleetCount(s.fleet.data.Stats.Running) + " 运行中 · Main 中心 · Thread 环 · Graph 环"
+		} else {
+			label = "编队 · Main 中心 · Thread 环"
+		}
 	case "thread":
 		label = "线程 · Graph 环"
 	case "graph":
@@ -129,7 +146,31 @@ func (s *shellState) networkCards(ctx *ui.Context, scene netScene, view *infinit
 	}
 }
 
-func (s *shellState) networkScene(scope chatScope) (netScene, string) {
+func networkSceneKey(scope string) string {
+	if scope == "fleet" {
+		return "fleet"
+	}
+	return "chat"
+}
+
+func (s *shellState) networkScene(ctx *ui.Context, scope string) (netScene, string) {
+	if scope == "fleet" {
+		data := s.fleetData(ctx)
+		if data == nil {
+			return netScene{}, ""
+		}
+		s.fleetNetworkModels(data)
+		return fleetNetScene(data), ""
+	}
+	chat := s.chatScope()
+	if chat.key() == "" {
+		return netScene{}, "先打开一个对话，这里会显示它所在的编队。"
+	}
+	scene, note := s.networkSceneForChat(chat)
+	return scene, note
+}
+
+func (s *shellState) networkSceneForChat(scope chatScope) (netScene, string) {
 	if scope.Kind == "node" {
 		state := &s.boardNet
 		s.ensureNetGraph(scope)

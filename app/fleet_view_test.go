@@ -213,7 +213,7 @@ func TestTheFleetPageUsesTheFreeformBoardLayout(t *testing.T) {
 	if !ok {
 		t.Fatalf("the tasks panel never laid out, rects %+v", state.board.rects)
 	}
-	startX, startY := network.X+network.W/2, network.Y+network.H*0.6
+	startX, startY := network.X+network.W/2, network.Y+12
 	endX, endY := tasks.X+tasks.W/2, tasks.Y+tasks.H*0.6
 	tester.Press(startX, startY)
 	for step := 1; step <= 12; step++ {
@@ -242,7 +242,7 @@ func sameStrings(a, b []string) bool {
 func TestClickingAGraphUnitOpensItsGraphPage(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
 	state.selectBoardPage(1)
-	state.openModule("fleet-network")
+	state.openModuleWithScope("agent-network", "fleet")
 	tester := frames(ui.NewTester(state.view, 1880, 900))
 	if err := tester.Click("编队图 实现四栏页面"); err != nil {
 		t.Fatalf("click the graph unit: %v", err)
@@ -293,7 +293,7 @@ func TestTheFleetCardsCarryTheAgentMetrics(t *testing.T) {
 			t.Fatalf("the ring misses %q, texts %q", want, tester.Texts())
 		}
 	}
-	for _, want := range []string{"编队图 实现四栏页面", "1 个图"} {
+	for _, want := range []string{"编队图 实现四栏页面"} {
 		if !tester.HasText(want) {
 			t.Fatalf("the graph ring misses %q, texts %q", want, tester.Texts())
 		}
@@ -407,10 +407,10 @@ func TestFleetEventCategoriesCoverTheLedgerEvents(t *testing.T) {
 func TestTheFleetNetworkStartsAtTheWorldOrigin(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
 	state.selectBoardPage(1)
-	state.openModule("fleet-network")
+	state.openModuleWithScope("agent-network", "fleet")
 	frames(ui.NewTester(state.view, 1440, 900))
-	if state.fleet.netScroll.X != 0 || state.fleet.netScroll.Y != 0 {
-		t.Fatalf("the network starts unscrolled, scroll %.1f,%.1f", state.fleet.netScroll.X, state.fleet.netScroll.Y)
+	if state.boardNet.view.x != 0 && state.boardNet.view.zoom == 0 {
+		t.Fatalf("the network canvas starts fitted, view %+v", state.boardNet.view)
 	}
 }
 

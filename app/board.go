@@ -389,7 +389,7 @@ func (s *shellState) boardPanelHeader(ctx *ui.Context, panel *boardPanel, freefo
 			return
 		}
 		iconAction(ctx, iconFit, "在新标签页打开", false, 6, func() {
-			s.openModule(panel.Kind)
+			s.openModuleWithScope(panel.Kind, panel.Scope)
 		})
 		iconAction(ctx, iconClose, "移除", false, 6, func() {
 			s.closeModule(panel.ID)

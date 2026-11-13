@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func networkPanelFleet() *fleetSnapshot {
 	data := &fleetSnapshot{RootID: "g1"}
@@ -173,5 +177,96 @@ func TestTheNetworkPanelFullScreenShowsTheSameNetwork(t *testing.T) {
 	}
 	if !tester.HasText("编队 · Main 中心 · Thread 环 · 拖拽平移 · 滚轮缩放") || !tester.HasText("居中") {
 		t.Fatalf("the full screen keeps the same network canvas, texts %q", tester.Texts())
+	}
+}
+
+func TestTheFleetAndWhiteboardNetworksAreOnePanel(t *testing.T) {
+	state := fleetServerShell(t, fleetSampleServer)
+	openFleetTester(t, state).Frame()
+	fleet := state.boardPage()
+	var kind, scope string
+	for _, panel := range fleet.Panels {
+		if panel.ID == "fleet-network" {
+			kind, scope = panel.Kind, panel.Scope
+		}
+	}
+	if kind != "agent-network" || scope != "fleet" {
+		t.Fatalf("the fleet page uses the shared agent network panel, panel kind %q scope %q", kind, scope)
+	}
+	for _, page := range state.board.pages {
+		for _, panel := range page.Panels {
+			if panel.Kind == "fleet-network" {
+				t.Fatalf("no page keeps a second network panel, page %+v", page)
+			}
+		}
+	}
+}
+
+func TestFullScreeningTheNetworkReusesOnePage(t *testing.T) {
+	state := fleetServerShell(t, fleetSampleServer)
+	tester := openFleetTester(t, state)
+	state.openModuleWithScope("agent-network", "fleet")
+	tester = frames(tester)
+	if page := state.boardPage(); page.Kind != "agent-network" || page.Scope != "fleet" {
+		t.Fatalf("the fleet network opens its scoped page, page %+v", page)
+	}
+	first := len(state.board.pages)
+	state.selectBoardPage(0)
+	state.openModuleWithScope("agent-network", "")
+	tester = frames(tester)
+	if len(state.board.pages) != first {
+		t.Fatalf("opening the network from the whiteboard reuses the page, pages %d want %d", len(state.board.pages), first)
+	}
+	if page := state.boardPage(); page.Scope != "" || page.Kind != "agent-network" {
+		t.Fatalf("the reused page follows the entry point's scope, page %+v", page)
+	}
+	if !tester.HasText("居中") || !tester.HasText("无限画布") {
+		t.Fatalf("both entry points show the same canvas, texts %q", tester.Texts())
+	}
+}
+
+func TestLoadingAnOldBoardRenamesTheNetworkToTheSharedPanel(t *testing.T) {
+	dir := t.TempDir()
+	saved := `{"version":9,"active":1,"pages":[
+		{"id":"board","title":"白板","panels":[{"id":"agent","kind":"agent"},{"id":"agent-network","kind":"agent-network"}],
+		 "layout":{"kind":"split","axis":"row","children":[
+			{"weight":1,"node":{"kind":"panel","panelId":"agent"}},
+			{"weight":1,"node":{"kind":"panel","panelId":"agent-network"}}]}},
+		{"id":"fleet","title":"编队","kind":"fleet","panels":[
+			{"id":"fleet-kpi","kind":"fleet-kpi"},
+			{"id":"fleet-network","kind":"fleet-network"}],
+		 "layout":{"kind":"split","axis":"row","children":[
+			{"weight":1,"node":{"kind":"panel","panelId":"fleet-kpi"}},
+			{"weight":1,"node":{"kind":"panel","panelId":"fleet-network"}}]}},
+		{"id":"tab-old","title":"Agent 网络","kind":"fleet-network","panels":[{"id":"fleet-network","kind":"fleet-network"}],
+		 "layout":{"kind":"panel","panelId":"fleet-network"}},
+		{"id":"tab-new","title":"Agent 网络","kind":"agent-network","panels":[{"id":"agent-network","kind":"agent-network"}],
+		 "layout":{"kind":"panel","panelId":"agent-network"}}]}`
+	if err := os.WriteFile(filepath.Join(dir, "whiteboard.json"), []byte(saved), 0o600); err != nil {
+		t.Fatalf("write whiteboard: %v", err)
+	}
+	state := newShellState("http://127.0.0.1:1", "")
+	state.loadBoard(dir)
+	fleet := state.board.pages[1]
+	if fleet.ID != "fleet" {
+		t.Fatalf("the fleet page stays first after the board, pages %+v", state.board.pages)
+	}
+	networkPanel := boardPanel{}
+	for _, panel := range fleet.Panels {
+		if panel.ID == "fleet-network" {
+			networkPanel = panel
+		}
+	}
+	if networkPanel.Kind != "agent-network" || networkPanel.Scope != "fleet" {
+		t.Fatalf("the fleet network becomes the shared scoped panel, panel %+v", networkPanel)
+	}
+	modulePages := 0
+	for _, page := range state.board.pages {
+		if page.Kind == "agent-network" {
+			modulePages++
+		}
+	}
+	if modulePages != 1 {
+		t.Fatalf("the old network tabs collapse into one page, pages %+v", state.board.pages)
 	}
 }

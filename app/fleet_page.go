@@ -10,9 +10,11 @@ import (
 
 func defaultFleetPanels() []boardPanel {
 	panels := make([]boardPanel, 0, 6)
-	for _, kind := range []string{"fleet-kpi", "fleet-network", "fleet-collaboration", "fleet-tasks", "fleet-events", "fleet-artifacts"} {
+	for _, kind := range []string{"fleet-kpi", "fleet-collaboration", "fleet-tasks", "fleet-events", "fleet-artifacts"} {
 		panels = append(panels, boardPanel{ID: kind, Kind: kind})
 	}
+	network := boardPanel{ID: "fleet-network", Kind: "agent-network", Scope: "fleet"}
+	panels = append(panels[:1], append([]boardPanel{network}, panels[1:]...)...)
 	return panels
 }
 

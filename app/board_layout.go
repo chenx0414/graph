@@ -9,9 +9,10 @@ import (
 )
 
 type boardPanel struct {
-	ID   string `json:"id"`
-	Kind string `json:"kind"`
-	Slot int    `json:"slot,omitempty"`
+	ID    string `json:"id"`
+	Kind  string `json:"kind"`
+	Scope string `json:"scope,omitempty"`
+	Slot  int    `json:"slot,omitempty"`
 }
 
 type boardSlot struct {
@@ -30,6 +31,7 @@ type boardPage struct {
 	ID     string       `json:"id"`
 	Title  string       `json:"title"`
 	Kind   string       `json:"kind,omitempty"`
+	Scope  string       `json:"scope,omitempty"`
 	Panels []boardPanel `json:"panels"`
 	Layout boardNode    `json:"layout"`
 }
@@ -41,7 +43,7 @@ type boardFile struct {
 	Active  int          `json:"active"`
 }
 
-const boardLayoutVersion = 9
+const boardLayoutVersion = 10
 
 const boardDefaultTitle = "白板"
 
@@ -148,8 +150,7 @@ func boardPanelTitle(kind string) string {
 		return "任务清单"
 	case "agent":
 		return "Agent 面板"
-	case "agent-network":
-		return "Agent 网络"
+
 	case "capabilities":
 		return "能力库"
 	case "settings":
@@ -162,7 +163,7 @@ func boardPanelTitle(kind string) string {
 		return "待答问题"
 	case "fleet-kpi":
 		return "编队总览"
-	case "fleet-network":
+	case "fleet-network", "agent-network":
 		return "Agent 网络"
 	case "fleet-collaboration":
 		return "跨 Agent 协作"
@@ -208,7 +209,20 @@ func (s *shellState) loadBoard(stateDir string) {
 		s.board.pages = []boardPage{{ID: "board", Title: boardDefaultTitle, Panels: file.Panels}}
 	}
 	for index := range s.board.pages {
+		if s.board.pages[index].Kind == "fleet-network" {
+			s.board.pages[index].Kind = "agent-network"
+			s.board.pages[index].Scope = "fleet"
+		}
+	}
+	s.board.pages = dedupeBoardModulePages(s.board.pages)
+	for index := range s.board.pages {
 		page := &s.board.pages[index]
+		for panel := range page.Panels {
+			if page.Panels[panel].Kind == "fleet-network" {
+				page.Panels[panel].Kind = "agent-network"
+				page.Panels[panel].Scope = "fleet"
+			}
+		}
 		removedPanels := false
 		if page.Kind == "" {
 			kept := make([]boardPanel, 0, len(page.Panels))
@@ -224,6 +238,7 @@ func (s *shellState) loadBoard(stateDir string) {
 				if panel.Kind == "artifacts" && file.Version < boardLayoutVersion {
 					panel.Kind = "agent-network"
 				}
+
 				kept = append(kept, panel)
 			}
 			page.Panels = kept
@@ -252,6 +267,26 @@ func (s *shellState) loadBoard(stateDir string) {
 	s.board.active = clampIndex(file.Active, len(s.board.pages))
 	s.pinBoardPages()
 	s.saveBoard()
+}
+
+func dedupeBoardModulePages(pages []boardPage) []boardPage {
+	out := make([]boardPage, 0, len(pages))
+	at := map[string]int{}
+	for _, page := range pages {
+		if page.Kind == "" || page.Kind == fleetPageID {
+			out = append(out, page)
+			continue
+		}
+		if position, ok := at[page.Kind]; ok {
+			if out[position].Scope == "" && page.Scope != "" {
+				out[position] = page
+			}
+			continue
+		}
+		at[page.Kind] = len(out)
+		out = append(out, page)
+	}
+	return out
 }
 
 func ensureBoardDashboardPanels(page *boardPage) {
@@ -382,19 +417,31 @@ func (s *shellState) panelByID(id string) *boardPanel {
 }
 
 func (s *shellState) openModule(kind string) {
+	s.openModuleWithScope(kind, "")
+}
+
+func (s *shellState) openModuleWithScope(kind, scope string) {
 	for index := range s.board.pages {
-		if s.board.pages[index].Kind == kind {
-			s.selectBoardPage(index)
-			return
+		if s.board.pages[index].Kind != kind {
+			continue
 		}
+		s.board.pages[index].Scope = scope
+		for panel := range s.board.pages[index].Panels {
+			if s.board.pages[index].Panels[panel].Kind == kind {
+				s.board.pages[index].Panels[panel].Scope = scope
+			}
+		}
+		s.selectBoardPage(index)
+		return
 	}
 	title := boardPanelTitle(kind)
 	page := boardPage{
 		ID:    "tab-" + strconv.FormatInt(time.Now().UnixNano(), 36),
 		Title: title,
 		Kind:  kind,
+		Scope: scope,
 		Panels: []boardPanel{
-			{ID: kind, Kind: kind},
+			{ID: kind, Kind: kind, Scope: scope},
 		},
 		Layout: boardNode{Kind: "panel", PanelID: kind},
 	}

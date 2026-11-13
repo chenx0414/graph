@@ -37,8 +37,12 @@ func TestTheBoardRegistersAFixedFleetPage(t *testing.T) {
 		t.Fatalf("the fleet page carries %d panels, want %d: %+v", len(fleet.Panels), len(fleetPanelKinds), fleet.Panels)
 	}
 	for index, kind := range fleetPanelKinds {
-		if fleet.Panels[index].ID != kind || fleet.Panels[index].Kind != kind {
-			t.Fatalf("fleet panel %d is %+v, want kind %q", index, fleet.Panels[index], kind)
+		wantKind := kind
+		if kind == "fleet-network" {
+			wantKind = "agent-network"
+		}
+		if fleet.Panels[index].ID != kind || fleet.Panels[index].Kind != wantKind {
+			t.Fatalf("fleet panel %d is %+v, want kind %q", index, fleet.Panels[index], wantKind)
 		}
 	}
 }

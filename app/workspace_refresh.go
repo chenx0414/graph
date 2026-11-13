@@ -28,7 +28,13 @@ func (c *chatState) refreshArtifacts() bool {
 
 func (s *shellState) refreshVisibleWorkspace() {
 	switch s.activeBoardKind() {
-	case "", "agent-network":
+	case "agent-network":
+		if page := s.boardPage(); page != nil && (page.Scope == "fleet" || s.panelScope() == "fleet") {
+			s.refreshFleet()
+			break
+		}
+		fallthrough
+	case "":
 		if s.panelOf("agent") != nil || s.panelOf("agent-network") != nil || s.activeBoardKind() == "agent-network" {
 			s.refreshFleet()
 			if agent, _ := s.chatAgent(); agent != nil && s.panelOf("agent") != nil {

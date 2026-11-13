@@ -14,42 +14,6 @@ const (
 	fleetRingAxisAlpha = 0.16
 )
 
-func (s *shellState) panelFleetNetwork(ctx *ui.Context) {
-	t := gwtheme.Of(ctx)
-	data := s.fleetData(ctx)
-	if data == nil {
-		return
-	}
-	if len(data.Agents) == 0 {
-		kit.Text(ctx, "编队还没有可展示的 Agent。", t.Text.Sm).TextColor(t.Muted)
-		return
-	}
-	ring := fleetRingLayout(data)
-	s.fleetNetworkModels(data)
-	s.fleetHoverScope(s.boardPage().ID + "/network")
-	caption := formatFleetCount(len(data.Agents)) + " 个 Agent · " +
-		formatFleetCount(data.Stats.Running) + " 运行中 · Main 中心 · Thread 环 · Graph 环"
-	kit.Text(ctx, caption, t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
-	ui.ScrollBoth(ctx).Fill().TrackScroll(&s.fleet.netScroll).Children(func() {
-		world := ui.Box(ctx).Width(ring.Width).Height(ring.Height)
-		world.Draw(func(p *ui.Painter, r ui.Rect) {
-			s.drawFleetRing(p, r.X, r.Y, ring, t)
-		})
-		world.Children(func() {
-			for _, node := range ring.Nodes {
-				positioned := node
-				switch positioned.Kind {
-				case "global", "thread", "orphan", "graph-unit", "graph-aggregate":
-				default:
-					continue
-				}
-				element := s.fleetRingElement(ctx, positioned)
-				element.Absolute().Left(positioned.X).Top(positioned.Y)
-			}
-		})
-	})
-}
-
 func (s *shellState) fleetNetworkModels(data *fleetSnapshot) {
 	accents := fleetAccents()
 	groups := fleetGroups(data)

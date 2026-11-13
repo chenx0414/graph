@@ -58,7 +58,7 @@ func TestHoveringLightsTheEdgesThatTouchTheHoveredNode(t *testing.T) {
 func TestEveryFleetNodeKindAnswersThePointerTheSameWay(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
 	tester := openFleetTester(t, state)
-	state.openModule("fleet-network")
+	state.openModuleWithScope("agent-network", "fleet")
 	tester = frames(tester)
 	cards := []struct{ label, id string }{
 		{"编队 Agent 主控", "g1"},

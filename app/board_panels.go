@@ -20,7 +20,7 @@ func (s *shellState) boardPanelBody(ctx *ui.Context, panel *boardPanel) {
 	case "agent":
 		s.panelChatAgent(ctx)
 	case "agent-network":
-		s.panelChatNetwork(ctx)
+		s.panelChatNetwork(ctx, s.panelScope())
 	case "trajectory":
 		s.panelTrajectory(ctx)
 	case "insights":
@@ -69,8 +69,7 @@ func (s *shellState) boardPanelBody(ctx *ui.Context, panel *boardPanel) {
 		s.panelSettings(ctx)
 	case "fleet-kpi":
 		s.panelFleetKPI(ctx)
-	case "fleet-network":
-		s.panelFleetNetwork(ctx)
+
 	case "fleet-collaboration":
 		s.panelFleetCollaboration(ctx)
 	case "fleet-tasks":
