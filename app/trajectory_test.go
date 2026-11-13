@@ -39,7 +39,7 @@ func TestTrajectoryModuleQuantifiesTheLatestConversation(t *testing.T) {
 	defer server.Close()
 
 	shell := newShellState(server.URL, "tok")
-	shell.activeID = "c1"
+	shell.selectConversation("c1")
 	shell.ensureTrajectory()
 	deadline := time.Now().Add(2 * time.Second)
 	for shell.trajectory.data == nil && time.Now().Before(deadline) {

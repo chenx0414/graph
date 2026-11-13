@@ -159,6 +159,10 @@ func (app *GraphApp) serveConversationTrajectory(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().Trajectory(conversationID))
 }
 
+func (app *GraphApp) serveNodeTrajectory(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, BuildNodeTrajectory(app.runtime.store, r.PathValue("taskId"), r.PathValue("nodeId")))
+}
+
 func (app *GraphApp) serveConversationHistory(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	query := NodeEntryQuery{}

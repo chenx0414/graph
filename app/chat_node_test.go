@@ -17,6 +17,9 @@ type nodeChatMock struct {
 	mu       sync.Mutex
 	run      string
 	runOlder map[string]string
+	taskView string
+	artifact string
+	asked    []string
 	fail     bool
 	posted   []string
 	fleet    *fleetSnapshot
@@ -57,6 +60,15 @@ func (m *nodeChatMock) server(t *testing.T) *httptest.Server {
 			payload, _ := io.ReadAll(r.Body)
 			m.posted = append(m.posted, string(payload))
 			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		m.asked = append(m.asked, r.URL.Path)
+		if strings.HasSuffix(r.URL.Path, "/artifacts") {
+			_, _ = w.Write([]byte(m.artifact))
+			return
+		}
+		if strings.Count(r.URL.Path, "/") == 3 {
+			_, _ = w.Write([]byte(m.taskView))
 			return
 		}
 		if strings.Contains(r.URL.Path, "/n3/") {

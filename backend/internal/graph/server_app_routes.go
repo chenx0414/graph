@@ -73,6 +73,7 @@ func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/conversations/{conversationId}/history", app.serveConversationHistory)
 	mux.HandleFunc("GET /api/conversations/{conversationId}/trajectory", app.serveConversationTrajectory)
 	mux.HandleFunc("GET /api/trajectory/insights", app.serveTrajectoryInsights)
+	mux.HandleFunc("GET /api/tasks/{taskId}/nodes/{nodeId}/trajectory", app.serveNodeTrajectory)
 	mux.HandleFunc("GET /api/conversations/{conversationId}/artifacts", app.serveConversationArtifacts)
 	mux.HandleFunc("GET /api/conversations/{conversationId}/draft-graph", app.serveDraftGraph)
 	mux.HandleFunc("GET /api/conversations/{conversationId}/proposals/{version}", app.serveProposal)

@@ -16,14 +16,15 @@ const (
 )
 
 type artifactRow struct {
-	artifactID string
-	taskID     string
-	namespace  string
-	name       string
-	title      string
-	mediaType  string
-	version    int
-	size       int64
+	artifactID   string
+	producerNode string
+	taskID       string
+	namespace    string
+	name         string
+	title        string
+	mediaType    string
+	version      int
+	size         int64
 }
 
 type artifactListPayload struct {
@@ -36,7 +37,23 @@ type artifactListPayload struct {
 		MediaType  string `json:"mediaType"`
 		Version    int    `json:"version"`
 		Size       int64  `json:"size"`
+		Producer   struct {
+			NodeID string `json:"nodeId"`
+		} `json:"producer"`
 	} `json:"artifacts"`
+}
+
+func artifactsOfNode(rows []artifactRow, nodeID string) []artifactRow {
+	if nodeID == "" {
+		return rows
+	}
+	kept := make([]artifactRow, 0, len(rows))
+	for _, row := range rows {
+		if row.producerNode == nodeID {
+			kept = append(kept, row)
+		}
+	}
+	return kept
 }
 
 func parseArtifacts(payload []byte) ([]artifactRow, error) {
@@ -47,14 +64,15 @@ func parseArtifacts(payload []byte) ([]artifactRow, error) {
 	rows := make([]artifactRow, 0, len(listed.Artifacts))
 	for _, artifact := range listed.Artifacts {
 		rows = append(rows, artifactRow{
-			artifactID: artifact.ArtifactID,
-			taskID:     artifact.TaskID,
-			namespace:  artifact.Namespace,
-			name:       artifact.Name,
-			title:      artifact.Title,
-			mediaType:  artifact.MediaType,
-			version:    artifact.Version,
-			size:       artifact.Size,
+			artifactID:   artifact.ArtifactID,
+			producerNode: artifact.Producer.NodeID,
+			taskID:       artifact.TaskID,
+			namespace:    artifact.Namespace,
+			name:         artifact.Name,
+			title:        artifact.Title,
+			mediaType:    artifact.MediaType,
+			version:      artifact.Version,
+			size:         artifact.Size,
 		})
 	}
 	return rows, nil

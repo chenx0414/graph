@@ -167,10 +167,32 @@ func (s *shellState) panelHistory(ctx *ui.Context) {
 	}
 }
 
+func (s *shellState) scopeLineGlobal(ctx *ui.Context) {
+	t := gwtheme.Of(ctx)
+	kit.Text(ctx, "全体 Agent · 安装级统计", t.Text.Xs).TextColor(t.Muted)
+}
+
+func (s *shellState) scopeLine(ctx *ui.Context, fallback string) {
+	t := gwtheme.Of(ctx)
+	text := fallback
+	switch scope := s.chatScope(); scope.Kind {
+	case "node":
+		text = "当前 Agent · " + s.titleOf(s.activeID)
+	case "conversation":
+		text = "当前会话 · " + s.titleOf(s.activeID)
+	}
+	kit.Text(ctx, text, t.Text.Xs).TextColor(t.Muted)
+}
+
 func (s *shellState) panelTasks(ctx *ui.Context) {
 	t := gwtheme.Of(ctx)
+	s.scopeLine(ctx, "全体 Agent · 安装级")
 	active := s.active()
 	if active == nil || len(active.tasks) == 0 {
+		if s.chatScope().Kind == "node" {
+			s.boardNote(ctx, "这个 Agent 还没有任务记录。")
+			return
+		}
 		s.boardNote(ctx, "当前会话还没有任务。任务启动后会在这里列出。")
 		return
 	}
@@ -184,12 +206,17 @@ func (s *shellState) panelTasks(ctx *ui.Context) {
 
 func (s *shellState) panelArtifacts(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
+	s.scopeLine(ctx, "全体 Agent · 安装级")
 	active := s.active()
 	if active == nil {
 		s.boardNote(ctx, "还没有选中的会话。")
 		return
 	}
 	if len(active.artifacts) == 0 && active.preview == "" {
+		if s.chatScope().Kind == "node" {
+			s.boardNote(ctx, "这个 Agent 还没有共享产物。")
+			return
+		}
 		s.boardNote(ctx, "这个会话还没有共享产物。")
 		return
 	}

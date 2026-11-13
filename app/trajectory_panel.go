@@ -11,13 +11,21 @@ import (
 func (s *shellState) panelTrajectory(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	state := &s.trajectory
+	s.scopeLine(ctx, "")
+	if state.data != nil && state.scopeKey != s.chatScope().key() {
+		if !state.loading {
+			go s.ensureTrajectory()
+		}
+		kit.Text(ctx, "正在整理轨迹…", t.Text.Sm).TextColor(t.Muted)
+		return
+	}
 	if state.data == nil {
 		if state.failed != "" {
 			kit.Text(ctx, state.failed, t.Text.Sm).TextColor(t.Muted)
 		} else {
 			kit.Text(ctx, "正在整理轨迹…", t.Text.Sm).TextColor(t.Muted)
 		}
-		if !state.loading && state.failed == "" {
+		if !state.loading && (state.failed == "" || state.scopeKey != s.chatScope().key()) {
 			go s.ensureTrajectory()
 		}
 		return

@@ -142,6 +142,7 @@ func (s *shellState) insightsSessionsCard(ctx *ui.Context) {
 }
 
 func (s *shellState) panelInsights(ctx *ui.Context) {
+	s.scopeLineGlobal(ctx)
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	data := s.insightsData(ctx)
 	if data == nil {

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
 	"time"
 )
@@ -165,36 +166,37 @@ type conversationTrajectory struct {
 }
 
 type trajectoryState struct {
-	conversationID string
-	loading        bool
-	failed         string
-	data           *conversationTrajectory
-	selected       int
+	scopeKey string
+	loading  bool
+	failed   string
+	data     *conversationTrajectory
+	selected int
 }
 
 func (s *shellState) ensureTrajectory() {
-	id := s.activeID
-	if id == "" {
-		if active := s.active(); active != nil {
-			id = active.active
-		}
-	}
+	scope := s.chatScope()
+	path, key := trajectoryEndpoint(scope)
 	state := &s.trajectory
-	if id == "" {
+	if path == "" {
 		state.failed = "先打开一个会话"
 		return
+	}
+	if state.scopeKey != key {
+		state.data = nil
+		state.selected = 0
+		state.failed = ""
 	}
 	if state.data == nil {
 		s.boardScrollTop = true
 	}
-	if state.loading || (state.data != nil && state.conversationID == id) {
+	if state.loading || (state.data != nil && state.scopeKey == key) {
 		return
 	}
 	state.loading = true
 	state.failed = ""
-	state.conversationID = id
+	state.scopeKey = key
 	go func() {
-		payload, err := s.api.get("/api/conversations/" + id + "/trajectory")
+		payload, err := s.api.get(path)
 		if err != nil {
 			state.failed = "读不到轨迹：" + err.Error()
 			state.loading = false
@@ -214,6 +216,16 @@ func (s *shellState) ensureTrajectory() {
 		state.loading = false
 		s.frame()
 	}()
+}
+
+func trajectoryEndpoint(scope chatScope) (string, string) {
+	switch scope.Kind {
+	case "conversation":
+		return "/api/conversations/" + url.PathEscape(scope.ConversationID) + "/trajectory", scope.key()
+	case "node":
+		return "/api/tasks/" + url.PathEscape(scope.TaskID) + "/nodes/" + url.PathEscape(scope.NodeID) + "/trajectory", scope.key()
+	}
+	return "", ""
 }
 
 func formatTrajectoryTokens(tokens int64) string {

@@ -178,16 +178,8 @@ type trajectoryInvocation struct {
 	Composition *TrajectoryComposition
 }
 
-func BuildConversationTrajectory(store *TaskStore, conversationId string) *ConversationTrajectory {
-	conversation := kernelRow(store.Db, "SELECT anchor_task_id FROM conversations WHERE id=?", conversationId)
-	trajectory := &ConversationTrajectory{ConversationId: conversationId, Turns: []TrajectoryTurn{}}
-	if conversation == nil {
-		return trajectory
-	}
-	trajectory.TaskId = kernelString(conversation["anchor_task_id"])
-	messages := trajectoryMessages(store, conversationId)
-	invocations := trajectoryInvocations(store, trajectory.TaskId)
-	tools := trajectoryTools(store, trajectory.TaskId)
+func trajectoryTurnsAndTotals(messages []trajectoryMessage, invocations []trajectoryInvocation, tools []TrajectoryTool) ([]TrajectoryTurn, TrajectoryTotals) {
+	trajectory := &ConversationTrajectory{Turns: []TrajectoryTurn{}}
 	turns := []TrajectoryTurn{}
 	turnOperations := []map[string]bool{}
 	current := -1
@@ -333,6 +325,22 @@ func BuildConversationTrajectory(store *TaskStore, conversationId string) *Conve
 	if trajectory.Totals.Timing.WallMs > occupied {
 		trajectory.Totals.Timing.OtherMs = trajectory.Totals.Timing.WallMs - occupied
 	}
+	return turns, trajectory.Totals
+}
+
+func BuildConversationTrajectory(store *TaskStore, conversationId string) *ConversationTrajectory {
+	conversation := kernelRow(store.Db, "SELECT anchor_task_id FROM conversations WHERE id=?", conversationId)
+	trajectory := &ConversationTrajectory{ConversationId: conversationId, Turns: []TrajectoryTurn{}}
+	if conversation == nil {
+		return trajectory
+	}
+	trajectory.TaskId = kernelString(conversation["anchor_task_id"])
+	messages := trajectoryMessages(store, conversationId)
+	invocations := trajectoryInvocations(store, trajectory.TaskId)
+	tools := trajectoryTools(store, trajectory.TaskId)
+	turns, totals := trajectoryTurnsAndTotals(messages, invocations, tools)
+	trajectory.Turns = turns
+	trajectory.Totals = totals
 	trajectory.Totals.Compactions = int(kernelInt(kernelRow(store.Db, "SELECT COUNT(*) AS count FROM events WHERE task_id=? AND type='session.compacted'", trajectory.TaskId)["count"]))
 	trajectory.Requests = trajectoryRequests(invocations)
 	trajectory.Events = trajectoryContextEvents(store, trajectory.TaskId)

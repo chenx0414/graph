@@ -16,6 +16,7 @@ type chatCapabilities struct {
 
 type agentChatSource interface {
 	Key() string
+	Scope() chatScope
 	Capabilities() chatCapabilities
 	Load(c *chatState) error
 	Refresh(c *chatState) (bool, error)
@@ -34,6 +35,9 @@ func newConversationChatSource(api apiClient, id string) *conversationChatSource
 }
 
 func (source *conversationChatSource) Key() string { return source.id }
+func (source *conversationChatSource) Scope() chatScope {
+	return chatScope{Kind: "conversation", ConversationID: source.id}
+}
 func (source *conversationChatSource) Capabilities() chatCapabilities {
 	return chatCapabilities{ModelChip: true, Pause: true, History: true}
 }
@@ -179,6 +183,9 @@ func newNodeChatSource(api apiClient, taskID, nodeID string) *nodeChatSource {
 }
 
 func (source *nodeChatSource) Key() string { return "node:" + source.taskID + "/" + source.nodeID }
+func (source *nodeChatSource) Scope() chatScope {
+	return chatScope{Kind: "node", TaskID: source.taskID, NodeID: source.nodeID}
+}
 func (source *nodeChatSource) Capabilities() chatCapabilities {
 	return chatCapabilities{History: true}
 }
@@ -215,8 +222,7 @@ func (source *nodeChatSource) Load(c *chatState) error {
 	c.oldestSeq = oldestSeqOf(messages)
 	c.noMoreHistory = !hasOlder || c.oldestSeq <= 0
 	c.questions = nil
-	c.artifacts = nil
-	c.tasks = nil
+	source.loadScopeData(c)
 	if len(messages) == 0 {
 		c.status = "这个节点还没有可显示的记录。"
 		return nil
@@ -255,6 +261,7 @@ func (source *nodeChatSource) Refresh(c *chatState) (bool, error) {
 		return false, err
 	}
 	fingerprint := transcriptFingerprint(messages)
+	source.loadScopeData(c)
 	if fingerprint == c.fingerprint {
 		return false, nil
 	}
@@ -265,6 +272,21 @@ func (source *nodeChatSource) Refresh(c *chatState) (bool, error) {
 		c.messages = messages
 	}
 	return true, nil
+}
+
+func (source *nodeChatSource) loadScopeData(c *chatState) {
+	c.tasks = nil
+	if payload, err := source.api.get("/api/tasks/" + url.PathEscape(source.taskID)); err == nil {
+		if rows, err := parseTaskViewRows(payload); err == nil {
+			c.tasks = rows
+		}
+	}
+	c.artifacts = nil
+	if payload, err := source.api.get("/api/tasks/" + url.PathEscape(source.taskID) + "/artifacts"); err == nil {
+		if rows, err := parseArtifacts(payload); err == nil {
+			c.artifacts = artifactsOfNode(rows, source.nodeID)
+		}
+	}
 }
 
 func (source *nodeChatSource) LoadOlder(c *chatState, before int64) ([]transcriptMessage, int64, bool, error) {

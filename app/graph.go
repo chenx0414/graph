@@ -86,3 +86,40 @@ func nodeLabel(row nodeRow) string {
 	}
 	return label
 }
+
+type taskViewPayload struct {
+	ID      string `json:"id"`
+	Request string `json:"request"`
+	Status  string `json:"status"`
+	Phase   string `json:"phase"`
+	Nodes   []struct {
+		ID         string `json:"id"`
+		Role       string `json:"role"`
+		Kind       string `json:"kind"`
+		Status     string `json:"status"`
+		Model      string `json:"model"`
+		Definition string `json:"definitionVersion"`
+	} `json:"nodes"`
+}
+
+func parseTaskViewRows(payload []byte) ([]taskRow, error) {
+	var view taskViewPayload
+	if err := json.Unmarshal(payload, &view); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(view.ID) == "" {
+		return nil, nil
+	}
+	row := taskRow{id: view.ID, request: view.Request, status: view.Status, phase: view.Phase}
+	for _, node := range view.Nodes {
+		row.nodes = append(row.nodes, nodeRow{
+			id:         node.ID,
+			role:       node.Role,
+			kind:       node.Kind,
+			status:     node.Status,
+			model:      node.Model,
+			definition: node.Definition,
+		})
+	}
+	return []taskRow{row}, nil
+}
