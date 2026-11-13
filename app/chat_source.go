@@ -11,10 +11,9 @@ import (
 )
 
 type chatCapabilities struct {
-	HideConversations bool
-	ModelChip         bool
-	Pause             bool
-	History           bool
+	ModelChip bool
+	Pause     bool
+	History   bool
 }
 
 type agentChatSource interface {
@@ -157,7 +156,7 @@ func newNodeChatSource(api apiClient, taskID, nodeID string) *nodeChatSource {
 
 func (source *nodeChatSource) Key() string { return "node:" + source.taskID + "/" + source.nodeID }
 func (source *nodeChatSource) Capabilities() chatCapabilities {
-	return chatCapabilities{HideConversations: true}
+	return chatCapabilities{}
 }
 func (source *nodeChatSource) Follows() bool { return false }
 

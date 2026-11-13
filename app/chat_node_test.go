@@ -223,7 +223,7 @@ func TestSwitchingNodeChatsReplacesTheActiveSource(t *testing.T) {
 	}
 }
 
-func TestNodeChatHidesTheConversationList(t *testing.T) {
+func TestEveryAgentChatKeepsTheConversationList(t *testing.T) {
 	fleet := ringGraphFleet()
 	node := fleetAgent{ID: "p1-n2", ParentID: "p1", Kind: "node", Name: "fleet-ui", TaskID: "tA", NodeID: "n2", Status: "running"}
 	mock := &nodeChatMock{
@@ -234,14 +234,14 @@ func TestNodeChatHidesTheConversationList(t *testing.T) {
 	state, tester := nodeChatShell(t, mock)
 	state.openFleetAgentChat(node)
 	tester = frames(tester)
-	if tester.HasText("会话列表标题") || tester.HasText("main agent 会话") {
-		t.Fatalf("the node chat hides the conversation list, texts %q", tester.Texts())
+	if !tester.HasText("会话列表标题") || !tester.HasText("main agent 会话") {
+		t.Fatalf("the node chat keeps the conversation list so users can navigate back, texts %q", tester.Texts())
 	}
 	thread := fleetAgent{ID: "p1", ParentID: "g1", Kind: "project", Name: "项目 A", ConversationID: "p1", Status: "running"}
 	state.openFleetAgentChat(thread)
 	tester = frames(tester)
 	if !tester.HasText("会话列表标题") || !tester.HasText("main agent 会话") {
-		t.Fatalf("a conversation chat restores the list, texts %q", tester.Texts())
+		t.Fatalf("a conversation chat keeps the list, texts %q", tester.Texts())
 	}
 }
 
