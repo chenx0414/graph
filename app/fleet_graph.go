@@ -259,6 +259,31 @@ func (s *shellState) ensureFleetGraph() {
 	s.graphRetry()
 }
 
+func (s *shellState) refreshFleetGraph() {
+	state := s.graph
+	if state.taskID == "" || state.loading {
+		return
+	}
+	state.generation++
+	generation := state.generation
+	s.graph = state
+	taskID := state.taskID
+	api := s.api
+	go func() {
+		payload, err := api.get("/api/tasks/" + url.PathEscape(taskID) + "/graph/topology")
+		var data *fleetTopologyData
+		if err == nil {
+			data, err = parseFleetTopology(payload)
+		}
+		s.updates.post(s.window, func() {
+			if err != nil || s.graph.taskID != taskID || s.graph.generation != generation || s.api != api {
+				return
+			}
+			s.graph.data = data
+		})
+	}()
+}
+
 func (s *shellState) graphRetry() {
 	state := s.graph
 	if state.taskID == "" {

@@ -32,18 +32,11 @@ func (s *shellState) refreshVisibleWorkspace() {
 		s.refreshFleet()
 	case "agent":
 		s.refreshFleet()
-		if s.fleet.global != nil {
-			s.fleet.global = nil
-			s.ensureGlobalFleet()
-		}
-		if !s.fleet.detail.loading {
-			s.fleet.detail.entries = nil
-			s.fleet.detail.failed = ""
+		if agent, note := s.fleetDetailAgent(fleetAgentIDOfPage(s.boardPage().ID)); note == "" && agent != nil {
+			s.refreshFleetDetail(*agent)
 		}
 	case "fleet-graph":
 		s.refreshFleet()
-		if !s.graph.loading {
-			s.graphRetry()
-		}
+		s.refreshFleetGraph()
 	}
 }

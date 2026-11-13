@@ -112,3 +112,40 @@ func awaitWorkspaceText(t *testing.T, tester *ui.Tester, text string) {
 		}
 	}
 }
+
+func agentPageState(t *testing.T) *shellState {
+	t.Helper()
+	state := fleetServerShell(t, fleetSampleServer)
+	state.fleet.data, _ = parseFleet([]byte(fleetSampleJSON))
+	state.fleet.conversationID = "g1"
+	state.board.pages = []boardPage{{ID: "agent:" + state.fleet.data.Agents[0].ID, Title: "Agent", Kind: "agent"}}
+	state.board.active = 0
+	return state
+}
+
+func TestRefreshingAnAgentPageKeepsItsActivityOnScreen(t *testing.T) {
+	state := agentPageState(t)
+	agent := state.fleet.data.Agents[0]
+	state.fleet.detail = fleetDetailEntry{agentID: agent.ID, entries: []fleetActivity{{ID: "a1", Text: "既有活动"}}}
+	state.refreshVisibleWorkspace()
+	if len(state.fleet.detail.entries) != 1 {
+		t.Fatalf("a quiet refresh must keep the activity list, entries %+v", state.fleet.detail.entries)
+	}
+	if state.fleet.detail.loading {
+		t.Fatal("a quiet refresh must not blank the page with a loading state")
+	}
+}
+
+func TestRefreshingAGraphPageKeepsTheGraphOnScreen(t *testing.T) {
+	state := fleetServerShell(t, fleetSampleServer)
+	state.board.pages = []boardPage{{ID: "graph:t1", Title: "Graph", Kind: "fleet-graph"}}
+	state.board.active = 0
+	state.graph = fleetGraphView{taskID: "t1", data: &fleetTopologyData{TaskID: "t1", Nodes: []fleetTopologyNode{{ID: "n0"}}}}
+	state.refreshVisibleWorkspace()
+	if state.graph.loading {
+		t.Fatal("a quiet refresh must keep the graph on screen instead of flashing a loading state")
+	}
+	if state.graph.data == nil {
+		t.Fatal("a quiet refresh must keep the graph data until a new snapshot arrives")
+	}
+}

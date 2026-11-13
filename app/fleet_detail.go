@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -65,20 +66,29 @@ func parseFleetNodeRun(payload []byte) ([]fleetActivity, error) {
 	return activities, nil
 }
 
+func fleetDetailPath(agent fleetAgent) (string, bool) {
+	switch {
+	case agent.Kind == "node" && agent.TaskID != "" && agent.NodeID != "":
+		return "/api/tasks/" + url.PathEscape(agent.TaskID) + "/nodes/" + url.PathEscape(agent.NodeID) + "/run?limit=" + strconv.Itoa(fleetDetailLimit), true
+	case agent.ConversationID != "":
+		return "/api/conversations/" + url.PathEscape(agent.ConversationID) + "/history?limit=" + strconv.Itoa(fleetDetailLimit), false
+	}
+	return "", false
+}
+
+func parseFleetDetail(path string, nodeRun bool, payload []byte) ([]fleetActivity, error) {
+	if nodeRun {
+		return parseFleetNodeRun(payload)
+	}
+	return parseFleetHistory(payload)
+}
+
 func (s *shellState) ensureFleetDetail(agent fleetAgent) {
 	state := &s.fleet.detail
 	if state.agentID == agent.ID && (state.loading || state.entries != nil || state.failed != "") {
 		return
 	}
-	path := ""
-	nodeRun := false
-	switch {
-	case agent.Kind == "node" && agent.TaskID != "" && agent.NodeID != "":
-		path = "/api/tasks/" + url.PathEscape(agent.TaskID) + "/nodes/" + url.PathEscape(agent.NodeID) + "/run?limit=" + strconv.Itoa(fleetDetailLimit)
-		nodeRun = true
-	case agent.ConversationID != "":
-		path = "/api/conversations/" + url.PathEscape(agent.ConversationID) + "/history?limit=" + strconv.Itoa(fleetDetailLimit)
-	}
+	path, nodeRun := fleetDetailPath(agent)
 	state.agentID = agent.ID
 	state.entries = nil
 	state.failed = ""
@@ -93,11 +103,7 @@ func (s *shellState) ensureFleetDetail(agent fleetAgent) {
 		payload, err := api.get(path)
 		var activities []fleetActivity
 		if err == nil {
-			if nodeRun {
-				activities, err = parseFleetNodeRun(payload)
-			} else {
-				activities, err = parseFleetHistory(payload)
-			}
+			activities, err = parseFleetDetail(path, nodeRun, payload)
 		}
 		s.updates.post(s.window, func() {
 			if s.fleet.detail.agentID != agent.ID || s.api != api {
@@ -109,6 +115,34 @@ func (s *shellState) ensureFleetDetail(agent fleetAgent) {
 				return
 			}
 			s.fleet.detail.entries = activities
+		})
+	}()
+}
+
+func (s *shellState) refreshFleetDetail(agent fleetAgent) {
+	state := &s.fleet.detail
+	if state.loading || state.agentID != agent.ID {
+		return
+	}
+	path, nodeRun := fleetDetailPath(agent)
+	if path == "" {
+		return
+	}
+	api := s.api
+	go func() {
+		payload, err := api.get(path)
+		var activities []fleetActivity
+		if err == nil {
+			activities, err = parseFleetDetail(path, nodeRun, payload)
+		}
+		s.updates.post(s.window, func() {
+			if err != nil || s.fleet.detail.agentID != agent.ID || s.api != api {
+				return
+			}
+			if !reflect.DeepEqual(activities, s.fleet.detail.entries) {
+				s.fleet.detail.entries = activities
+				s.fleet.detail.failed = ""
+			}
 		})
 	}()
 }
