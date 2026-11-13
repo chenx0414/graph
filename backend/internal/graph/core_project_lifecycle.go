@@ -17,7 +17,8 @@ func (runtime *TaskRuntime) projectLifecycleInTransaction(projectID string) Proj
 	}
 	active := kernelRow(runtime.store.Db, `SELECT
  (SELECT COUNT(*) FROM kernel_executions e JOIN tasks t ON t.id=e.task_id WHERE t.project_id=? AND e.state='running') +
- (SELECT COUNT(*) FROM operations o JOIN tasks t ON t.id=o.task_id WHERE t.project_id=? AND t.phase!='chatting' AND o.worker_active=1) AS total`, projectID, projectID)
+ (SELECT COUNT(*) FROM operations o JOIN tasks t ON t.id=o.task_id WHERE t.project_id=? AND t.phase!='chatting' AND o.worker_active=1) +
+ (SELECT COUNT(*) FROM operations o JOIN agents a ON a.task_id=o.task_id WHERE a.kind='child' AND a.project_id=? AND o.worker_active=1) AS total`, projectID, projectID, projectID)
 	archived := row["archived_at"] != nil
 	state := "active"
 	if archived {
@@ -39,20 +40,37 @@ func (runtime *TaskRuntime) ProjectLifecycle(projectID string) ProjectLifecycle 
 func (runtime *TaskRuntime) ArchiveProject(projectID, requestID string) ProjectLifecycle {
 	runtime.ensureOpen()
 	graphDatabaseMu.Lock()
-	defer graphDatabaseMu.Unlock()
-	result := runtime.store.Command("project:archive:"+projectID, requestID, map[string]any{"projectId": projectID}, func() any {
-		before := runtime.projectLifecycleInTransaction(projectID)
-		if !before.Archived {
-			runtime.store.ArchiveProject(projectID, NowMillis())
-			runtime.store.PauseProjectWork(projectID)
-			runtime.store.PauseProjectTasks(projectID)
-			for _, row := range kernelRows(runtime.store.Db, `SELECT id FROM tasks WHERE project_id=? AND phase NOT IN ('chatting','completed','stopping','stopped','abandoned')`, projectID) {
-				runtime.kernel.SetNativePause(kernelString(row["id"]), true, "", 0)
+	result, childTasks := func() (any, []string) {
+		defer graphDatabaseMu.Unlock()
+		result := runtime.store.Command("project:archive:"+projectID, requestID, map[string]any{"projectId": projectID}, func() any {
+			before := runtime.projectLifecycleInTransaction(projectID)
+			if !before.Archived {
+				runtime.store.ArchiveProject(projectID, NowMillis())
+				runtime.store.PauseProjectWork(projectID)
+				runtime.store.PauseProjectTasks(projectID)
+				for _, row := range kernelRows(runtime.store.Db, `SELECT id FROM tasks WHERE project_id=? AND phase NOT IN ('chatting','completed','stopping','stopped','abandoned')`, projectID) {
+					runtime.kernel.SetNativePause(kernelString(row["id"]), true, "", 0)
+				}
+				runtime.store.Event(nil, "project.archived", map[string]any{"projectId": projectID, "requestId": requestID})
 			}
-			runtime.store.Event(nil, "project.archived", map[string]any{"projectId": projectID, "requestId": requestID})
+			for _, row := range kernelRows(runtime.store.Db, "SELECT task_id FROM agents WHERE kind='child' AND project_id=?", projectID) {
+				taskID := kernelString(row["task_id"])
+				runtime.store.SetTaskPaused(taskID, true)
+				pauseMasterTurn(runtime, taskID, "archive:"+requestID+":"+taskID)
+			}
+			return runtime.projectLifecycleInTransaction(projectID)
+		})
+		tasks := []string{}
+		for _, row := range kernelRows(runtime.store.Db, "SELECT task_id FROM agents WHERE kind='child' AND project_id=?", projectID) {
+			tasks = append(tasks, kernelString(row["task_id"]))
 		}
-		return runtime.projectLifecycleInTransaction(projectID)
-	})
+		return result, tasks
+	}()
+	if runtime.execution != nil {
+		for _, taskID := range childTasks {
+			runtime.execution.StopActiveMasterTurns(taskID)
+		}
+	}
 	return projectLifecycleReceipt(result)
 }
 

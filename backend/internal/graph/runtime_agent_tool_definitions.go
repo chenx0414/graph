@@ -26,7 +26,8 @@ type AgentToolFeatures struct {
 	Conversations   *AgentConversationFeatures
 	Peers           bool
 	Spawn           bool
-	Desktop bool
+	AgentControl    bool
+	Desktop         bool
 }
 
 type AgentArtifactAccess struct {
@@ -192,6 +193,7 @@ func agentToolDeclarations(features AgentToolFeatures) []AgentToolDeclaration {
 	declarations = append(declarations, harnessToolDeclarations(set)...)
 	declarations = append(declarations, desktopToolDeclarations(set)...)
 	declarations = append(declarations, spawnToolDeclarations(set)...)
+	declarations = append(declarations, agentControlDeclarations(set)...)
 	return declarations
 }
 

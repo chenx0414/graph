@@ -227,7 +227,7 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 			if role != "" {
 				tools.Role = role
 			}
-			if options.SpawnAgent != nil {
+			if options.SpawnAgent != nil || options.ControlAgent != nil {
 				parent := AgentSpawnParent{TaskId: operation.TaskId, NodeId: operation.NodeId, Workspace: workspace}
 				if conversation != nil {
 					parent.AgentId = conversation.Id
@@ -239,11 +239,16 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 				if parent.AgentId == "" {
 					parent.AgentId = operation.TaskId + "/" + operation.NodeId
 				}
-				tools.Spawn = func(request AgentToolsSpawnInput) any {
-					return options.SpawnAgent(parent, AgentSpawnInput{
-						Objective: request.Objective, Name: request.Name, Model: request.Model,
-						Workspace: request.Workspace, RequestId: request.RequestId,
-					})
+				if options.SpawnAgent != nil {
+					tools.Spawn = func(request AgentToolsSpawnInput) any {
+						return options.SpawnAgent(parent, AgentSpawnInput{
+							Objective: request.Objective, Name: request.Name, Model: request.Model,
+							Workspace: request.Workspace, RequestId: request.RequestId,
+						})
+					}
+				}
+				if options.ControlAgent != nil {
+					tools.ControlAgent = func(request AgentControlInput) any { return options.ControlAgent(parent, request) }
 				}
 			}
 			if conversation != nil && conversation.Role == ConversationProject && role == "master" && conversation.AnchorTaskId == operation.TaskId {
