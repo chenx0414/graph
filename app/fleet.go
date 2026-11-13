@@ -134,9 +134,8 @@ type fleetState struct {
 	agentFilter    string
 	category       string
 	generation     int
-	toggled        map[string]bool
-	windows        map[string]int
-	rects          map[string]ui.Rect
+	netScroll      ui.ScrollState
+	netKey         string
 	accents        map[string]ui.Color
 	shares         map[string]float64
 }
@@ -229,26 +228,6 @@ func (s *shellState) fleetData(ctx *ui.Context) *fleetSnapshot {
 		s.ensureFleet()
 	}
 	return nil
-}
-
-func (s *shellState) toggleFleetGroup(key string, open bool) {
-	if s.fleet.toggled == nil {
-		s.fleet.toggled = map[string]bool{}
-	}
-	s.fleet.toggled[key] = open
-	s.frame()
-}
-
-func (s *shellState) pageFleetGroup(key string) {
-	if s.fleet.windows == nil {
-		s.fleet.windows = map[string]int{}
-	}
-	limit := fleetWindowStep
-	if current, ok := s.fleet.windows[key]; ok && current > limit {
-		limit = current
-	}
-	s.fleet.windows[key] = limit + fleetWindowStep
-	s.frame()
 }
 
 func (s *shellState) ensureGlobalFleet() {

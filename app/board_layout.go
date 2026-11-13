@@ -471,3 +471,8 @@ func (s *shellState) ensureBoardPageData() {
 		s.ensureFleet()
 	}
 }
+
+func (s *shellState) deferBoardDrop(drop func()) {
+	s.board.pendingDrop = drop
+	s.frame()
+}

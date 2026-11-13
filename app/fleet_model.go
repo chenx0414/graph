@@ -270,26 +270,25 @@ func fleetOperation(agent fleetAgent) string {
 	return "—"
 }
 
-func fleetGroupExpanded(state *fleetState, group fleetGroup, total int) bool {
-	key := group.Project.ID
+func fleetGroupKey(group fleetGroup) string {
 	if group.Orphan {
-		key = "orphans"
+		return "orphans"
 	}
-	if open, ok := state.toggled[key]; ok {
-		return open
-	}
-	return total <= fleetAutoExpand
+	return group.Project.ID
 }
 
-func fleetGroupLimit(state *fleetState, group fleetGroup) int {
-	key := group.Project.ID
-	if group.Orphan {
-		key = "orphans"
+func joinFleetMeta(parts []string) string {
+	out := ""
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		if out != "" {
+			out += " · "
+		}
+		out += part
 	}
-	if limit, ok := state.windows[key]; ok && limit > fleetWindowStep {
-		return limit
-	}
-	return fleetWindowStep
+	return out
 }
 
 func fleetAgentByID(data *fleetSnapshot, id string) (fleetAgent, bool) {
@@ -341,11 +340,6 @@ func fleetGroupIndex(data *fleetSnapshot, agent fleetAgent) int {
 	}
 	for index, group := range fleetGroups(data) {
 		if group.Orphan {
-			if agent.Kind == "node" || agent.Kind == "child" {
-				if project, ok := fleetProjectOf(fleetIndex(data), agent); !ok || project.ID == "" {
-					return index
-				}
-			}
 			continue
 		}
 		if group.Project.ID == agent.ID {
@@ -402,25 +396,4 @@ func fleetChildrenOf(data *fleetSnapshot, agent fleetAgent) []fleetAgent {
 		}
 	}
 	return children
-}
-
-func fleetGroupKey(group fleetGroup) string {
-	if group.Orphan {
-		return "orphans"
-	}
-	return group.Project.ID
-}
-
-func joinFleetMeta(parts []string) string {
-	out := ""
-	for _, part := range parts {
-		if part == "" {
-			continue
-		}
-		if out != "" {
-			out += " · "
-		}
-		out += part
-	}
-	return out
 }

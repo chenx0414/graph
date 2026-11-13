@@ -25,16 +25,17 @@ var railItems = []railItem{
 }
 
 type boardState struct {
-	pages      []boardPage
-	active     int
-	path       string
-	drag       *boardDrag
-	rects      map[string]ui.Rect
-	splits     map[string]ui.Rect
-	press      string
-	pressX     float32
-	pressY     float32
-	hoverSince map[string]time.Time
+	pages       []boardPage
+	active      int
+	path        string
+	drag        *boardDrag
+	rects       map[string]ui.Rect
+	splits      map[string]ui.Rect
+	press       string
+	pressX      float32
+	pressY      float32
+	hoverSince  map[string]time.Time
+	pendingDrop func()
 }
 
 type boardDrag struct {
@@ -95,6 +96,10 @@ func (s *shellState) boardTabBar(ctx *ui.Context) {
 
 func (s *shellState) boardPageView(ctx *ui.Context) {
 	t := gwtheme.Of(ctx)
+	if drop := s.board.pendingDrop; drop != nil {
+		s.board.pendingDrop = nil
+		drop()
+	}
 	page := s.boardPage()
 	if s.board.rects == nil {
 		s.board.rects = map[string]ui.Rect{}
@@ -340,10 +345,10 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform
 				s.dragBoardPanel(panel, dx, dy)
 			}
 			if point, missed := card.DragMissed(); missed {
-				s.dropBoardPanelAt(panel.ID, point.X, point.Y)
+				s.deferBoardDrop(func() { s.dropBoardPanelAt(panel.ID, point.X, point.Y) })
 			}
 			if _, _, ended := card.DragEnded(); ended {
-				s.dropBoardPanel()
+				s.deferBoardDrop(func() { s.dropBoardPanel() })
 			}
 			s.boardDropPreview(ctx, panel)
 		}

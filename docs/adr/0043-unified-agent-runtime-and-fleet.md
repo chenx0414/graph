@@ -69,7 +69,7 @@ spawn_agent({ objective, name?, model?, workspace: "isolated"|"read-only", wait?
 
 - KPI 条：Agent 数、运行中、工作项、消息数、token、成本。
 - 页面本身是可拖拽、可分割的白板：每个面板都能移动、调整大小与全屏；布局持久化在白板文件里，编队页仍固定不可关闭。
-- Agent 网络：`global → project → node/child` 的树与跨 Agent 协作连线；卡片显示角色、模型、状态、token/成本、当前 execution；1,000 Agent 时默认折叠项目，展开后按窗口分批渲染。
+- Agent 网络：以 Main Agent 为圆心的同心环图——内环是 thread（项目主管）卡，外环是 graph agent（节点/子 Agent）圆点，父子与同族用连续贝塞尔曲线连接；卡片/圆点显示角色、模型、状态、token/成本与当前 execution；1,000 Agent 时禁止铺满 1k 个点：thread 超过 12 个聚合，graph agent 超过阈值按项目聚合成簇，保证一屏可读。
 - 每张 Agent 卡片打开独立的 `agent:<id>` 标签页：身份、当前操作与 KPI，最近活动（主管/子 Agent 取会话历史，节点取 NodeRun entries），右侧任务、事件、共享产物与关系；不再把详情塞回卡片内。
 - 跨 Agent 协作：委派、投递、spawn、问题与结果的时间线。
 - 协作任务：`work_requests` 与 graph 的执行状态。

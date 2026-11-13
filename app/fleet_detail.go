@@ -257,7 +257,7 @@ func (s *shellState) agentDetailHeader(ctx *ui.Context, agent fleetAgent, data *
 				fleetEllipsis(ctx, joinFleetMeta(meta), t.Text.Sm, t.Muted)
 				fleetEllipsis(ctx, "当前操作 · "+fleetOperation(agent), t.Text.Sm, t.Muted)
 			})
-			actions := ui.Row(ctx).Gap(th.Space(1))
+			actions := ui.Row(ctx).Gap(th.Space(1)).AlignItems(ui.Center)
 			actions.Children(func() {
 				if agent.Kind == "node" {
 					button := kit.Button(ctx, "打开节点窗口", kit.ButtonOpts{Variant: kit.Outline, Size: kit.SizeSm})
