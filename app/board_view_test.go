@@ -513,3 +513,14 @@ func TestTheBoardStacksTheContextOverviewAndTheNetwork(t *testing.T) {
 		t.Fatalf("the agent card leads the last row: agent %+v trajectory %+v", agent, trajectory)
 	}
 }
+
+func TestTheContextOverviewKeepsItsRightEdgeUnfaded(t *testing.T) {
+	if boardPanelFadesRight("context-overview") {
+		t.Fatal("the context overview must not fade its right edge")
+	}
+	for _, kind := range []string{"agent", "trajectory", "agent-network"} {
+		if !boardPanelFadesRight(kind) {
+			t.Fatalf("panel %q keeps the scroll fade", kind)
+		}
+	}
+}
