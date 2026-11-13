@@ -19,8 +19,10 @@ func (s *shellState) view(ctx *ui.Context) {
 					Radius(t.Radius.Xl).Border(gwtheme.Hairline, t.Border).Clip().Label("主区域卡片")
 				kit.Elevate(ctx, card, shellShadow)
 				card.Children(func() {
-					s.conversationPane(ctx)
-					s.columnDivider(ctx)
+					if !s.activeChatCapabilities().HideConversations {
+						s.conversationPane(ctx)
+						s.columnDivider(ctx)
+					}
 					s.chatPane(ctx)
 					s.columnDivider(ctx)
 					s.whiteboard(ctx)
@@ -41,12 +43,14 @@ func (s *shellState) titleBand(ctx *ui.Context) {
 	th := ctx.Theme()
 	band := ui.Row(ctx).FillWidth().Height(titleBandHeight(ctx)).Padding(0, cardGap, 0, th.Space(1.25)).AlignItems(ui.Center)
 	band.Children(func() {
-		listTitle := ui.Row(ctx).Width(listWidth).FillHeight().Padding(0, th.Space(3), 0, th.Space(3)).
-			AlignItems(ui.Center).Label("会话列表标题").DragWindow()
-		listTitle.Children(func() {
-			ui.Spacer(ctx).Grow(1)
-		})
-		ui.Box(ctx).Width(gwtheme.Stroke)
+		if !s.activeChatCapabilities().HideConversations {
+			listTitle := ui.Row(ctx).Width(listWidth).FillHeight().Padding(0, th.Space(3), 0, th.Space(3)).
+				AlignItems(ui.Center).Label("会话列表标题").DragWindow()
+			listTitle.Children(func() {
+				ui.Spacer(ctx).Grow(1)
+			})
+			ui.Box(ctx).Width(gwtheme.Stroke)
+		}
 		chatTitle := ui.Row(ctx).Grow(1).FillHeight().AlignItems(ui.Center).Label("对话标题").DragWindow()
 		chatTitle.Children(func() {
 			ui.Box(ctx).Width(th.Space(4))

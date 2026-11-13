@@ -142,22 +142,23 @@ func (c *chatState) send() {
 }
 
 func (c *chatState) sendText(text string) {
-	if text == "" || c.active == "" {
+	text = stripSpace(text)
+	if text == "" || c.active == "" || c.source == nil {
 		return
 	}
-	if c.nodeMode {
-		c.sendNode(text)
-		return
-	}
-	body := map[string]string{"text": text, "requestId": "native-" + time.Now().Format("150405.000000")}
-	if _, err := c.api.post("/api/conversations/"+c.active+"/messages", body); err != nil {
+	if err := c.source.Send(c, text); err != nil {
 		c.status = "发送失败：" + err.Error()
 		return
 	}
-	c.draft = ""
+	if stripSpace(c.draft) == text {
+		c.draft = ""
+	}
+	c.focusComposer = true
 	c.status = "已发出，等待回复…"
 	c.refresh()
-	go c.follow()
+	if c.source.Follows() {
+		go c.follow()
+	}
 }
 
 func (c *chatState) follow() {
@@ -175,79 +176,33 @@ func (c *chatState) follow() {
 }
 
 func (c *chatState) refresh() {
-	if c.nodeMode {
-		c.refreshNode()
+	if c.source == nil && c.active != "" {
+		c.source = newConversationChatSource(c.api, c.active)
+	}
+	if c.source == nil {
 		return
 	}
-	payload, err := c.api.get("/api/conversations/" + c.active)
-	if err != nil {
+	if _, err := c.source.Refresh(c); err != nil {
 		c.status = "读不到这个会话：" + err.Error()
-		return
-	}
-	messages, err := parseConversationMessages(payload)
-	if err != nil {
-		c.status = "会话内容不是预期的 JSON：" + err.Error()
-		return
-	}
-	if c.pagedHistory {
-		c.messages = mergeMessages(c.messages, messages)
-	} else {
-		c.messages = messages
-	}
-	if len(messages) > 0 && messages[len(messages)-1].Role == "assistant" {
-		c.status = ""
 	}
 }
 
 func (c *chatState) open(id string) {
-	payload, err := c.api.get("/api/conversations/" + id)
-	if err != nil {
-		c.status = "读不到这个会话：" + err.Error()
-		return
-	}
-	messages, err := parseConversationMessages(payload)
-	if err != nil {
-		c.status = "会话内容不是预期的 JSON：" + err.Error()
-		return
-	}
-	c.messages = messages
-	c.fingerprint = transcriptFingerprint(messages)
-	c.historyLoading = false
-	c.pagedHistory = false
-	c.runBoundaries = map[string]bool{}
-	if len(messages) > 0 {
-		c.runBoundaries[messages[0].ID] = true
-	}
-	raw, _ := parseConversationRaw(payload)
-	c.oldestSeq = oldestSeqOf(raw)
-	c.noMoreHistory = c.oldestSeq <= 0 || len(raw) < historyPageSize
-	c.active = id
+	c.openSource(newConversationChatSource(c.api, id))
+}
+
+func (c *chatState) openSource(source agentChatSource) {
+	c.source = source
+	c.active = source.Key()
+	c.messages = nil
+	c.fingerprint = ""
+	c.status = "正在读取会话…"
 	c.questions = nil
-	if body, err := parseConversationBody(payload); err == nil {
-		c.paused = body.Paused
-		for _, question := range body.Questions {
-			if question.open() {
-				c.questions = append(c.questions, question)
-			}
-		}
-	}
 	c.artifacts = nil
-	c.preview = ""
-	c.previewTitle = ""
-	if listed, err := c.api.get("/api/conversations/" + id + "/artifacts"); err == nil {
-		if rows, err := parseArtifacts(listed); err == nil {
-			c.artifacts = rows
-		}
-	}
 	c.tasks = nil
-	if rows, err := parseGraphTasks(payload); err == nil {
-		c.tasks = rows
+	if err := source.Load(c); err != nil && c.status == "正在读取会话…" {
+		c.status = "读不到这个会话：" + err.Error()
 	}
-	if len(messages) == 0 {
-		c.status = "这个会话还没有可显示的对话。"
-		return
-	}
-	c.status = ""
 }
 
 func countLabel(count int) string {
@@ -343,7 +298,7 @@ const (
 )
 
 func (c *chatState) composerMode() composerMode {
-	if c.nodeMode {
+	if c.source != nil && !c.source.Capabilities().Pause {
 		return composerSend
 	}
 	if c.busy() && !c.paused {
@@ -383,7 +338,7 @@ func (c *chatState) composer(ctx *ui.Context) {
 			ui.Row(ctx).FillWidth().AlignItems(ui.Center).Gap(th.Space(1.5)).Children(func() {
 				composerPlaceholder(ctx, iconClip, "附件")
 				ui.Spacer(ctx)
-				if !c.nodeMode {
+				if c.source == nil || c.source.Capabilities().ModelChip {
 					c.modelChip(ctx)
 				}
 				composerPlaceholder(ctx, iconMic, "语音")

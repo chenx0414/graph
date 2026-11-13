@@ -41,7 +41,7 @@ func mergeMessages(older, newer []transcriptMessage) []transcriptMessage {
 }
 
 func (c *chatState) ensureHistory() {
-	if c.nodeMode {
+	if c.source == nil || !c.source.Capabilities().History {
 		c.noMoreHistory = true
 		return
 	}

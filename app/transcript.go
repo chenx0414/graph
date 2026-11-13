@@ -156,9 +156,7 @@ type chatState struct {
 	draft           string
 	focusComposer   bool
 	active          string
-	nodeMode        bool
-	nodeTaskID      string
-	nodeID          string
+	source          agentChatSource
 	agentTitle      string
 	agentStatus     string
 	agentDetail     func()

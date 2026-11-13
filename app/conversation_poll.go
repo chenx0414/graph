@@ -19,45 +19,9 @@ func transcriptFingerprint(messages []transcriptMessage) string {
 }
 
 func (c *chatState) poll() bool {
-	if c.active == "" || c.api.address == "" {
+	if c.active == "" || c.api.address == "" || c.source == nil {
 		return false
 	}
-	payload, err := c.api.get("/api/conversations/" + c.active)
-	if err != nil {
-		return false
-	}
-	messages, err := parseConversationMessages(payload)
-	if err != nil {
-		return false
-	}
-	fingerprint := transcriptFingerprint(messages)
-	body, bodyErr := parseConversationBody(payload)
-	changed := fingerprint != c.fingerprint
-	if bodyErr == nil {
-		if body.Paused != c.paused || len(body.Questions) != len(c.questions) {
-			changed = true
-		}
-	}
-	if !changed {
-		return false
-	}
-	c.fingerprint = fingerprint
-	if c.pagedHistory {
-		c.messages = mergeMessages(c.messages, messages)
-	} else {
-		c.messages = messages
-	}
-	if bodyErr == nil {
-		c.paused = body.Paused
-		c.questions = nil
-		for _, question := range body.Questions {
-			if question.open() {
-				c.questions = append(c.questions, question)
-			}
-		}
-	}
-	if rows, err := parseGraphTasks(payload); err == nil {
-		c.tasks = rows
-	}
-	return true
+	changed, err := c.source.Refresh(c)
+	return err == nil && changed
 }

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -54,6 +55,10 @@ func (m *nodeChatMock) server(t *testing.T) *httptest.Server {
 			payload, _ := io.ReadAll(r.Body)
 			m.posted = append(m.posted, string(payload))
 			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		if strings.Contains(r.URL.Path, "/n3/") {
+			_, _ = w.Write([]byte(`{"entries":[{"seq":1,"id":"x3","role":"assistant","kind":"message","text":"这是第三个节点的记录","createdAt":3}]}`))
 			return
 		}
 		_, _ = w.Write([]byte(m.run))
@@ -163,5 +168,108 @@ func TestChildChatOpensWithoutSidebar(t *testing.T) {
 	state.openFleetAgentChat(child)
 	if state.activeID != "c1" || state.active() == nil || state.active().agentTitle != "spawn-probe" {
 		t.Fatalf("a child opens its chat with a header, activeID %q", state.activeID)
+	}
+}
+
+func TestNodeChatSourceWinsOverConversationID(t *testing.T) {
+	fleet := ringGraphFleet()
+	node := fleetAgent{ID: "p1-n2", ParentID: "p1", Kind: "node", Name: "fleet-ui", ConversationID: "p1", TaskID: "tA", NodeID: "n2", Status: "running"}
+	mock := &nodeChatMock{
+		fleet: fleet,
+		run:   `{"entries":[{"seq":1,"id":"e1","role":"assistant","kind":"message","text":"节点记录优先","createdAt":1}]}`,
+		conv:  map[string]string{"p1": `{"messages":[]}`},
+	}
+	state, _ := nodeChatShell(t, mock)
+	state.openFleetAgentChat(node)
+	active := state.active()
+	if active == nil || active.active != "node:tA/n2" {
+		t.Fatalf("a node agent opens the node source even with a conversation id, %+v", active)
+	}
+	if _, ok := active.source.(*nodeChatSource); !ok {
+		t.Fatalf("the node chat uses the node source, %T", active.source)
+	}
+	if len(active.messages) != 1 || active.messages[0].Text != "节点记录优先" {
+		t.Fatalf("the node chat reads its entries, %+v", active.messages)
+	}
+}
+
+func TestSwitchingNodeChatsReplacesTheActiveSource(t *testing.T) {
+	fleet := ringGraphFleet()
+	first := fleetAgent{ID: "p1-n2", ParentID: "p1", Kind: "node", Name: "fleet-ui", TaskID: "tA", NodeID: "n2", Status: "running"}
+	second := fleetAgent{ID: "p1-n3", ParentID: "p1", Kind: "node", Name: "scale-engineer", TaskID: "tA", NodeID: "n3", Status: "idle"}
+	mock := &nodeChatMock{
+		fleet: fleet,
+		run:   `{"entries":[{"seq":1,"id":"e1","role":"assistant","kind":"message","text":"第一个节点的记录","createdAt":1}]}`,
+	}
+	state, _ := nodeChatShell(t, mock)
+	state.openFleetAgentChat(first)
+	state.openFleetAgentChat(second)
+	active := state.active()
+	if active == nil || active.active != "node:tA/n3" {
+		t.Fatalf("opening another node replaces the chat, %+v", active)
+	}
+	if active.agentTitle != "scale-engineer" || len(active.messages) != 1 || active.messages[0].Text != "这是第三个节点的记录" {
+		t.Fatalf("the second node swaps title and messages, %+v", active)
+	}
+	thread := fleetAgent{ID: "p1", ParentID: "g1", Kind: "project", Name: "项目 A", ConversationID: "p1", Status: "running"}
+	mock.conv = map[string]string{"p1": `{"messages":[]}`}
+	state.openFleetAgentChat(thread)
+	if active := state.active(); active == nil || active.active != "p1" {
+		t.Fatalf("conversation after node opens the conversation, %+v", active)
+	}
+	state.openFleetAgentChat(first)
+	if active := state.active(); active == nil || active.active != "node:tA/n2" {
+		t.Fatalf("node after conversation opens the node again, %+v", active)
+	}
+}
+
+func TestNodeChatHidesTheConversationList(t *testing.T) {
+	fleet := ringGraphFleet()
+	node := fleetAgent{ID: "p1-n2", ParentID: "p1", Kind: "node", Name: "fleet-ui", TaskID: "tA", NodeID: "n2", Status: "running"}
+	mock := &nodeChatMock{
+		fleet: fleet,
+		conv:  map[string]string{"p1": `{"messages":[{"id":"m1","role":"assistant","text":"线程消息"}]}`},
+		run:   `{"entries":[{"seq":1,"id":"e1","role":"assistant","kind":"message","text":"节点消息","createdAt":1}]}`,
+	}
+	state, tester := nodeChatShell(t, mock)
+	state.openFleetAgentChat(node)
+	tester = frames(tester)
+	if tester.HasText("会话列表标题") || tester.HasText("main agent 会话") {
+		t.Fatalf("the node chat hides the conversation list, texts %q", tester.Texts())
+	}
+	thread := fleetAgent{ID: "p1", ParentID: "g1", Kind: "project", Name: "项目 A", ConversationID: "p1", Status: "running"}
+	state.openFleetAgentChat(thread)
+	tester = frames(tester)
+	if !tester.HasText("会话列表标题") || !tester.HasText("main agent 会话") {
+		t.Fatalf("a conversation chat restores the list, texts %q", tester.Texts())
+	}
+}
+
+func TestFourAgentKindsShareOpenAgentChat(t *testing.T) {
+	fleet := ringGraphFleet()
+	child := fleetAgent{ID: "c1", ParentID: "p1", Kind: "child", Name: "spawn-probe", ConversationID: "c1"}
+	fleet.Agents = append(fleet.Agents, child)
+	mock := &nodeChatMock{
+		fleet: fleet,
+		conv: map[string]string{
+			"g1": `{"messages":[]}`,
+			"p1": `{"messages":[]}`,
+			"c1": `{"messages":[]}`,
+		},
+		run: `{"entries":[]}`,
+	}
+	state, _ := nodeChatShell(t, mock)
+	agents := []fleetAgent{
+		{ID: "g1", Kind: "global", Name: "Main", ConversationID: "g1"},
+		{ID: "p1", Kind: "project", Name: "项目 A", ConversationID: "p1"},
+		child,
+		{ID: "p1-n2", ParentID: "p1", Kind: "node", Name: "fleet-ui", TaskID: "tA", NodeID: "n2"},
+	}
+	want := []string{"g1", "p1", "c1", "node:tA/n2"}
+	for index, agent := range agents {
+		state.openFleetAgentChat(agent)
+		if active := state.active(); active == nil || active.active != want[index] {
+			t.Fatalf("%s opens %q, got %+v", agent.Kind, want[index], active)
+		}
 	}
 }
