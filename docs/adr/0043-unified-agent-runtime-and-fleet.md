@@ -68,7 +68,9 @@ spawn_agent({ objective, name?, model?, workspace: "isolated"|"read-only", wait?
 白板新增固定的“编队”页（非关闭页），复用白板卡片、滚动、悬停头、tab 样式；信息架构对齐 dsh-context Fleet：
 
 - KPI 条：Agent 数、运行中、工作项、消息数、token、成本。
-- Agent 网络：`global → project → node/child` 的树与跨 Agent 协作连线；卡片显示角色、模型、状态、token/成本、当前 execution。
+- 页面本身是可拖拽、可分割的白板：每个面板都能移动、调整大小与全屏；布局持久化在白板文件里，编队页仍固定不可关闭。
+- Agent 网络：`global → project → node/child` 的树与跨 Agent 协作连线；卡片显示角色、模型、状态、token/成本、当前 execution；1,000 Agent 时默认折叠项目，展开后按窗口分批渲染。
+- 每张 Agent 卡片打开独立的 `agent:<id>` 标签页：身份、当前操作与 KPI，最近活动（主管/子 Agent 取会话历史，节点取 NodeRun entries），右侧任务、事件、共享产物与关系；不再把详情塞回卡片内。
 - 跨 Agent 协作：委派、投递、spawn、问题与结果的时间线。
 - 协作任务：`work_requests` 与 graph 的执行状态。
 - 事件检查：按 Agent 过滤的账本事件。

@@ -105,18 +105,40 @@ type fleetSnapshot struct {
 	Artifacts []fleetArtifact `json:"artifacts"`
 }
 
+type fleetActivity struct {
+	ID    string
+	At    int64
+	Role  string
+	Kind  string
+	Text  string
+	State string
+}
+
+type fleetDetailEntry struct {
+	agentID string
+	loading bool
+	failed  string
+	entries []fleetActivity
+}
+
 type fleetState struct {
 	conversationID string
 	loading        bool
 	failed         string
 	data           *fleetSnapshot
+	global         *fleetSnapshot
+	globalLoading  bool
+	globalFailed   string
+	detail         fleetDetailEntry
 	hoverID        string
-	selectedID     string
 	agentFilter    string
 	category       string
 	generation     int
 	toggled        map[string]bool
 	windows        map[string]int
+	rects          map[string]ui.Rect
+	accents        map[string]ui.Color
+	shares         map[string]float64
 }
 
 func parseFleet(payload []byte) (*fleetSnapshot, error) {
@@ -229,21 +251,32 @@ func (s *shellState) pageFleetGroup(key string) {
 	s.frame()
 }
 
-func (s *shellState) openFleetAgent(agent fleetAgent) {
-	switch agent.Kind {
-	case "global", "project":
-		if agent.ConversationID != "" {
-			go s.selectConversation(agent.ConversationID)
+func (s *shellState) ensureGlobalFleet() {
+	state := &s.fleet
+	if state.globalLoading || state.global != nil {
+		return
+	}
+	state.globalLoading = true
+	state.globalFailed = ""
+	go func() {
+		payload, err := s.api.get("/api/fleet")
+		if err != nil {
+			state.globalFailed = "读不到全局编队：" + err.Error()
+			state.globalLoading = false
+			s.frame()
 			return
 		}
-		if agent.ID != "" {
-			s.fleet.selectedID = agent.ID
+		data, err := parseFleet(payload)
+		if err != nil {
+			state.globalFailed = "全局编队数据格式不对"
+			state.globalLoading = false
 			s.frame()
+			return
 		}
-	default:
-		s.fleet.selectedID = agent.ID
+		state.global = data
+		state.globalLoading = false
 		s.frame()
-	}
+	}()
 }
 
 func (s *shellState) selectFleetAgentFilter(id string) {
@@ -261,7 +294,6 @@ func (s *shellState) selectFleetCategory(category string) {
 }
 
 func (s *shellState) openFleetArtifact(artifact fleetArtifact) {
-	s.fleet.selectedID = artifact.ProducerAgentID
 	s.openModule("artifacts")
 }
 

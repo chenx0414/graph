@@ -199,25 +199,59 @@ func TestTheFleetNetworkWindowsAThousandAgents(t *testing.T) {
 	}
 }
 
-func TestClickingAFleetProjectOpensItsConversation(t *testing.T) {
+func TestTheFleetPageUsesTheFreeformBoardLayout(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
 	tester := openFleetTester(t, state)
-	if err := tester.Click("编队 Agent 13-Graph"); err != nil {
-		t.Fatalf("click the project card: %v", err)
+	page := state.boardPage()
+	want := []string{"fleet-kpi", "fleet-network", "fleet-collaboration", "fleet-tasks", "fleet-events", "fleet-artifacts"}
+	if leaves := boardLeafIDs(&page.Layout); !sameStrings(leaves, want) {
+		t.Fatalf("the fleet page is a freeform board over its layout, leaves %v", leaves)
 	}
-	if state.activeID != "p1" {
-		t.Fatalf("a project card opens its conversation, active %q", state.activeID)
+	if len(state.board.rects) < len(want) {
+		t.Fatalf("the freeform pictures every panel for dragging, rects %+v", state.board.rects)
+	}
+	network, ok := state.board.rects["fleet-network"]
+	if !ok {
+		t.Fatalf("the network panel never laid out, rects %+v", state.board.rects)
+	}
+	tasks, ok := state.board.rects["fleet-tasks"]
+	if !ok {
+		t.Fatalf("the tasks panel never laid out, rects %+v", state.board.rects)
+	}
+	startX, startY := network.X+network.W/2, network.Y+network.H*0.6
+	endX, endY := tasks.X+tasks.W/2, tasks.Y+tasks.H*0.6
+	tester.Press(startX, startY)
+	for step := 1; step <= 12; step++ {
+		tester.Move(startX+(endX-startX)*float32(step)/12, startY+(endY-startY)*float32(step)/12)
+		tester.Frame()
+	}
+	tester.Release(endX, endY)
+	frames(tester)
+	if leaves := boardLeafIDs(&state.boardPage().Layout); !sameStrings(leaves, []string{"fleet-kpi", "fleet-tasks", "fleet-collaboration", "fleet-network", "fleet-events", "fleet-artifacts"}) {
+		t.Fatalf("dragging one fleet panel onto another swaps them, leaves %v", leaves)
 	}
 }
 
-func TestClickingAFleetNodeOpensItsNodeWindow(t *testing.T) {
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for index := range a {
+		if a[index] != b[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestClickingAFleetCardOpensItsAgentPage(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
 	small := &fleetSnapshot{
 		RootID: "p1",
 		Stats:  fleetStats{Agents: 2, Running: 1},
 		Agents: []fleetAgent{
 			{ID: "p1", Kind: "project", Name: "13-Graph", ConversationID: "p1", Status: "running", Model: "deepseek-v4"},
-			{ID: "n2", ParentID: "p1", Kind: "node", Name: "worker", Model: "deepseek-v4-flash", Status: "running", Tokens: 16000, Cost: 0.21, TaskID: "t1", NodeID: "worker", Activity: "实现白板页"},
+			{ID: "n2", ParentID: "p1", Kind: "node", Name: "worker", Model: "deepseek-v4-flash", Status: "running", Tokens: 16000, Cost: 0.21, Requests: 4, TaskID: "t1", NodeID: "worker", Activity: "实现白板页"},
 		},
 	}
 	state.fleet = fleetState{conversationID: "g1", data: small}
@@ -226,15 +260,59 @@ func TestClickingAFleetNodeOpensItsNodeWindow(t *testing.T) {
 	if err := tester.Click("编队 Agent worker"); err != nil {
 		t.Fatalf("click the node card: %v", err)
 	}
-	if state.fleet.selectedID != "n2" {
-		t.Fatalf("a node card selects the node, selected %q", state.fleet.selectedID)
-	}
 	tester = frames(tester)
-	if !tester.HasText("节点窗口 · worker") {
-		t.Fatalf("the node window must open, texts %q", tester.Texts())
+	page := state.boardPage()
+	if page.ID != "agent:n2" || page.Kind != "agent" || page.Title != "worker" {
+		t.Fatalf("a card opens its own agent page, page %+v", page)
 	}
-	if !tester.HasText("deepseek-v4-flash") {
-		t.Fatalf("the node window must show the model, texts %q", tester.Texts())
+	if !tester.HasText("标签页 worker") {
+		t.Fatalf("the agent page shows a tab, texts %q", tester.Texts())
+	}
+	for _, want := range []string{"打开节点窗口", "deepseek-v4-flash", "16.0k", "Tokens", "请求"} {
+		if !tester.HasText(want) {
+			t.Fatalf("the agent page misses %q, texts %q", want, tester.Texts())
+		}
+	}
+}
+
+func TestTheAgentPageClosesLikeAModulePage(t *testing.T) {
+	state := fleetServerShell(t, fleetSampleServer)
+	state.fleet = fleetState{conversationID: "g1", data: &fleetSnapshot{RootID: "p1", Stats: fleetStats{Agents: 1}, Agents: []fleetAgent{{ID: "p1", Kind: "project", Name: "13-Graph", ConversationID: "p1", Status: "running"}}}}
+	state.selectBoardPage(1)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	if err := tester.Click("编队 Agent 13-Graph"); err != nil {
+		t.Fatalf("open the agent page: %v", err)
+	}
+	frames(tester)
+	if err := tester.Click("关闭 13-Graph"); err != nil {
+		t.Fatalf("close the agent page: %v", err)
+	}
+	frames(tester)
+	for _, page := range state.board.pages {
+		if page.ID == "agent:p1" {
+			t.Fatalf("the agent page stayed open, pages %+v", state.board.pages)
+		}
+	}
+}
+
+func TestTheFleetCardsCarryTheAgentMetrics(t *testing.T) {
+	state := fleetServerShell(t, fleetSampleServer)
+	tester := openFleetTester(t, state)
+	for _, want := range []string{"16.0k", "$0.210", "4 步", "占比"} {
+		if !tester.HasText(want) {
+			t.Fatalf("the worker card misses %q, texts %q", want, tester.Texts())
+		}
+	}
+	accents := fleetAccents()
+	seen := false
+	for _, accent := range accents {
+		if countColor(tester.Image(), accent) > 0 {
+			seen = true
+			break
+		}
+	}
+	if !seen {
+		t.Fatal("the agent cards paint a family accent")
 	}
 }
 

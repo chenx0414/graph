@@ -291,3 +291,136 @@ func fleetGroupLimit(state *fleetState, group fleetGroup) int {
 	}
 	return fleetWindowStep
 }
+
+func fleetAgentByID(data *fleetSnapshot, id string) (fleetAgent, bool) {
+	if data == nil || id == "" {
+		return fleetAgent{}, false
+	}
+	for _, agent := range data.Agents {
+		if agent.ID == id {
+			return agent, true
+		}
+	}
+	return fleetAgent{}, false
+}
+
+func fleetAgentDurationMs(agent fleetAgent) int64 {
+	if agent.UpdatedAt <= agent.CreatedAt {
+		return 0
+	}
+	return agent.UpdatedAt - agent.CreatedAt
+}
+
+func fleetAgentSteps(agent fleetAgent) int {
+	return agent.Requests
+}
+
+func fleetAgentShare(data *fleetSnapshot, agent fleetAgent) float64 {
+	total := int64(0)
+	for _, other := range data.Agents {
+		if other.Tokens > 0 {
+			total += other.Tokens
+		}
+	}
+	if total <= 0 || agent.Tokens <= 0 {
+		return 0
+	}
+	return float64(agent.Tokens) / float64(total)
+}
+
+func fleetAgentInitial(agent fleetAgent) string {
+	for _, letter := range []rune(fleetAgentLabel(agent)) {
+		return strings.ToUpper(string(letter))
+	}
+	return "?"
+}
+
+func fleetGroupIndex(data *fleetSnapshot, agent fleetAgent) int {
+	if agent.Kind == "global" {
+		return -1
+	}
+	for index, group := range fleetGroups(data) {
+		if group.Orphan {
+			if agent.Kind == "node" || agent.Kind == "child" {
+				if project, ok := fleetProjectOf(fleetIndex(data), agent); !ok || project.ID == "" {
+					return index
+				}
+			}
+			continue
+		}
+		if group.Project.ID == agent.ID {
+			return index
+		}
+		for _, child := range group.Agents {
+			if child.ID == agent.ID {
+				return index
+			}
+		}
+	}
+	return 0
+}
+
+func fleetTasksFor(data *fleetSnapshot, agent fleetAgent) []fleetTask {
+	tasks := []fleetTask{}
+	for _, task := range data.Tasks {
+		if task.OwnerAgentID == agent.ID || (agent.Kind == "project" && agent.ProjectID != "" && task.ProjectID == agent.ProjectID) {
+			tasks = append(tasks, task)
+		}
+	}
+	return tasks
+}
+
+func fleetEventsFor(data *fleetSnapshot, agent fleetAgent) []fleetEvent {
+	events := []fleetEvent{}
+	for _, event := range data.Events {
+		if event.AgentID == agent.ID || event.TargetAgentID == agent.ID {
+			events = append(events, event)
+		}
+	}
+	return events
+}
+
+func fleetArtifactsFor(data *fleetSnapshot, agent fleetAgent) []fleetArtifact {
+	artifacts := []fleetArtifact{}
+	for _, artifact := range data.Artifacts {
+		if artifact.ProducerAgentID == agent.ID {
+			artifacts = append(artifacts, artifact)
+		}
+	}
+	return artifacts
+}
+
+func fleetParentOf(data *fleetSnapshot, agent fleetAgent) (fleetAgent, bool) {
+	return fleetAgentByID(data, agent.ParentID)
+}
+
+func fleetChildrenOf(data *fleetSnapshot, agent fleetAgent) []fleetAgent {
+	children := []fleetAgent{}
+	for _, other := range data.Agents {
+		if other.ParentID == agent.ID {
+			children = append(children, other)
+		}
+	}
+	return children
+}
+
+func fleetGroupKey(group fleetGroup) string {
+	if group.Orphan {
+		return "orphans"
+	}
+	return group.Project.ID
+}
+
+func joinFleetMeta(parts []string) string {
+	out := ""
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		if out != "" {
+			out += " · "
+		}
+		out += part
+	}
+	return out
+}

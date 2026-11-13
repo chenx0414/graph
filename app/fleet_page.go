@@ -2,6 +2,7 @@ package main
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -15,14 +16,29 @@ func defaultFleetPanels() []boardPanel {
 	return panels
 }
 
+func defaultFleetLayout() boardNode {
+	network := boardSlot{Weight: 3, Node: boardNode{Kind: "panel", PanelID: "fleet-network"}}
+	right := boardSlot{Weight: 2, Node: boardNode{Kind: "split", Axis: "column", Children: []boardSlot{
+		{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "fleet-collaboration"}},
+		{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "fleet-tasks"}},
+	}}}
+	return boardNode{Kind: "split", Axis: "column", Children: []boardSlot{
+		{Weight: 1.15, Node: boardNode{Kind: "panel", PanelID: "fleet-kpi"}},
+		{Weight: 4.2, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{network, right}}},
+		{Weight: 2.4, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
+			{Weight: 3, Node: boardNode{Kind: "panel", PanelID: "fleet-events"}},
+			{Weight: 2, Node: boardNode{Kind: "panel", PanelID: "fleet-artifacts"}},
+		}}},
+	}}
+}
+
 func defaultFleetPage() boardPage {
-	panels := defaultFleetPanels()
 	return boardPage{
 		ID:     fleetPageID,
 		Title:  fleetPageTitle,
 		Kind:   fleetPageID,
-		Panels: panels,
-		Layout: layoutFromPanels(panels),
+		Panels: defaultFleetPanels(),
+		Layout: defaultFleetLayout(),
 	}
 }
 
@@ -41,11 +57,16 @@ func (s *shellState) pinBoardPages() {
 	}
 	pinned := defaultBoardPage()
 	pinnedSet := false
+	fleet := defaultFleetPage()
+	fleetSet := false
 	modules := []boardPage{}
 	for _, page := range s.board.pages {
 		switch {
 		case page.ID == fleetPageID || page.Kind == fleetPageID:
-			continue
+			if !fleetSet {
+				fleet = page
+				fleetSet = true
+			}
 		case page.Kind == "":
 			if pinnedSet {
 				continue
@@ -57,8 +78,15 @@ func (s *shellState) pinBoardPages() {
 		}
 	}
 	pinned.ID, pinned.Kind, pinned.Title = "board", "", boardDefaultTitle
+	fleet.ID, fleet.Kind, fleet.Title = fleetPageID, fleetPageID, fleetPageTitle
+	if fleetSet {
+		normalizeBoardLayout(&fleet.Layout)
+		if fleet.Layout.Kind == "" || len(fleet.Panels) == 0 {
+			fleet = defaultFleetPage()
+		}
+	}
 	pages := make([]boardPage, 0, len(modules)+2)
-	pages = append(pages, pinned, defaultFleetPage())
+	pages = append(pages, pinned, fleet)
 	pages = append(pages, modules...)
 	s.board.pages = pages
 	s.board.active = 0
@@ -121,60 +149,37 @@ func (s *shellState) closeBoardPage(index int) {
 	s.frame()
 }
 
-func fleetPanelOf(page *boardPage, kind string) *boardPanel {
-	for index := range page.Panels {
-		if page.Panels[index].Kind == kind {
-			return &page.Panels[index]
-		}
-	}
-	return nil
+func fleetAgentPageID(agentID string) string {
+	return "agent:" + agentID
 }
 
-func (s *shellState) fleetPageView(ctx *ui.Context, page *boardPage) {
-	th := ctx.Theme()
-	dashboard := ui.Column(ctx).Fill().Padding(th.Space(2.5)).Gap(th.Space(2.5))
-	dashboard.Children(func() {
-		kpi := fleetPanelOf(page, "fleet-kpi")
-		if kpi != nil {
-			band := ui.Column(ctx).FillWidth().Height(th.Space(32))
-			band.Children(func() { s.boardPanelView(ctx, kpi, false, false) })
+func fleetAgentIDOfPage(pageID string) string {
+	return strings.TrimPrefix(pageID, "agent:")
+}
+
+func (s *shellState) openFleetAgentPage(agent fleetAgent) error {
+	if agent.ID == "" {
+		return nil
+	}
+	id := fleetAgentPageID(agent.ID)
+	for index := range s.board.pages {
+		if s.board.pages[index].ID == id {
+			s.selectBoardPage(index)
+			return nil
 		}
-		middle := ui.Row(ctx).FillWidth().Grow(1).Gap(th.Space(2.5))
-		middle.Children(func() {
-			left := ui.Column(ctx).Grow(3).FillHeight()
-			left.Children(func() {
-				if panel := fleetPanelOf(page, "fleet-network"); panel != nil {
-					s.boardPanelView(ctx, panel, false, false)
-				}
-			})
-			right := ui.Column(ctx).Grow(2).FillHeight().Gap(th.Space(2.5))
-			right.Children(func() {
-				for _, column := range []struct {
-					kind string
-					grow float32
-				}{{"fleet-collaboration", 3}, {"fleet-tasks", 2}} {
-					panel := fleetPanelOf(page, column.kind)
-					if panel == nil {
-						continue
-					}
-					cell := ui.Column(ctx).Grow(column.grow).FillWidth()
-					cell.Children(func() { s.boardPanelView(ctx, panel, false, false) })
-				}
-			})
-		})
-		bottom := ui.Row(ctx).FillWidth().Grow(1).Gap(th.Space(2.5))
-		bottom.Children(func() {
-			for _, column := range []struct {
-				kind string
-				grow float32
-			}{{"fleet-events", 3}, {"fleet-artifacts", 2}} {
-				panel := fleetPanelOf(page, column.kind)
-				if panel == nil {
-					continue
-				}
-				cell := ui.Column(ctx).Grow(column.grow).FillHeight()
-				cell.Children(func() { s.boardPanelView(ctx, panel, false, false) })
-			}
-		})
-	})
+	}
+	title := fleetAgentLabel(agent)
+	page := boardPage{
+		ID:     id,
+		Title:  title,
+		Kind:   "agent",
+		Panels: []boardPanel{{ID: "agent-detail", Kind: "agent-detail"}},
+		Layout: boardNode{Kind: "panel", PanelID: "agent-detail"},
+	}
+	s.board.pages = append(s.board.pages, page)
+	s.board.active = len(s.board.pages) - 1
+	s.ensureBoardPageData()
+	s.saveBoard()
+	s.frame()
+	return nil
 }

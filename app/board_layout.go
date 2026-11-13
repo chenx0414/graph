@@ -41,7 +41,7 @@ type boardFile struct {
 	Active  int          `json:"active"`
 }
 
-const boardLayoutVersion = 5
+const boardLayoutVersion = 7
 
 const boardDefaultTitle = "白板"
 
@@ -170,6 +170,8 @@ func boardPanelTitle(kind string) string {
 		return "事件检查"
 	case "fleet-artifacts":
 		return "共享产物"
+	case "agent-detail":
+		return "Agent 详情"
 	}
 	return kind
 }
@@ -225,7 +227,14 @@ func (s *shellState) loadBoard(stateDir string) {
 		normalizeBoardLayout(&page.Layout)
 		pruneBoardPanels(page)
 		ensureBoardDashboardPanels(page)
-		if removedPanels || file.Version < boardLayoutVersion {
+		if page.Kind == fleetPageID {
+			if file.Version < boardLayoutVersion {
+				page.Layout = defaultFleetLayout()
+			}
+			normalizeBoardLayout(&page.Layout)
+			continue
+		}
+		if removedPanels {
 			page.Layout = layoutFromPanels(page.Panels)
 			normalizeBoardLayout(&page.Layout)
 		}
@@ -458,7 +467,7 @@ func (s *shellState) ensureBoardPageData() {
 		s.ensureTrajectory()
 	case "insights":
 		s.ensureInsights()
-	case "fleet":
+	case "fleet", "agent":
 		s.ensureFleet()
 	}
 }
