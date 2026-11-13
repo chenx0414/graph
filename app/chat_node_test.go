@@ -115,10 +115,13 @@ func TestOpeningNodeChatReadsAndSendsEntries(t *testing.T) {
 	if active == nil || active.active != "node:tA/n2" {
 		t.Fatalf("the node chat opens with a synthetic id, %+v", active)
 	}
-	for _, want := range []string{"fleet-ui", "节点已启动", "上次调用失败", "正在重做 Graph 页", "详情"} {
+	for _, want := range []string{"节点已启动", "上次调用失败", "正在重做 Graph 页"} {
 		if !tester.HasText(want) {
 			t.Fatalf("the node chat shows %q, texts %q", want, tester.Texts())
 		}
+	}
+	if tester.HasText("详情") {
+		t.Fatalf("the node chat must not paint an agent header/detail bar, texts %q", tester.Texts())
 	}
 	state.active().sendText("继续实现")
 	if len(mock.posted) == 0 || !containsString(mock.posted[0], "继续实现") || !containsString(mock.posted[0], "\"text\"") {

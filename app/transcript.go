@@ -159,7 +159,6 @@ type chatState struct {
 	source          agentChatSource
 	agentTitle      string
 	agentStatus     string
-	agentDetail     func()
 	status          string
 	messages        []transcriptMessage
 	list            ui.ListState

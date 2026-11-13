@@ -5,9 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egoist/mygo/ui"
-	"graph/app/gwui/kit"
-	gwtheme "graph/app/gwui/theme"
 )
 
 type chatCapabilities struct {
@@ -227,8 +224,6 @@ func (s *shellState) installAgentChat(source agentChatSource, agent fleetAgent) 
 	if agent.ID != "" {
 		state.agentTitle = fleetAgentLabel(agent)
 		state.agentStatus = agent.Status
-		selected := agent
-		state.agentDetail = func() { _ = s.openFleetAgentPage(selected) }
 	}
 	state.openSource(source)
 	s.chatMu.Lock()
@@ -239,28 +234,3 @@ func (s *shellState) installAgentChat(source agentChatSource, agent fleetAgent) 
 }
 
 func stripSpace(text string) string { return strings.TrimSpace(text) }
-
-func (c *chatState) agentHeader(ctx *ui.Context) {
-	if c.agentTitle == "" {
-		return
-	}
-	t, th := gwtheme.Of(ctx), ctx.Theme()
-	row := ui.Row(ctx).FillWidth().Padding(th.Space(1.5), th.Space(3)).Gap(th.Space(1.5)).AlignItems(ui.Center).
-		Background(t.Card).Border(gwtheme.Hairline, t.Border)
-	row.Children(func() {
-		fleetAvatar(ctx, fleetGraphInitial(c.agentTitle), t.Primary, th.Space(5))
-		ui.Column(ctx).Gap(0).Grow(1).Children(func() {
-			kit.Text(ctx, c.agentTitle, t.Text.Sm).FontWeight(650).TextColor(t.Foreground).SingleLine().Ellipsis("…")
-			if c.agentStatus != "" {
-				ui.Row(ctx).Gap(th.Space(1)).AlignItems(ui.Center).Children(func() {
-					fleetStatusDot(ctx, c.agentStatus)
-					kit.Text(ctx, fleetStatusLabel(c.agentStatus), t.Text.Xs).TextColor(t.Muted)
-				})
-			}
-		})
-		if c.agentDetail != nil {
-			detail := c.agentDetail
-			kit.Button(ctx, "详情", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).OnClick(func() { go detail() })
-		}
-	})
-}

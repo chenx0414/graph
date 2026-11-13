@@ -218,7 +218,6 @@ func (c *chatState) frame() {
 func (c *chatState) view(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	ui.Column(ctx).Fill().Children(func() {
-		c.agentHeader(ctx)
 		c.transcript(ctx)
 		if c.status != "" {
 			ui.Text(ctx, c.status).FontSize(12).TextColor(th.TextMuted).Padding(16, 4, 16, 0)
