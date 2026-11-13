@@ -24,6 +24,7 @@ type shellState struct {
 	insights       insightsState
 	fleet          fleetState
 	graph          fleetGraphView
+	boardNet       netPanelState
 	conversations  []conversationSummary
 	supervisorID   string
 	broken         bool

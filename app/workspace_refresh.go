@@ -29,10 +29,15 @@ func (c *chatState) refreshArtifacts() bool {
 func (s *shellState) refreshVisibleWorkspace() {
 	switch s.activeBoardKind() {
 	case "":
-		if s.panelOf("agent") != nil {
+		if s.panelOf("agent") != nil || s.panelOf("agent-network") != nil {
 			s.refreshFleet()
-			if agent, _ := s.chatAgent(); agent != nil {
+			if agent, _ := s.chatAgent(); agent != nil && s.panelOf("agent") != nil {
 				s.refreshFleetDetail(*agent)
+			}
+			if s.panelOf("agent-network") != nil {
+				if scope := s.chatScope(); scope.Kind == "node" {
+					s.refreshNetGraph(scope)
+				}
 			}
 		}
 	case "fleet":

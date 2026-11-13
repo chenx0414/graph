@@ -19,6 +19,7 @@ type nodeChatMock struct {
 	runOlder map[string]string
 	taskView string
 	artifact string
+	topology string
 	asked    []string
 	fail     bool
 	posted   []string
@@ -63,6 +64,10 @@ func (m *nodeChatMock) server(t *testing.T) *httptest.Server {
 			return
 		}
 		m.asked = append(m.asked, r.URL.Path)
+		if strings.HasSuffix(r.URL.Path, "/graph/topology") {
+			_, _ = w.Write([]byte(m.topology))
+			return
+		}
 		if strings.HasSuffix(r.URL.Path, "/artifacts") {
 			_, _ = w.Write([]byte(m.artifact))
 			return

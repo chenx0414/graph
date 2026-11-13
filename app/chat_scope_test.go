@@ -5,6 +5,12 @@ import (
 	"time"
 )
 
+func showArtifactsBoard(state *shellState) {
+	page := &state.board.pages[0]
+	page.Panels = append(page.Panels, boardPanel{ID: "artifacts", Kind: "artifacts"})
+	page.Layout = layoutFromPanels(page.Panels)
+}
+
 func TestNodeChatFillsTheWhiteboardWithItsOwnData(t *testing.T) {
 	fleet := ringGraphFleet()
 	node := fleetAgent{ID: "p1-n2", ParentID: "p1", Kind: "node", Name: "fleet-ui", TaskID: "tA", NodeID: "n2", Status: "running"}
@@ -19,6 +25,7 @@ func TestNodeChatFillsTheWhiteboardWithItsOwnData(t *testing.T) {
 		]}`,
 	}
 	state, tester := nodeChatShell(t, mock)
+	showArtifactsBoard(state)
 	state.openFleetAgentChat(node)
 	tester = frames(frames(tester))
 	if !tester.HasText("把这个白板接到当前 Agent") {

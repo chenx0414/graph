@@ -41,7 +41,7 @@ type boardFile struct {
 	Active  int          `json:"active"`
 }
 
-const boardLayoutVersion = 8
+const boardLayoutVersion = 9
 
 const boardDefaultTitle = "白板"
 
@@ -52,7 +52,7 @@ const boardMinPaneHeight = 90
 func defaultBoardPanels() []boardPanel {
 	return []boardPanel{
 		{ID: "agent", Kind: "agent"},
-		{ID: "artifacts", Kind: "artifacts"},
+		{ID: "agent-network", Kind: "agent-network"},
 		{ID: "trajectory", Kind: "trajectory"},
 		{ID: "insights", Kind: "insights"},
 	}
@@ -62,7 +62,7 @@ func defaultBoardLayout() boardNode {
 	return boardNode{Kind: "split", Axis: "column", Children: []boardSlot{
 		{Weight: 1, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
 			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "agent"}},
-			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "artifacts"}},
+			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "agent-network"}},
 		}}},
 		{Weight: 1, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
 			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "trajectory"}},
@@ -148,6 +148,8 @@ func boardPanelTitle(kind string) string {
 		return "任务清单"
 	case "agent":
 		return "Agent 面板"
+	case "agent-network":
+		return "Agent 网络"
 	case "capabilities":
 		return "能力库"
 	case "settings":
@@ -218,6 +220,9 @@ func (s *shellState) loadBoard(stateDir string) {
 				}
 				if panel.Kind == "tasks" && file.Version < boardLayoutVersion {
 					panel.Kind = "agent"
+				}
+				if panel.Kind == "artifacts" && file.Version < boardLayoutVersion {
+					panel.Kind = "agent-network"
 				}
 				kept = append(kept, panel)
 			}
