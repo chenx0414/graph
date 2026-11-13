@@ -52,6 +52,9 @@ func ConversationActivityRecords(activity any, reply string) []ConversationActiv
 			data["result"] = result
 			text = text + " → " + truncateRunes(result, 400)
 		}
+		if output := conversationActivityString(entry["output"]); strings.TrimSpace(output) != "" {
+			data["output"] = truncateRunes(output, 8_000)
+		}
 		record := ConversationActivityRecord{Kind: ConversationActivityTool, Text: text, Data: data}
 		if ordinal != nil {
 			record.Ordinal = ordinal

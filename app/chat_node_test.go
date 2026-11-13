@@ -457,3 +457,21 @@ func TestNodeChatSaysWhenTheHistoryStarts(t *testing.T) {
 		t.Fatalf("a fully loaded node chat says where its history starts, texts %q", tester.Texts())
 	}
 }
+
+func TestNodeToolEntriesDecodeIntoOneCodexActivity(t *testing.T) {
+	payload := []byte(`{"entries":[
+		{"seq":1,"id":"c1","role":"tool","kind":"call","text":"{\"name\":\"bash\",\"args\":{\"command\":\"echo hi\"}}","createdAt":1,"data":{"toolCallId":"call-1","toolName":"bash"}},
+		{"seq":2,"id":"r1","role":"tool","kind":"result","text":"{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}","createdAt":2,"data":{"toolCallId":"call-1","toolName":"bash"}}
+	],"hasOlder":false}`)
+	messages, _, err := parseNodeRunEntries(payload)
+	if err != nil {
+		t.Fatalf("parse the node entries: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("a call and its result fold into one activity, messages %+v", messages)
+	}
+	message := messages[0]
+	if message.Data.Tool != "bash" || message.Data.Command != "echo hi" || message.Data.Output != "hi" || message.State != "done" {
+		t.Fatalf("the activity carries tool, command, output and state, got %+v", message)
+	}
+}

@@ -12,9 +12,27 @@ import (
 )
 
 type codexActivity struct {
-	kind   string
-	text   string
-	detail string
+	kind    string
+	text    string
+	label   string
+	command string
+	output  string
+	failed  bool
+	key     string
+}
+
+func codexActivityLabel(name string) string {
+	switch {
+	case codexCommandTools[name]:
+		return "Shell"
+	case codexImageTools[name]:
+		return "Image"
+	case codexEditTools[name]:
+		return "Edit"
+	case name == "":
+		return "Tool"
+	}
+	return name
 }
 
 var codexCommandTools = map[string]bool{"bash": true, "shell": true, "exec": true, "terminal": true, "run_command": true, "cmd": true}
@@ -33,16 +51,25 @@ func codexToolPayload(text, tool string) string {
 func codexActivities(run transcriptRun) []codexActivity {
 	activities := []codexActivity{}
 	commands := []string{}
+	outputs := []string{}
+	failed := false
+	key := ""
 	flushCommands := func() {
 		if len(commands) == 0 {
 			return
 		}
-		activities = append(activities, codexActivity{kind: "command", text: "已运行 " + strings.Join(commands, "; ")})
-		commands = nil
+		activities = append(activities, codexActivity{
+			kind: "command", text: "已运行 " + strings.Join(commands, "; "), label: "Shell",
+			command: strings.Join(commands, "; "), output: strings.Join(outputs, "\n\n"), failed: failed, key: key,
+		})
+		commands, outputs, failed, key = nil, nil, false, ""
 	}
 	for _, message := range run.messages {
 		name := message.Data.Tool
-		payload := codexToolPayload(message.Text, name)
+		payload := message.Data.Command
+		if payload == "" {
+			payload = codexToolPayload(message.Text, name)
+		}
 		running := message.State != "done"
 		switch {
 		case codexCommandTools[name]:
@@ -51,17 +78,26 @@ func codexActivities(run transcriptRun) []codexActivity {
 			}
 			if running {
 				flushCommands()
-				activities = append(activities, codexActivity{kind: "command", text: "正在运行 " + payload})
+				activities = append(activities, codexActivity{kind: "command", text: "正在运行 " + payload, label: "Shell", command: payload, key: message.Data.ToolCallID})
 				continue
 			}
+			if len(commands) == 0 {
+				key = message.Data.ToolCallID
+			}
 			commands = append(commands, payload)
+			if message.Data.Output != "" {
+				outputs = append(outputs, message.Data.Output)
+			}
+			if message.Data.Error {
+				failed = true
+			}
 		case codexImageTools[name]:
 			flushCommands()
 			text := "已查看 1 张图像"
 			if running {
 				text = "正在查看图像"
 			}
-			activities = append(activities, codexActivity{kind: "image", text: text})
+			activities = append(activities, codexActivity{kind: "image", text: text, label: "Image", output: message.Data.Output, key: message.Data.ToolCallID})
 		case codexEditTools[name]:
 			flushCommands()
 			text := "已编辑文件"
@@ -74,7 +110,7 @@ func codexActivities(run transcriptRun) []codexActivity {
 					text = "正在编辑 " + payload
 				}
 			}
-			activities = append(activities, codexActivity{kind: "edit", text: text})
+			activities = append(activities, codexActivity{kind: "edit", text: text, label: "Edit", command: payload, output: message.Data.Output, failed: message.Data.Error, key: message.Data.ToolCallID})
 		default:
 			flushCommands()
 			label := name
@@ -85,7 +121,7 @@ func codexActivities(run transcriptRun) []codexActivity {
 			if running {
 				text = label + "运行中"
 			}
-			activities = append(activities, codexActivity{kind: "tool", text: text})
+			activities = append(activities, codexActivity{kind: "tool", text: text, label: codexActivityLabel(name), output: message.Data.Output, failed: message.Data.Error, key: message.Data.ToolCallID})
 		}
 	}
 	flushCommands()
@@ -163,12 +199,53 @@ func (c *chatState) toolRow(ctx *ui.Context, run transcriptRun) {
 		return
 	}
 	for _, activity := range codexActivities(run) {
-		row := ui.Row(ctx).FillWidth().Height(th.Space(8)).Gap(th.Space(2)).AlignItems(ui.Center)
+		rowKey := "act:" + activity.key
+		if activity.key == "" {
+			rowKey = "act:" + activity.text
+		}
+		open := c.expanded[rowKey]
+		row := ui.Row(ctx).FillWidth().Height(th.Space(8)).Gap(th.Space(2)).AlignItems(ui.Center).
+			Label(activity.text).Focusable()
+		row.OnClick(func() {
+			c.expanded[rowKey] = !open
+			c.frame()
+		})
 		row.Children(func() {
 			ui.Icon(ctx, codexActivityIcon(activity.kind)).Size(gwtheme.Icon, gwtheme.Icon).TextColor(t.Muted)
 			kit.Text(ctx, activity.text, t.Text.Sm).TextColor(t.Muted).Grow(1).SingleLine().Ellipsis("…")
+			chevron := ui.Icon(ctx, iconChevron).Size(gwtheme.IconXs, gwtheme.IconXs).TextColor(t.Muted)
+			if open {
+				chevron.Rotate(180)
+			}
 		})
+		if open {
+			c.activityPanel(ctx, activity)
+		}
 	}
+}
+
+func (c *chatState) activityPanel(ctx *ui.Context, activity codexActivity) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	panel := ui.Column(ctx).FillWidth().Padding(th.Space(3)).Radius(t.Radius.Sm).
+		Border(gwtheme.Hairline, t.Border).Background(t.Card).Gap(th.Space(1.5))
+	panel.Children(func() {
+		kit.Text(ctx, activity.label, t.Text.Xs).TextColor(t.Muted)
+		if activity.command != "" {
+			kit.Text(ctx, "$ "+activity.command, t.Text.Xs).Font(gwtheme.MonoFont).TextColor(t.PrimaryText)
+		}
+		if activity.output != "" {
+			kit.Text(ctx, activity.output, t.Text.Xs).Font(gwtheme.MonoFont).TextColor(t.Muted)
+		}
+		ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center).Justify(ui.End).Children(func() {
+			if activity.failed {
+				ui.Icon(ctx, iconClose).Size(gwtheme.IconXs, gwtheme.IconXs).TextColor(t.Danger)
+				kit.Text(ctx, "失败", t.Text.Xs).TextColor(t.Danger)
+				return
+			}
+			ui.Icon(ctx, iconCheck).Size(gwtheme.IconXs, gwtheme.IconXs).TextColor(t.Muted)
+			kit.Text(ctx, "成功", t.Text.Xs).TextColor(t.Muted)
+		})
+	})
 }
 
 func chatRightFade() ui.LinearGradient {

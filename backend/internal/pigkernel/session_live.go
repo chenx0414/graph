@@ -17,13 +17,15 @@ type liveShape struct {
 	busy        bool
 	turns       int
 	tools       map[string]string
+	names       map[string]string
+	args        map[string]ai.JsonObject
 	outputs     map[string]string
 	compactions map[string]string
 	lastEntry   durable.EntryId
 }
 
 func liveShapeOf(state *harness.LiveState) liveShape {
-	shape := liveShape{tools: map[string]string{}, outputs: map[string]string{}, compactions: map[string]string{}}
+	shape := liveShape{tools: map[string]string{}, names: map[string]string{}, args: map[string]ai.JsonObject{}, outputs: map[string]string{}, compactions: map[string]string{}}
 	if state == nil {
 		return shape
 	}
@@ -31,8 +33,19 @@ func liveShapeOf(state *harness.LiveState) liveShape {
 		shape.busy = true
 		shape.turns = state.Run.Turns
 	}
+	if state.Generation != nil && state.Generation.Message != nil {
+		for _, block := range state.Generation.Message.Content {
+			if call, ok := block.(ai.ToolCall); ok {
+				shape.names[call.ID] = call.Name
+				shape.args[call.ID] = call.Arguments
+			}
+		}
+	}
 	for _, slot := range state.Tools {
 		shape.tools[slot.CallId] = string(slot.Status)
+		if slot.Name != "" {
+			shape.names[slot.CallId] = slot.Name
+		}
 		if slot.Output != nil {
 			shape.outputs[slot.CallId] = *slot.Output
 		}
@@ -59,20 +72,38 @@ func diffLive(previous, next liveShape) []map[string]any {
 		switch status {
 		case string(harness.ToolSlotPending), string(harness.ToolSlotRunning):
 			if !known {
-				reports = append(reports, map[string]any{"type": "tool_execution_start", "toolCallId": callId})
+				report := map[string]any{"type": "tool_execution_start", "toolCallId": callId}
+				if name := liveToolName(previous, next, callId); name != "" {
+					report["toolName"] = name
+				}
+				if args, ok := next.args[callId]; ok && args != nil {
+					report["args"] = args
+				}
+				reports = append(reports, report)
 			}
 		case string(harness.ToolSlotDone):
 			result := map[string]any{"content": []any{}}
 			if output := next.outputs[callId]; output != "" {
 				result["content"] = []any{map[string]any{"type": "text", "text": output}}
 			}
-			reports = append(reports, map[string]any{"type": "tool_execution_end", "toolCallId": callId, "isError": false, "result": result})
+			report := map[string]any{"type": "tool_execution_end", "toolCallId": callId, "isError": false, "result": result}
+			if name := liveToolName(previous, next, callId); name != "" {
+				report["toolName"] = name
+			}
+			reports = append(reports, report)
 		}
 	}
 	if previous.busy && !next.busy {
 		reports = append(reports, map[string]any{"type": "agent_end"})
 	}
 	return reports
+}
+
+func liveToolName(previous, next liveShape, callId string) string {
+	if name := next.names[callId]; name != "" {
+		return name
+	}
+	return previous.names[callId]
 }
 
 func startedCompactions(previous, next liveShape) []string {

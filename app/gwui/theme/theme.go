@@ -11,33 +11,35 @@ import (
 )
 
 type Tokens struct {
-	Dark                                                            bool
+	Dark                                                                  bool
 	Window, Sidebar, Background, Foreground, Muted, Border, Grid, Primary ui.Color
-	PrimaryText, SidebarSelected, Hover, Success                    ui.Color
-	GlassBg, GlassBorder, GlassHover ui.Color
-	HoverTint                                                       ui.Color
-	WarningBg, WarningBorder, WarningText, Danger, DangerBg         ui.Color
-	SuccessBg, SuccessBorder, SuccessText, DangerBorder, DangerText ui.Color
-	InsBg, InsText, DelBg, DelText                                  ui.Color
-	Attention, Unread, Input, Ring                                  ui.Color
-	Idle ui.Color
-	Outline ui.Color
-	FloatInset ui.Color
-	DividerHover ui.Color
-	Raised ui.Color
-	Scrim, AlertScrim ui.Color
-	Card ui.Color
-	MarkTile ui.Color
-	OnSolid ui.Color
-	Highlight, HighlightText ui.Color
-	FontSize, BodyFontSize, Scale float32
-	Radius                        RadiusScale
-	Text                          TextScale
+	PrimaryText, SidebarSelected, Hover, Success                          ui.Color
+	GlassBg, GlassBorder, GlassHover                                      ui.Color
+	HoverTint                                                             ui.Color
+	WarningBg, WarningBorder, WarningText, Danger, DangerBg               ui.Color
+	SuccessBg, SuccessBorder, SuccessText, DangerBorder, DangerText       ui.Color
+	InsBg, InsText, DelBg, DelText                                        ui.Color
+	Attention, Unread, Input, Ring                                        ui.Color
+	Idle                                                                  ui.Color
+	Outline                                                               ui.Color
+	FloatInset                                                            ui.Color
+	DividerHover                                                          ui.Color
+	Raised                                                                ui.Color
+	Scrim, AlertScrim                                                     ui.Color
+	Card                                                                  ui.Color
+	MarkTile                                                              ui.Color
+	OnSolid                                                               ui.Color
+	Highlight, HighlightText                                              ui.Color
+	FontSize, BodyFontSize, Scale                                         float32
+	Radius                                                                RadiusScale
+	Text                                                                  TextScale
 }
 
 type RadiusScale struct{ Xs, Sm, Md, Lg, Xl, X2l, X3l, X4l, Full float32 }
 
 type TextScale struct{ Xs, Sm, Base, Body, Lg, Title, Xl, X2l, Display float32 }
+
+const MonoFont = "Menlo"
 
 const (
 	LineXs, LineSm, LineBase, LineBody, LineLg = 1.4, 1.45, 1.3, 1.3, 1.5
@@ -81,41 +83,41 @@ func (s TextScale) Line(size float32) float32 {
 }
 
 const (
-	Stroke       = 1
-	MaterialTint = 0.6
-	Hairline        = 0.01
-	SidebarWidth    = 248
-	SidebarMinWidth = 240
-	SidebarMaxWidth = 480
-	SidebarCollapsePull = 80
-	ListWidth           = 340
-	ListMinWidth        = 280
-	ListMaxWidth        = 560
-	TopBarHeight        = 44
-	DialogSmWidth       = 440
-	BackdropBlur        = 4
-	GlassBlur           = 20
-	DialogLift          = 0.2
-	DialogMinTop        = 32
-	DialogTop           = 64
-	SheetWidth          = 560
-	DialogWideWidth     = 640
-	DialogWideMax       = 788
-	SheetMaxHeight      = 760
-	AsideWidth          = 440
-	FormMaxWidth        = 520
-	ContentMaxWidth     = 1040
-	RuleAsideWidth      = 340
-	RuleConnector       = 20
-	RuleFieldWidth      = 108
-	RuleOpWidth         = 96
-	RuleActionWidth     = 200
-	ControlWidth        = 220
-	SettingsMaxWidth    = 760
-	SettingsSelectMin   = 200
-	SettingsSelectMax   = 280
-	UsageSelectMin      = 240
-	SettingsInputWidth  = 260
+	Stroke                = 1
+	MaterialTint          = 0.6
+	Hairline              = 0.01
+	SidebarWidth          = 248
+	SidebarMinWidth       = 240
+	SidebarMaxWidth       = 480
+	SidebarCollapsePull   = 80
+	ListWidth             = 340
+	ListMinWidth          = 280
+	ListMaxWidth          = 560
+	TopBarHeight          = 44
+	DialogSmWidth         = 440
+	BackdropBlur          = 4
+	GlassBlur             = 20
+	DialogLift            = 0.2
+	DialogMinTop          = 32
+	DialogTop             = 64
+	SheetWidth            = 560
+	DialogWideWidth       = 640
+	DialogWideMax         = 788
+	SheetMaxHeight        = 760
+	AsideWidth            = 440
+	FormMaxWidth          = 520
+	ContentMaxWidth       = 1040
+	RuleAsideWidth        = 340
+	RuleConnector         = 20
+	RuleFieldWidth        = 108
+	RuleOpWidth           = 96
+	RuleActionWidth       = 200
+	ControlWidth          = 220
+	SettingsMaxWidth      = 760
+	SettingsSelectMin     = 200
+	SettingsSelectMax     = 280
+	UsageSelectMin        = 240
+	SettingsInputWidth    = 260
 	SignatureEditorHeight = 257
 	HeadingGap            = 6
 	SectionGap            = 10
@@ -205,8 +207,6 @@ func sized(t Tokens) Tokens {
 		Xl: f + 4, X2l: f + 6, Display: f + 15}
 	return t
 }
-
-
 
 func status(t Tokens) Tokens {
 	t.Success = p.Green600.Color()
@@ -310,8 +310,8 @@ func Of(c *ui.Context) Tokens {
 }
 
 const (
-	MotionFast = 120 * time.Millisecond
-	MotionBase = 200 * time.Millisecond
+	MotionFast   = 120 * time.Millisecond
+	MotionBase   = 200 * time.Millisecond
 	MotionOffset = 4
 
 	SkeletonPulse = 1500 * time.Millisecond

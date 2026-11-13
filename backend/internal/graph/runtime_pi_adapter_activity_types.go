@@ -14,6 +14,7 @@ type PiAdapterToolActivity struct {
 	Name       string `json:"name"`
 	Summary    string `json:"summary"`
 	State      string `json:"state"`
+	Output     string `json:"output,omitempty"`
 }
 
 type PiAdapterActivityRecord struct {
@@ -23,8 +24,9 @@ type PiAdapterActivityRecord struct {
 	Name       string `json:"name,omitempty"`
 	Summary    string `json:"summary,omitempty"`
 	State      string `json:"state,omitempty"`
-	Message string `json:"message,omitempty"`
-	Ordinal int    `json:"ordinal"`
+	Message    string `json:"message,omitempty"`
+	Output     string `json:"output,omitempty"`
+	Ordinal    int    `json:"ordinal"`
 }
 
 type PiAdapterAskedQuestion struct {
@@ -38,10 +40,10 @@ type PiAdapterAskedQuestion struct {
 }
 
 type PiAdapterSupervisorNotice struct {
-	Text      string
-	Milestone string
-	WorkID    string
-	Evidence  string
+	Text            string
+	Milestone       string
+	WorkID          string
+	Evidence        string
 	ArtifactID      string
 	ArtifactVersion int
 	EvidenceExcerpt string

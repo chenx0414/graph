@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/MichaelKinsy/PiG/ai"
 	"github.com/MichaelKinsy/PiG/durable"
 	"github.com/MichaelKinsy/PiG/durable/harness"
 )
@@ -72,5 +73,34 @@ func TestLiveShapeCarriesSlotOutputAndCompactionKey(t *testing.T) {
 	}
 	if shape.compactions["11"] != "overflow" {
 		t.Fatalf("compactions = %v", shape.compactions)
+	}
+}
+
+func TestDiffLiveReportsToolNamesAndArguments(t *testing.T) {
+	state := &harness.LiveState{
+		Run:   &harness.LiveRun{Turns: 1},
+		Tools: []harness.ToolSlot{{CallId: "call-1", Name: "bash", Status: harness.ToolSlotRunning}},
+		Generation: &harness.LiveGeneration{Message: &ai.AssistantMessage{Content: []ai.AssistantContentBlock{
+			ai.ToolCall{ID: "call-1", Name: "bash", Arguments: ai.JsonObject{"command": "echo hi"}},
+		}}},
+	}
+	reports := diffLive(liveShape{}, liveShapeOf(state))
+	start := reports[len(reports)-1]
+	if start["type"] != "tool_execution_start" || start["toolName"] != "bash" {
+		t.Fatalf("the start report names its tool, got %v", start)
+	}
+	args, _ := start["args"].(ai.JsonObject)
+	if args["command"] != "echo hi" {
+		t.Fatalf("the start report carries the call arguments, got %v", start["args"])
+	}
+	output := "hi"
+	done := liveShapeOf(&harness.LiveState{
+		Run:   &harness.LiveRun{Turns: 2},
+		Tools: []harness.ToolSlot{{CallId: "call-1", Name: "bash", Status: harness.ToolSlotDone, Output: &output}},
+	})
+	ended := diffLive(liveShapeOf(state), done)
+	last := ended[len(ended)-1]
+	if last["type"] != "tool_execution_end" || last["toolName"] != "bash" {
+		t.Fatalf("the end report names its tool, got %v", last)
 	}
 }

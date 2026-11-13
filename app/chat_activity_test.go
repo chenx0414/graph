@@ -73,3 +73,42 @@ func TestTheToolActivityFoldsUnderItsDurationHeader(t *testing.T) {
 		t.Fatalf("folding hides the rows, texts %q", tester.Texts())
 	}
 }
+
+func TestCodexActivityCarriesCommandOutputForThePanel(t *testing.T) {
+	message := activityTool("bash", "bash: echo hi", "done")
+	message.Data.Output = "hi"
+	message.Data.ToolCallID = "call-1"
+	activities := codexActivities(transcriptRun{tools: true, messages: []transcriptMessage{message}})
+	if len(activities) != 1 {
+		t.Fatalf("activities %+v", activities)
+	}
+	activity := activities[0]
+	if activity.label != "Shell" || activity.command != "echo hi" || activity.output != "hi" || activity.failed {
+		t.Fatalf("the activity carries its panel data, got %+v", activity)
+	}
+}
+
+func TestAToolRowExpandsIntoTheCodexPanel(t *testing.T) {
+	state := newChatState("http://127.0.0.1:1", "tok")
+	message := activityTool("bash", "bash: echo hi", "done")
+	message.Data.Output = "hi there"
+	message.Data.ToolCallID = "call-1"
+	message.CreatedAt = 1_000_000
+	state.messages = []transcriptMessage{message}
+	tester := frames(ui.NewTester(state.view, 760, 620))
+	if !tester.HasText("已运行 echo hi") {
+		t.Fatalf("the row shows its command, texts %q", tester.Texts())
+	}
+	if tester.HasText("Shell") {
+		t.Fatalf("the panel is closed until the row is clicked, texts %q", tester.Texts())
+	}
+	if err := tester.Click("已运行 echo hi"); err != nil {
+		t.Fatalf("expand the row: %v", err)
+	}
+	frames(tester)
+	for _, want := range []string{"Shell", "$ echo hi", "hi there", "成功"} {
+		if !tester.HasText(want) {
+			t.Fatalf("the panel shows %q, texts %q", want, tester.Texts())
+		}
+	}
+}

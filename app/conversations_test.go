@@ -196,21 +196,9 @@ func TestFollowStopsWhenTheReplyLands(t *testing.T) {
 func TestToolCallsGroupIntoOneRowPerRun(t *testing.T) {
 	messages := []transcriptMessage{
 		{Role: "user", Text: "跑一下"},
-		{Role: "tool", State: "done", Data: struct {
-			Tool       string `json:"tool"`
-			ToolCallID string `json:"toolCallId"`
-			Ordinal    int    `json:"ordinal"`
-		}{Tool: "bash"}},
-		{Role: "tool", State: "done", Data: struct {
-			Tool       string `json:"tool"`
-			ToolCallID string `json:"toolCallId"`
-			Ordinal    int    `json:"ordinal"`
-		}{Tool: "bash"}},
-		{Role: "tool", State: "running", Data: struct {
-			Tool       string `json:"tool"`
-			ToolCallID string `json:"toolCallId"`
-			Ordinal    int    `json:"ordinal"`
-		}{Tool: "edit"}},
+		{Role: "tool", State: "done", Data: transcriptMessageData{Tool: "bash"}},
+		{Role: "tool", State: "done", Data: transcriptMessageData{Tool: "bash"}},
+		{Role: "tool", State: "running", Data: transcriptMessageData{Tool: "edit"}},
 		{Role: "assistant", Kind: "chat", Text: "好了"},
 	}
 	runs := groupRuns(messages)
@@ -273,11 +261,7 @@ func TestSpokenMessagesNeverMergeIntoOneRun(t *testing.T) {
 
 func TestToolRunsExpandAndCollapse(t *testing.T) {
 	messages := []transcriptMessage{
-		{Role: "tool", State: "done", Text: "bash: ls", Data: struct {
-			Tool       string `json:"tool"`
-			ToolCallID string `json:"toolCallId"`
-			Ordinal    int    `json:"ordinal"`
-		}{Tool: "bash", ToolCallID: "call-1"}},
+		{Role: "tool", State: "done", Text: "bash: ls", Data: transcriptMessageData{Tool: "bash", ToolCallID: "call-1"}},
 	}
 	state := newChatState("http://127.0.0.1:1", "tok")
 	state.messages = messages

@@ -207,6 +207,7 @@ func (live *piAdapterLiveTurn) handle(event map[string]any) {
 		if summary == "" {
 			summary = toolName
 		}
+		output := truncateRunes(ToolResultText(event["result"], 8_000), 8_000)
 		deferred := live.bindDeferredEnd(toolCallId, event["result"])
 		state := "done"
 		if isError {
@@ -216,11 +217,12 @@ func (live *piAdapterLiveTurn) handle(event map[string]any) {
 			state = "running"
 		}
 		live.toolActivity = append(live.toolActivity, PiAdapterToolActivity{
-			ToolCallId: toolCallId, Name: toolName, Summary: summary, State: state,
+			ToolCallId: toolCallId, Name: toolName, Summary: summary, State: state, Output: output,
 		})
 		for i := range live.activity {
 			if live.activity[i].Type == "tool" && live.activity[i].ToolCallId == toolCallId {
 				live.activity[i].State = state
+				live.activity[i].Output = output
 				if isError {
 					live.activity[i].Message = truncateRunes(reason, 400)
 				}

@@ -26,14 +26,21 @@ func parseNodeRunEntries(payload []byte) ([]transcriptMessage, bool, error) {
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		return nil, false, err
 	}
-	answered := map[string]bool{}
+	outputs := map[string]string{}
+	failed := map[string]bool{}
 	for _, entry := range raw.Entries {
 		if entry.Kind == "result" && entry.Data.ToolCallID != "" {
-			answered[entry.Data.ToolCallID] = true
+			outputs[entry.Data.ToolCallID] = nodeToolResultText(entry.Text)
+			if entry.Data.IsError != nil && *entry.Data.IsError {
+				failed[entry.Data.ToolCallID] = true
+			}
 		}
 	}
 	messages := []transcriptMessage{}
 	for _, entry := range raw.Entries {
+		if entry.Kind == "result" {
+			continue
+		}
 		text := strings.TrimSpace(entry.Text)
 		if text == "" {
 			continue
@@ -43,11 +50,25 @@ func parseNodeRunEntries(payload []byte) ([]transcriptMessage, bool, error) {
 			Text: text, State: entry.State, CreatedAt: entry.CreatedAt,
 		}
 		if message.Role == "tool" {
-			message.Data.Tool = entry.Data.ToolName
+			name, command, ok := nodeToolCallText(text)
+			if !ok {
+				name = entry.Data.ToolName
+				command = text
+			}
+			if name == "" {
+				name = entry.Data.ToolName
+			}
+			message.Data.Tool = name
 			message.Data.ToolCallID = entry.Data.ToolCallID
+			message.Data.Command = command
+			message.Data.Output = outputs[entry.Data.ToolCallID]
+			message.Data.Error = failed[entry.Data.ToolCallID]
 			message.State = "running"
-			if entry.Kind == "result" || answered[entry.Data.ToolCallID] {
+			if _, ok := outputs[entry.Data.ToolCallID]; ok {
 				message.State = "done"
+			}
+			if command != "" {
+				message.Text = name + ": " + command
 			}
 		}
 		if message.ID == "" {
@@ -56,6 +77,44 @@ func parseNodeRunEntries(payload []byte) ([]transcriptMessage, bool, error) {
 		messages = append(messages, message)
 	}
 	return messages, raw.HasOlder, nil
+}
+
+func nodeToolCallText(text string) (name, command string, ok bool) {
+	var call struct {
+		Name string          `json:"name"`
+		Args json.RawMessage `json:"args"`
+	}
+	if err := json.Unmarshal([]byte(text), &call); err != nil || call.Name == "" {
+		return "", "", false
+	}
+	var args map[string]any
+	if err := json.Unmarshal(call.Args, &args); err == nil {
+		for _, key := range []string{"command", "cmd", "path", "query", "url", "pattern"} {
+			if value, ok := args[key].(string); ok && value != "" {
+				return call.Name, value, true
+			}
+		}
+	}
+	return call.Name, "", true
+}
+
+func nodeToolResultText(text string) string {
+	var result struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(text), &result); err != nil {
+		return strings.TrimSpace(text)
+	}
+	parts := []string{}
+	for _, item := range result.Content {
+		if item.Type == "text" && strings.TrimSpace(item.Text) != "" {
+			parts = append(parts, item.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 func formatSeq(seq int64) string {
