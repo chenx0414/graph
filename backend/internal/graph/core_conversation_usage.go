@@ -90,6 +90,7 @@ func RecordConversationOutput(store *TaskStore, operation Operation, result Oper
 		return
 	}
 	alreadyReplied := OperationReplied(store, &operation.Id)
+	alreadyAnswered := kernelRow(store.Db, "SELECT id FROM messages WHERE operation_id=? AND role='assistant' AND kind='chat' LIMIT 1", operation.Id) != nil
 	output, _ := result.Output.(map[string]any)
 	if result.Outcome == "completed" {
 		reply := ""
@@ -103,7 +104,7 @@ func RecordConversationOutput(store *TaskStore, operation Operation, result Oper
 		records := ConversationActivityRecords(activity, reply)
 		PersistConversationActivity(store, conversation.Id, operation.Id, operation.Attempt, records, nil,
 			LiveDeferredToolCallIds(store, conversation.Id))
-		if reply != "" && !alreadyReplied {
+		if reply != "" && !alreadyAnswered {
 			AppendMessage(store, MessageInput{
 				ConversationID: conversation.Id,
 				Role:           MessageRoleAssistant,
