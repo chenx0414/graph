@@ -72,8 +72,8 @@ func TestTheWindowShowsFourPanesLeftToRight(t *testing.T) {
 	if !(rail.X < conversation.X && conversation.X+conversation.W <= composer.X && composer.X < board.X) {
 		t.Fatalf("panes out of order: rail %+v conversation %+v composer %+v board %+v", rail, conversation, composer, board)
 	}
-	if !tester.HasText("Agent 面板窗口") || !tester.HasText("轨迹量化窗口") || !tester.HasText("洞察概览窗口") {
-		t.Fatalf("the whiteboard must present the agent panel, trajectory and insights, texts %q", tester.Texts())
+	if !tester.HasText("Agent 面板窗口") || !tester.HasText("轨迹量化窗口") || !tester.HasText("当前上下文窗口") {
+		t.Fatalf("the whiteboard must present the agent panel, trajectory and context overview, texts %q", tester.Texts())
 	}
 	if !tester.HasText("来自主控") {
 		t.Fatalf("the chat pane must open the main agent conversation, texts %q", tester.Texts())

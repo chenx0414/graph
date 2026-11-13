@@ -11,13 +11,16 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-func TestTheBoardShowsTheTrajectoryAndInsightsCards(t *testing.T) {
+func TestTheBoardShowsTheContextOverviewNetworkAndChatCards(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
-	for _, label := range []string{"轨迹量化窗口", "洞察概览窗口"} {
+	for _, label := range []string{"当前上下文窗口", "Agent 网络窗口", "Agent 面板窗口", "轨迹量化窗口"} {
 		if !tester.HasText(label) {
 			t.Fatalf("the default board must present %q, texts %q", label, tester.Texts())
 		}
+	}
+	if tester.HasText("洞察概览窗口") {
+		t.Fatalf("the default board drops the insights card, texts %q", tester.Texts())
 	}
 }
 
@@ -25,14 +28,14 @@ func TestTheBoardKeepsFixedNonOverlappingPartitions(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 	rects := map[string]ui.Rect{}
-	for _, kind := range []string{"agent", "agent-network", "trajectory", "insights"} {
+	for _, kind := range []string{"context-overview", "agent-network", "agent", "trajectory"} {
 		rect, ok := tester.Find(boardPanelTitle(kind) + "窗口")
 		if !ok {
 			t.Fatalf("%s never rendered, texts %q", kind, tester.Texts())
 		}
 		rects[kind] = rect
 	}
-	names := []string{"agent", "agent-network", "trajectory", "insights"}
+	names := []string{"context-overview", "agent-network", "agent", "trajectory"}
 	for first := 0; first < len(names); first++ {
 		for second := first + 1; second < len(names); second++ {
 			a, b := rects[names[first]], rects[names[second]]
@@ -41,14 +44,16 @@ func TestTheBoardKeepsFixedNonOverlappingPartitions(t *testing.T) {
 			}
 		}
 	}
-	if rects["agent"].Y != rects["agent-network"].Y || rects["trajectory"].Y != rects["insights"].Y {
-		t.Fatalf("the board keeps two fixed rows: %+v", rects)
+	overview, network := rects["context-overview"], rects["agent-network"]
+	agent, trajectory := rects["agent"], rects["trajectory"]
+	if overview.Y >= network.Y || network.Y >= agent.Y {
+		t.Fatalf("the board stacks overview, network, then the last row: %+v", rects)
 	}
-	if rects["trajectory"].Y <= rects["agent"].Y {
-		t.Fatalf("trajectory and insights sit below tasks: %+v", rects)
+	if overview.W <= agent.W*1.8 || network.W <= agent.W*1.8 {
+		t.Fatalf("overview and network take a whole row, overview %.1f network %.1f agent %.1f", overview.W, network.W, agent.W)
 	}
-	if rects["agent"].X != rects["trajectory"].X || rects["agent-network"].X != rects["insights"].X {
-		t.Fatalf("the board keeps two fixed columns: %+v", rects)
+	if agent.Y != trajectory.Y || agent.X >= trajectory.X {
+		t.Fatalf("the last row splits into two cards: agent %+v trajectory %+v", agent, trajectory)
 	}
 }
 
@@ -56,7 +61,7 @@ func TestDraggingAPanelBodySwapsItsPartition(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 	tasks := state.board.rects["agent"]
-	artifacts := state.board.rects["agent-network"]
+	artifacts := state.board.rects["trajectory"]
 	if tasks.W <= 0 || artifacts.W <= 0 {
 		t.Fatalf("the board must know its partitions, rects %+v", state.board.rects)
 	}
@@ -70,7 +75,7 @@ func TestDraggingAPanelBodySwapsItsPartition(t *testing.T) {
 	tester.Release(endX, endY)
 	frames(tester)
 	page := state.boardPage()
-	if leaves := boardLeafIDs(&page.Layout); len(leaves) != 4 || leaves[0] != "agent-network" || leaves[1] != "agent" || leaves[2] != "trajectory" || leaves[3] != "insights" {
+	if leaves := boardLeafIDs(&page.Layout); len(leaves) != 4 || leaves[0] != "context-overview" || leaves[1] != "agent-network" || leaves[2] != "trajectory" || leaves[3] != "agent" {
 		t.Fatalf("a center drop swaps the two partitions, leaves %v", leaves)
 	}
 }
@@ -79,7 +84,7 @@ func TestDraggingToAPartitionEdgeSplitsIt(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 	tasks := state.board.rects["agent"]
-	artifacts := state.board.rects["agent-network"]
+	artifacts := state.board.rects["trajectory"]
 	if tasks.W <= 0 || artifacts.W <= 0 {
 		t.Fatalf("the board must know its partitions, rects %+v", state.board.rects)
 	}
@@ -105,20 +110,23 @@ func TestDraggingToAPartitionEdgeSplitsIt(t *testing.T) {
 		seen[id] = true
 	}
 	after := state.board.rects
-	if after["agent"].X >= after["agent-network"].X {
-		t.Fatalf("dropping on the left edge puts the dragged pane before the target: tasks %+v artifacts %+v", after["agent"], after["agent-network"])
+	if after["agent"].X >= after["trajectory"].X {
+		t.Fatalf("dropping on the left edge puts the dragged pane before the target: agent %+v trajectory %+v", after["agent"], after["trajectory"])
 	}
 }
 
 func TestADividerDragResizesBothPartitions(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
-	divider, ok := tester.Find("调整分区")
+	tasksBefore, ok := tester.Find(boardPanelTitle("agent") + "窗口")
 	if !ok {
-		t.Fatalf("the split divider never rendered, texts %q", tester.Texts())
+		t.Fatalf("the agent card never rendered, texts %q", tester.Texts())
 	}
-	tasksBefore, _ := tester.Find(boardPanelTitle("agent") + "窗口")
-	x, y := divider.X+divider.W/2, divider.Y+divider.H/2
+	trajectory, ok := tester.Find(boardPanelTitle("trajectory") + "窗口")
+	if !ok {
+		t.Fatalf("the trajectory card never rendered, texts %q", tester.Texts())
+	}
+	x, y := (tasksBefore.X+tasksBefore.W+trajectory.X)/2, tasksBefore.Y+tasksBefore.H/2
 	tester.Press(x, y)
 	for step := 1; step <= 10; step++ {
 		tester.Move(x+float32(step)*8, y)
@@ -144,8 +152,8 @@ func TestAnOldFreeformBoardMigratesIntoPartitions(t *testing.T) {
 	state := newShellState("http://127.0.0.1:1", "tok")
 	state.loadBoard(directory)
 	page := state.boardPage()
-	if leaves := boardLeafIDs(&page.Layout); len(leaves) != 4 || leaves[0] != "agent" || leaves[1] != "agent-network" {
-		t.Fatalf("a freeform board migrates into a partition tree and gains the dashboard cards, leaves %v", leaves)
+	if leaves := boardLeafIDs(&page.Layout); len(leaves) != 4 || leaves[0] != "context-overview" || leaves[1] != "agent-network" {
+		t.Fatalf("a freeform board migrates into the dashboard layout, leaves %v", leaves)
 	}
 	if page.Kind != "" {
 		t.Fatalf("the migrated page stays a board, kind %q", page.Kind)
@@ -156,13 +164,13 @@ func TestTheBoardRemembersItsLayout(t *testing.T) {
 	directory := t.TempDir()
 	first := newShellState("http://127.0.0.1:1", "tok")
 	first.loadBoard(directory)
-	swapBoardPanels(&first.boardPage().Layout, "agent", "agent-network")
+	swapBoardPanels(&first.boardPage().Layout, "agent", "trajectory")
 	first.saveBoard()
 
 	second := newShellState("http://127.0.0.1:1", "tok")
 	second.loadBoard(directory)
 	leaves := boardLeafIDs(&second.boardPage().Layout)
-	if len(leaves) != 4 || leaves[0] != "agent-network" || leaves[1] != "agent" {
+	if len(leaves) != 4 || leaves[2] != "trajectory" || leaves[3] != "agent" {
 		t.Fatalf("saved partitions not restored: leaves %v", leaves)
 	}
 }
@@ -234,8 +242,8 @@ func TestLoadingAnOldBoardAddsTheTrajectoryAndInsightsCards(t *testing.T) {
 	for _, panel := range page.Panels {
 		kinds[panel.Kind] = true
 	}
-	if kinds["overview"] || !kinds["trajectory"] || !kinds["insights"] {
-		t.Fatalf("the old board must trade overview for trajectory and insights, panels %+v", page.Panels)
+	if kinds["overview"] || kinds["insights"] || !kinds["trajectory"] || !kinds["context-overview"] || !kinds["agent-network"] {
+		t.Fatalf("the old board must trade overview and insights for the dashboard cards, panels %+v", page.Panels)
 	}
 }
 
@@ -336,9 +344,9 @@ func TestTheWhiteboardTakesTheListBackgroundAndLiftsItsCards(t *testing.T) {
 	if !ok {
 		t.Fatalf("the whiteboard tab never rendered, texts %q", tester.Texts())
 	}
-	card, ok := tester.Find(boardPanelTitle("agent") + "窗口")
+	card, ok := tester.Find(boardPanelTitle("context-overview") + "窗口")
 	if !ok {
-		t.Fatalf("the tasks card never rendered, texts %q", tester.Texts())
+		t.Fatalf("the overview card never rendered, texts %q", tester.Texts())
 	}
 	canvas := image.RGBAAt(int(card.X+card.W/2), int(card.Y-5))
 	if distance(canvas, listBackground) > 4 {
@@ -473,5 +481,35 @@ func TestTheBoardTabBarHasNoBottomRule(t *testing.T) {
 	delta := absInt(int(rule.R)-int(background.R)) + absInt(int(rule.G)-int(background.G)) + absInt(int(rule.B)-int(background.B))
 	if delta > 4 {
 		t.Fatalf("the tab bar keeps its bottom rule: %v against %v", rule, background)
+	}
+}
+
+func TestTheBoardStacksTheContextOverviewAndTheNetwork(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	rects := map[string]ui.Rect{}
+	for _, kind := range []string{"context-overview", "agent-network", "agent", "trajectory"} {
+		rect, ok := tester.Find(boardPanelTitle(kind) + "窗口")
+		if !ok {
+			t.Fatalf("%s never rendered, texts %q", kind, tester.Texts())
+		}
+		rects[kind] = rect
+	}
+	if tester.HasText("洞察概览窗口") {
+		t.Fatalf("the insights card left the board, texts %q", tester.Texts())
+	}
+	overview, network := rects["context-overview"], rects["agent-network"]
+	agent, trajectory := rects["agent"], rects["trajectory"]
+	if overview.Y >= network.Y || network.Y >= agent.Y {
+		t.Fatalf("the board stacks overview, network, then the last row: %+v", rects)
+	}
+	if overview.W <= agent.W*1.8 || network.W <= agent.W*1.8 {
+		t.Fatalf("overview and network take a whole row, overview %.1f network %.1f agent %.1f", overview.W, network.W, agent.W)
+	}
+	if agent.Y != trajectory.Y || agent.W-trajectory.W > 0.5 || trajectory.W-agent.W > 0.5 {
+		t.Fatalf("the last row splits into two equal cards: agent %+v trajectory %+v", agent, trajectory)
+	}
+	if agent.X >= trajectory.X {
+		t.Fatalf("the agent card leads the last row: agent %+v trajectory %+v", agent, trajectory)
 	}
 }

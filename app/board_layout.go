@@ -43,7 +43,7 @@ type boardFile struct {
 	Active  int          `json:"active"`
 }
 
-const boardLayoutVersion = 12
+const boardLayoutVersion = 14
 
 const boardDefaultTitle = "白板"
 
@@ -54,21 +54,19 @@ const boardMinPaneHeight = 90
 func defaultBoardPanels() []boardPanel {
 	return []boardPanel{
 		{ID: "agent", Kind: "agent"},
-		{ID: "agent-network", Kind: "agent-network"},
 		{ID: "trajectory", Kind: "trajectory"},
-		{ID: "insights", Kind: "insights"},
+		{ID: "context-overview", Kind: "context-overview"},
+		{ID: "agent-network", Kind: "agent-network"},
 	}
 }
 
 func defaultBoardLayout() boardNode {
 	return boardNode{Kind: "split", Axis: "column", Children: []boardSlot{
-		{Weight: 1, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
+		{Weight: 2.6, Node: boardNode{Kind: "panel", PanelID: "context-overview"}},
+		{Weight: 3.2, Node: boardNode{Kind: "panel", PanelID: "agent-network"}},
+		{Weight: 2.4, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
 			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "agent"}},
-			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "agent-network"}},
-		}}},
-		{Weight: 1, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
 			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "trajectory"}},
-			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "insights"}},
 		}}},
 	}}
 }
@@ -221,6 +219,15 @@ func (s *shellState) loadBoard(stateDir string) {
 			s.board.pages[index].Scope = "fleet"
 		}
 	}
+	if file.Version < 14 {
+		for index := range s.board.pages {
+			page := &s.board.pages[index]
+			if page.Kind == "" {
+				page.Panels = defaultBoardPanels()
+				page.Layout = defaultBoardLayout()
+			}
+		}
+	}
 	if file.Version < boardLayoutVersion {
 		for index := range s.board.pages {
 			page := &s.board.pages[index]
@@ -337,21 +344,35 @@ func ensureBoardDashboardPanels(page *boardPage) {
 	if page.Kind != "" {
 		return
 	}
-	hasTrajectory, hasInsights := false, false
+	kept := make([]boardPanel, 0, len(page.Panels))
 	for _, panel := range page.Panels {
-		if panel.Kind == "trajectory" {
-			hasTrajectory = true
-		}
 		if panel.Kind == "insights" {
-			hasInsights = true
+			removeBoardPanelFromLayout(&page.Layout, panel.ID)
+			continue
+		}
+		kept = append(kept, panel)
+	}
+	page.Panels = kept
+	hasTrajectory, hasOverview, hasNetwork := false, false, false
+	for _, panel := range page.Panels {
+		switch panel.Kind {
+		case "trajectory":
+			hasTrajectory = true
+		case "context-overview":
+			hasOverview = true
+		case "agent-network":
+			hasNetwork = true
 		}
 	}
 	added := []boardPanel{}
+	if !hasOverview {
+		added = append(added, boardPanel{ID: "context-overview", Kind: "context-overview"})
+	}
+	if !hasNetwork {
+		added = append(added, boardPanel{ID: "agent-network", Kind: "agent-network"})
+	}
 	if !hasTrajectory {
 		added = append(added, boardPanel{ID: "trajectory", Kind: "trajectory"})
-	}
-	if !hasInsights {
-		added = append(added, boardPanel{ID: "insights", Kind: "insights"})
 	}
 	if len(added) == 0 {
 		return
