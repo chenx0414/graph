@@ -78,36 +78,20 @@ func (s *shellState) panelChatNetwork(ctx *ui.Context, scope string) {
 	state := &s.boardNet
 	if page := s.boardPage(); page != nil && state.page != page.ID {
 		state.page = page.ID
-		state.view.fit = true
+		state.view.fit = false
 	}
 	key := networkSceneKey(scope)
 	if state.key != key || !sameNetScene(state.scene, scene) {
 		if state.key != key || state.scene.mode != scene.mode || state.scene.width != scene.width || state.scene.height != scene.height {
-			state.view = newInfiniteCanvas()
+			state.view = infiniteCanvas{}
 		}
 		state.key = key
 		state.scene = scene
 	}
 	s.networkCaption(ctx, scene, scope)
-	state.view.setContent(scene.contentBounds())
 	s.infiniteView(ctx, &state.view, scene.width, scene.height, scene.edges, scene.hit, func(ctx *ui.Context, view *infiniteCanvas) {
 		s.networkCards(ctx, scene, view)
 	})
-}
-
-func (scene netScene) contentBounds() ui.Rect {
-	if len(scene.nodes) == 0 {
-		return ui.Rect{}
-	}
-	minX, minY := scene.nodes[0].X, scene.nodes[0].Y
-	maxX, maxY := scene.nodes[0].X+scene.nodes[0].W, scene.nodes[0].Y+scene.nodes[0].H
-	for _, node := range scene.nodes[1:] {
-		minX = minFleetFloat(minX, node.X)
-		minY = minFleetFloat(minY, node.Y)
-		maxX = maxFleetFloat(maxX, node.X+node.W)
-		maxY = maxFleetFloat(maxY, node.Y+node.H)
-	}
-	return ui.Rect{X: minX, Y: minY, W: maxX - minX, H: maxY - minY}
 }
 
 func sameNetScene(left, right netScene) bool {
@@ -220,23 +204,10 @@ func (s *shellState) networkSceneForChat(ctx *ui.Context, scope chatScope) (netS
 	return s.threadNetScene(*agent, data), ""
 }
 
-func ringStretch(viewW, viewH, worldW, worldH float32) float32 {
-	if viewW <= 0 || viewH <= 0 || worldW <= 0 || worldH <= 0 {
-		return 1
-	}
-	return clampFleetFloat((viewW/viewH)/(worldW/worldH), 1, 4)
-}
-
 func (s *shellState) fleetNetScene(data *fleetSnapshot) netScene {
 	ring := fleetRingLayout(data)
 	if len(ring.Nodes) == 0 {
 		return netScene{}
-	}
-	stretch := ringStretch(s.boardNet.view.viewW, s.boardNet.view.viewH, ring.Width, ring.Height)
-	nodes := make([]fleetRingNode, len(ring.Nodes))
-	copy(nodes, ring.Nodes)
-	for index := range nodes {
-		nodes[index].X *= stretch
 	}
 	edges := make([]canvasEdge, 0, len(ring.Edges))
 	for _, edge := range ring.Edges {
@@ -244,13 +215,9 @@ func (s *shellState) fleetNetScene(data *fleetSnapshot) netScene {
 		if !ok {
 			color = fleetAccents()[1]
 		}
-		points := make([][2]float32, len(edge.Points))
-		for index, point := range edge.Points {
-			points[index] = [2]float32{point[0] * stretch, point[1]}
-		}
-		edges = append(edges, canvasEdge{From: edge.FromID, To: edge.ToID, Points: points, Color: color})
+		edges = append(edges, canvasEdge{From: edge.FromID, To: edge.ToID, Points: edge.Points, Color: color})
 	}
-	return netScene{mode: "fleet", width: ring.Width * stretch, height: ring.Height, nodes: nodes, edges: edges}
+	return netScene{mode: "fleet", width: ring.Width, height: ring.Height, nodes: ring.Nodes, edges: edges}
 }
 
 func (s *shellState) threadNetScene(thread fleetAgent, data *fleetSnapshot) netScene {
@@ -260,24 +227,21 @@ func (s *shellState) threadNetScene(thread fleetAgent, data *fleetSnapshot) netS
 			units = append(units, unit)
 		}
 	}
-	rx, ry := threadRingRadii(s.boardNet.view.viewW, s.boardNet.view.viewH)
-	worldW := maxFleetFloat(netThreadWorldW, 2*rx+fleetRingGraphW+40)
-	worldH := maxFleetFloat(netThreadWorldH, 2*ry+fleetRingGraphH+40)
-	scene := netScene{mode: "thread", width: worldW, height: worldH}
+	scene := netScene{mode: "thread", width: netThreadWorldW, height: netThreadWorldH}
 	center := fleetRingNode{
 		Kind: "thread", ID: thread.ID, Agent: thread,
 		W: fleetRingThreadW, H: fleetRingThreadH,
-		X: worldW/2 - fleetRingThreadW/2, Y: worldH/2 - fleetRingThreadH/2,
+		X: netThreadWorldW/2 - fleetRingThreadW/2, Y: netThreadWorldH/2 - fleetRingThreadH/2,
 	}
 	scene.nodes = append(scene.nodes, center)
 	if len(units) == 0 {
 		return scene
 	}
-	hub := [2]float32{worldW / 2, worldH / 2}
+	hub := [2]float32{netThreadWorldW / 2, netThreadWorldH / 2}
 	for index, unit := range units {
 		angle := -math.Pi/2 + 2*math.Pi*float64(index)/float64(len(units))
-		x := hub[0] + rx*float32(math.Cos(angle))
-		y := hub[1] + ry*float32(math.Sin(angle))
+		x := hub[0] + netThreadRx*float32(math.Cos(angle))
+		y := hub[1] + netThreadRy*float32(math.Sin(angle))
 		node := fleetRingNode{
 			Kind: "graph-unit", ID: "graph:" + unit.TaskID, Unit: unit,
 			W: fleetRingGraphW, H: fleetRingGraphH,
@@ -287,20 +251,6 @@ func (s *shellState) threadNetScene(thread fleetAgent, data *fleetSnapshot) netS
 		scene.edges = append(scene.edges, canvasEdge{From: thread.ID, To: "graph:" + unit.TaskID, Points: [][2]float32{hub, [2]float32{x, y}}, Color: fleetAccents()[1]})
 	}
 	return scene
-}
-
-func threadRingRadii(viewW, viewH float32) (float32, float32) {
-	rx, ry := float32(netThreadRx), float32(netThreadRy)
-	if viewW <= 0 || viewH <= 0 {
-		return rx, ry
-	}
-	target := viewW / viewH / 1.35
-	if target > 1 {
-		rx = netThreadRx * minFleetFloat(target, 2.2)
-	} else if target < 1 {
-		ry = netThreadRy * clampFleetFloat(target, 0.55, 1)
-	}
-	return rx, ry
 }
 
 func (s *shellState) graphNetScene(ctx *ui.Context, data *fleetTopologyData) netScene {

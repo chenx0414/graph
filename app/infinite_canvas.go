@@ -13,32 +13,19 @@ const (
 	canvasMinZoom    = 0.3
 	canvasMaxZoom    = 2.2
 	canvasFitMinZoom = 0.55
-	canvasFitMaxZoom = 1.5
-	canvasFitPadding = 8
 )
 
 type infiniteCanvas struct {
-	zoom       float32
-	x, y       float32
-	fit        bool
-	dragging   bool
-	lastX      float32
-	lastY      float32
-	worldW     float32
-	worldH     float32
-	viewW      float32
-	viewH      float32
-	content    ui.Rect
-	hasContent bool
-}
-
-func newInfiniteCanvas() infiniteCanvas {
-	return infiniteCanvas{fit: true}
-}
-
-func (view *infiniteCanvas) setContent(rect ui.Rect) {
-	view.content = rect
-	view.hasContent = rect.W > 0 && rect.H > 0
+	zoom     float32
+	x, y     float32
+	fit      bool
+	dragging bool
+	lastX    float32
+	lastY    float32
+	worldW   float32
+	worldH   float32
+	viewW    float32
+	viewH    float32
 }
 
 func (view *infiniteCanvas) clamp() {
@@ -80,7 +67,6 @@ func (view *infiniteCanvas) zoomAt(x, y, factor float32) {
 		return
 	}
 	wx, wy := view.world(x, y)
-	view.fit = false
 	view.zoom = next
 	view.x = x - wx*next
 	view.y = y - wy*next
@@ -91,25 +77,10 @@ func (view *infiniteCanvas) fitWorld(width, height, viewWidth, viewHeight float3
 	if width <= 0 || height <= 0 || viewWidth <= 0 || viewHeight <= 0 {
 		return
 	}
-	view.worldW, view.worldH = width, height
-	view.viewW, view.viewH = viewWidth, viewHeight
-	if view.hasContent {
-		content := view.content
-		availableW := viewWidth - 2*canvasFitPadding
-		availableH := viewHeight - 2*canvasFitPadding
-		if availableW <= 0 || availableH <= 0 {
-			availableW, availableH = viewWidth, viewHeight
-		}
-		zoom := minFleetFloat(availableW/content.W, availableH/content.H)
-		view.zoom = clampFleetFloat(zoom, canvasMinZoom, canvasFitMaxZoom)
-		view.x = (viewWidth-content.W*view.zoom)/2 - content.X*view.zoom
-		view.y = (viewHeight-content.H*view.zoom)/2 - content.Y*view.zoom
-		view.fit = true
-		view.clamp()
-		return
-	}
 	zoom := minFleetFloat(viewWidth/width, viewHeight/height)
 	view.zoom = clampFleetFloat(zoom, canvasFitMinZoom, 1)
+	view.worldW, view.worldH = width, height
+	view.viewW, view.viewH = viewWidth, viewHeight
 	view.x = (viewWidth - width*view.zoom) / 2
 	view.y = (viewHeight - height*view.zoom) / 2
 	view.fit = true
@@ -124,13 +95,6 @@ func clampFleetFloat(value, low, high float32) float32 {
 		return high
 	}
 	return value
-}
-
-func maxFleetFloat(a, b float32) float32 {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func minFleetFloat(a, b float32) float32 {
@@ -152,7 +116,6 @@ func (s *shellState) infiniteView(ctx *ui.Context, view *infiniteCanvas, worldW,
 	stage.HandleInput(func(ev ui.InputEvent) bool {
 		switch ev.Kind {
 		case ui.InputScroll:
-			view.fit = false
 			view.x -= ev.DX
 			view.y -= ev.DY
 			view.clamp()
@@ -167,7 +130,6 @@ func (s *shellState) infiniteView(ctx *ui.Context, view *infiniteCanvas, worldW,
 			if hit != nil && hit(view.world(ev.X, ev.Y)) {
 				return false
 			}
-			view.fit = false
 			view.dragging = true
 			view.lastX, view.lastY = ev.X, ev.Y
 			return true
@@ -192,7 +154,7 @@ func (s *shellState) infiniteView(ctx *ui.Context, view *infiniteCanvas, worldW,
 	stage.Draw(func(p *ui.Painter, r ui.Rect) {
 		view.worldW, view.worldH = worldW, worldH
 		view.viewW, view.viewH = r.W, r.H
-		if view.fit {
+		if !view.fit {
 			view.fitWorld(worldW, worldH, r.W, r.H)
 		}
 		s.canvasGrid(p, r, view, t)
@@ -216,7 +178,7 @@ func (s *shellState) infiniteView(ctx *ui.Context, view *infiniteCanvas, worldW,
 	ui.Row(ctx).Gap(th.Space(1)).AlignItems(ui.Center).Children(func() {
 		kit.Text(ctx, formatCanvasZoom(view.zoom), t.Text.Xs).TextColor(t.Muted)
 		if kit.Button(ctx, "居中", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeXs}).Clicked() {
-			view.fit = true
+			view.fit = false
 		}
 		if kit.Button(ctx, "+", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeXs}).Clicked() {
 			view.zoomAt(200, 150, 1.2)
