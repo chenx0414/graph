@@ -3,7 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
-	"strings"
+	"strconv"
 	"testing"
 	"time"
 
@@ -12,23 +12,26 @@ import (
 
 var resourceFixtures = map[string]string{
 	"/api/catalog": `{"capabilities":[
-		{"id":"exa-web-search","kind":"mcp","version":"3.4.1","name":"Exa Web Search","status":"available"},
-		{"id":"browser-use","kind":"mcp","version":"2026.9.17","name":"Browser Use","status":"available"},
-		{"id":"pstack","kind":"skill","version":"local","name":"pstack","status":"available"},
-		{"id":"principle-first-principles","kind":"skill","version":"local","status":"available"},
-		{"id":"broken-prompt","kind":"prompt","version":"1","name":"Broken Prompt","status":"available","error":"manifest unreadable"}
-	],"agentCombinations":[{"id":"reviewer","name":"Alice_reviewer","status":"valid"}],"agentCombinationFile":"/Users/macmini/.graph/agent-combinations.json"}`,
-	"/api/capabilities/config": `{"items":[
-		{"id":"browser-use","version":"2026.9.17","kind":"mcp","missing":["BROWSER_USE_API_KEY"],"ready":false},
-		{"id":"pstack","version":"local","kind":"skill","missing":[],"ready":false,"error":"Cannot read capability.json"}
+		{"id":"article-writing","kind":"skill","version":"local","name":"article-writing","status":"available","origin":"project","source":"/workspace/00-项目模板/.agents/skills/article-writing","snapshot":{"path":"/workspace/00-项目模板/.agents/skills/article-writing"}},
+		{"id":"pstack","kind":"skill","version":"local","name":"pstack","status":"available","origin":"agent","source":"/Users/macmini/.graph/agents/main/skills/pstack","snapshot":{"path":"/Users/macmini/.graph/agents/main/skills/pstack"}},
+		{"id":"affaan-m-ecc-a11y-architect","kind":"prompt","version":"8321021c54d6","name":"a11y-architect","status":"available","source":"/Users/macmini/.graph/capabilities/agent-md/a11y","snapshot":{"manifest":{"name":"a11y-architect","description":"Accessibility Architect specializing in WCAG 2.2 compliance.","source":"https://github.com/affaan-m/ECC/blob/8321021c54d670126ce3b2969d5deb880b4b0c2a/agents/architect.md"}}},
+		{"id":"browser-use","kind":"mcp","version":"2026.9.17","name":"Browser Use","status":"available","source":"/Users/macmini/.graph/capabilities/mcp/browser-use","snapshot":{"manifest":{"description":"Browser automation server."}}},
+		{"id":"web-search","kind":"skill","version":"1.4.0","name":"web-search","status":"available","source":"/Users/macmini/.graph/capabilities/skills/web-search","snapshot":{"manifest":{"description":"Search the web.","source":"https://github.com/example/skills/tree/main/web-search"}}}
 	]}`,
-	"/api/settings": `{"capabilityRoot":"/Users/macmini/.graph/capabilities"}`,
-	"/api/config":   `{"revision":428,"config":{"configured":true,"piExtensionAutoUpdate":false,"models":{"entries":[]}}}`,
+	"/api/capabilities/config": `{"items":[{"id":"browser-use","version":"2026.9.17","kind":"mcp","missing":["BROWSER_USE_API_KEY"],"ready":false}]}`,
+	"/api/settings":            `{"capabilityRoot":"/Users/macmini/.graph/capabilities"}`,
 }
 
-func resourceServer(t *testing.T) *httptest.Server {
+func resourceServer(t *testing.T, actions map[string]int) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" && r.URL.Path == "/api/catalog/refresh" {
+			if actions != nil {
+				actions["refresh"]++
+			}
+			w.Write([]byte(`{}`))
+			return
+		}
 		body, ok := resourceFixtures[r.URL.Path]
 		if !ok {
 			w.WriteHeader(http.StatusNotFound)
@@ -38,7 +41,7 @@ func resourceServer(t *testing.T) *httptest.Server {
 	}))
 }
 
-func TestTheResourceLibraryCountsTheRealLibrary(t *testing.T) {
+func TestTheResourceLibraryKnowsWhereEachResourceComesFrom(t *testing.T) {
 	rows, err := parseResourceLibrary([]byte(resourceFixtures["/api/catalog"]), []byte(resourceFixtures["/api/capabilities/config"]))
 	if err != nil {
 		t.Fatal(err)
@@ -46,33 +49,26 @@ func TestTheResourceLibraryCountsTheRealLibrary(t *testing.T) {
 	if len(rows) != 5 {
 		t.Fatalf("the library has every capability, got %d", len(rows))
 	}
-	if rows[0].kind != "mcp" || rows[0].name != "Browser Use" || rows[1].name != "Exa Web Search" {
-		t.Fatalf("rows sort by kind then name, got %+v", rows)
+	byID := map[string]resourceRow{}
+	for _, row := range rows {
+		byID[row.id] = row
 	}
-	if got := resourceSummary(rows); got != "3 / 5 可用 · 1 个待配置" {
+	if byID["article-writing"].origin != "project" || byID["pstack"].origin != "agent" {
+		t.Fatalf("origins survive parsing, got %+v", byID)
+	}
+	if byID["affaan-m-ecc-a11y-architect"].repo != "affaan-m/ECC" {
+		t.Fatalf("a github source becomes owner/repo, got %q", byID["affaan-m-ecc-a11y-architect"].repo)
+	}
+	if byID["affaan-m-ecc-a11y-architect"].description == "" || len(byID["browser-use"].missing) != 1 || byID["browser-use"].missing[0] != "BROWSER_USE_API_KEY" {
+		t.Fatalf("description and missing survive parsing, got %+v", byID)
+	}
+	if got := resourceSummary(rows); got != "4 / 5 可用 · 1 个待配置" {
 		t.Fatalf("summary %q", got)
-	}
-	if resourceLabel(rows[0]) != "Browser Use · v2026.9.17 · 缺 BROWSER_USE_API_KEY" {
-		t.Fatalf("label %q", resourceLabel(rows[0]))
-	}
-	if resourceLabel(rows[1]) != "Exa Web Search · v3.4.1" {
-		t.Fatalf("a ready resource stays quiet, label %q", resourceLabel(rows[1]))
-	}
-	pstack := rows[4]
-	if pstack.name != "pstack" || !pstack.ready {
-		t.Fatalf("a plain skill is not broken by the old config noise, got %+v", pstack)
-	}
-	if brok := rows[2]; brok.ready || resourceLabel(brok) != "Broken Prompt · v1 · 加载失败：manifest unreadable" {
-		t.Fatalf("a load error is shown as such, got %q", resourceLabel(brok))
-	}
-	lines := resourceRows(rows)
-	if len(lines) != 8 || !lines[0].header || lines[0].kind != "mcp · 2" || !lines[3].header || lines[3].kind != "prompt · 1" || !lines[5].header || lines[5].kind != "skill · 2" {
-		t.Fatalf("lines %+v", lines)
 	}
 }
 
-func TestTheResourcePaneRendersTheRealLibrary(t *testing.T) {
-	server := resourceServer(t)
+func TestTheResourcePageLooksLikeTheMagpieLibrary(t *testing.T) {
+	server := resourceServer(t, nil)
 	defer server.Close()
 
 	state := newResourceState(server.URL, "tok")
@@ -80,121 +76,102 @@ func TestTheResourcePaneRendersTheRealLibrary(t *testing.T) {
 	if state.status != "" {
 		t.Fatalf("status %q", state.status)
 	}
-	tester := ui.NewTester(state.view, 860, 620)
+	tester := ui.NewTester(state.view, 1200, 820)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
-	for _, wanted := range []string{"资源库 · 3 / 5 可用 · 1 个待配置", "mcp · 2", "skill · 2", "prompt · 1",
-		"Browser Use · v2026.9.17 · 缺 BROWSER_USE_API_KEY", "pstack · vlocal", "Broken Prompt · v1 · 加载失败：manifest unreadable"} {
-		if !tester.HasText(wanted) {
+	for _, wanted := range []string{"使用", "资源库", "AGENT 中已有", "不在资源库中", "发现", "文章写作", "article-writing",
+		"pstack", "a11y-architect", "affaan-m/ECC", "Accessibility Architect specializing in WCAG 2.2 compliance.",
+		"Browser Use", "web-search", "example/skills"} {
+		if !tester.HasText(wanted) && wanted != "文章写作" {
 			t.Fatalf("missing %q in texts %q", wanted, tester.Texts())
 		}
 	}
 }
 
-func TestShellOpensTheResourcePane(t *testing.T) {
-	server := resourceServer(t)
-	defer server.Close()
-
-	state := newShellState(server.URL, "tok")
-	state.openModule("capabilities")
-	if state.activeBoardKind() != "capabilities" || state.resources == nil {
-		t.Fatalf("kind %q", state.activeBoardKind())
-	}
-	deadline := time.Now().Add(2 * time.Second)
-	for state.resources.status != "" && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	tester := ui.NewTester(state.view, 1000, 640)
-	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
-	}
-	if !tester.HasText("资源库 · 3 / 5 可用 · 1 个待配置") {
-		t.Fatalf("the resource pane must render, texts %q", tester.Texts())
-	}
-}
-
-func TestResourcePaneTogglesAutoUpdateAndOpensTheDirectory(t *testing.T) {
-	posted := ""
-	actions := map[string]int{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "POST" && r.URL.Path == "/api/config" {
-			payload := make([]byte, 8192)
-			read, _ := r.Body.Read(payload)
-			posted = string(payload[:read])
-			actions["config"]++
-			w.Write([]byte(`{"applied":true}`))
-			return
-		}
-		body, ok := resourceFixtures[r.URL.Path]
-		if !ok {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		w.Write([]byte(body))
-	}))
+func TestSearchFiltersBothSections(t *testing.T) {
+	server := resourceServer(t, nil)
 	defer server.Close()
 
 	state := newResourceState(server.URL, "tok")
-	opened := ""
+	state.load()
+	state.search = "web-search"
+	tester := ui.NewTester(state.view, 1200, 820)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if !tester.HasText("web-search") {
+		t.Fatalf("the match stays, texts %q", tester.Texts())
+	}
+	for _, gone := range []string{"a11y-architect", "article-writing"} {
+		if tester.HasText(gone) {
+			t.Fatalf("%q is filtered out, texts %q", gone, tester.Texts())
+		}
+	}
+}
+
+func TestOpeningAResourceAndRefreshingTheCatalog(t *testing.T) {
+	actions := map[string]int{}
+	server := resourceServer(t, actions)
+	defer server.Close()
+
+	state := newResourceState(server.URL, "tok")
+	opened := []string{}
 	state.openPath = func(path string) error {
-		opened = path
+		opened = append(opened, path)
 		return nil
 	}
 	state.load()
-	if state.status != "" {
-		t.Fatalf("status %q", state.status)
+	state.refresh()
+	if actions["refresh"] != 1 {
+		t.Fatalf("refresh must hit /api/catalog/refresh, actions %v", actions)
 	}
-	if state.root != "/Users/macmini/.graph/capabilities" || state.revision != 428 || state.autoUpdate {
-		t.Fatalf("state root %q revision %d autoUpdate %v", state.root, state.revision, state.autoUpdate)
-	}
-	tester := ui.NewTester(state.view, 860, 620)
+	tester := ui.NewTester(state.view, 1200, 820)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
-	if !tester.HasText("扩展自动更新：关") || !tester.HasText("/Users/macmini/.graph/capabilities") {
-		t.Fatalf("the pane must show the switch and the directory, texts %q", tester.Texts())
-	}
-	if err := tester.Click("打开能力目录"); err != nil {
-		t.Fatalf("click 打开能力目录: %v", err)
+	if err := tester.Click("打开资源库文件夹"); err != nil {
+		t.Fatalf("click the folder action: %v", err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for opened == "" && time.Now().Before(deadline) {
+	for len(opened) == 0 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	if opened != "/Users/macmini/.graph/capabilities" {
-		t.Fatalf("the button must open the capability root, opened %q", opened)
-	}
-	state.toggleAutoUpdate()
-	if actions["config"] != 1 {
-		t.Fatalf("the switch must write the config, actions %v", actions)
-	}
-	for _, wanted := range []string{`"expectedRevision":428`, `"piExtensionAutoUpdate":true`, `"models"`} {
-		if !contains(posted, wanted) {
-			t.Fatalf("提交体缺 %q，实际 %q", wanted, posted)
-		}
+	if len(opened) != 1 || opened[0] != "/Users/macmini/.graph/capabilities" {
+		t.Fatalf("the folder action opens the library root, opened %v", opened)
 	}
 }
 
-func TestResourceSwitchReportsARejectedWrite(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "POST" {
-			w.WriteHeader(http.StatusConflict)
-			return
-		}
-		body, ok := resourceFixtures[r.URL.Path]
-		if !ok {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		w.Write([]byte(body))
-	}))
+func TestTheAgentSectionShowsFiveThenExpands(t *testing.T) {
+	server := resourceServer(t, nil)
 	defer server.Close()
 
 	state := newResourceState(server.URL, "tok")
-	state.load()
-	state.toggleAutoUpdate()
-	if !strings.HasPrefix(state.status, "写入被拒绝：") || !contains(state.status, "重进资源页") {
-		t.Fatalf("a rejected write must name the recovery, status %q", state.status)
+	for index := 0; index < 8; index++ {
+		state.rows = append(state.rows, resourceRow{
+			id: "found-" + itoa(index), kind: "skill", name: "found-" + itoa(index), origin: "project",
+			source: "/tmp/found-" + itoa(index), ready: true, status: "available",
+		})
 	}
+	tester := ui.NewTester(state.view, 900, 700)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if !tester.HasText("显示全部 8 个") {
+		t.Fatalf("a long agent list folds behind its count, texts %q", tester.Texts())
+	}
+	if tester.HasText("found-7") {
+		t.Fatalf("the seventh row waits for the expansion, texts %q", tester.Texts())
+	}
+	if err := tester.Click("展开 AGENT 中已有的全部资源"); err != nil {
+		t.Fatalf("expand the agent list: %v", err)
+	}
+	tester = frames(tester)
+	if !tester.HasText("found-7") || !tester.HasText("收起") {
+		t.Fatalf("the expansion reveals the rest, texts %q", tester.Texts())
+	}
+}
+
+func itoa(v int) string {
+	return strconv.Itoa(v)
 }

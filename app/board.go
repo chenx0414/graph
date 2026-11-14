@@ -20,7 +20,7 @@ var railItems = []railItem{
 	{"insights", "洞察", iconTrend},
 	{"fleet", "编队", iconNetwork},
 	{"providers", "供应商", iconDatabase},
-	{"capabilities", "能力", iconShare},
+	{"capabilities", "资源", iconShare},
 	{"settings", "设置", iconGear},
 }
 

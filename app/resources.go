@@ -2,35 +2,45 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo"
-	"github.com/egoist/mygo/ui"
 )
 
 type resourceRow struct {
-	kind    string
-	name    string
-	version string
-	origin  string
-	status  string
-	missing []string
-	err     string
-	ready   bool
+	id          string
+	kind        string
+	name        string
+	version     string
+	origin      string
+	status      string
+	source      string
+	description string
+	repo        string
+	missing     []string
+	err         string
+	ready       bool
 }
 
 type resourceLibraryPayload struct {
 	Capabilities []struct {
-		ID      string `json:"id"`
-		Name    string `json:"name"`
-		Kind    string `json:"kind"`
-		Version string `json:"version"`
-		Origin  string `json:"origin"`
-		Status  string `json:"status"`
-		Error   string `json:"error"`
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		Kind     string `json:"kind"`
+		Version  string `json:"version"`
+		Origin   string `json:"origin"`
+		Status   string `json:"status"`
+		Source   string `json:"source"`
+		Error    string `json:"error"`
+		Snapshot struct {
+			Manifest struct {
+				Description string `json:"description"`
+				Source      string `json:"source"`
+			} `json:"manifest"`
+		} `json:"snapshot"`
 	} `json:"capabilities"`
 	AgentCombinations []struct {
 		ID     string `json:"id"`
@@ -53,6 +63,18 @@ type resourceConfigPayload struct {
 
 func resourceConfigKey(id, version string) string {
 	return id + "@" + version
+}
+
+func resourceRepo(sourceURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(sourceURL))
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) < 2 {
+		return ""
+	}
+	return parts[0] + "/" + parts[1]
 }
 
 func parseResourceLibrary(catalog, config []byte) ([]resourceRow, error) {
@@ -93,8 +115,9 @@ func parseResourceLibrary(catalog, config []byte) ([]resourceRow, error) {
 		}
 		ready := status == "available" && len(missing) == 0 && errText == ""
 		rows = append(rows, resourceRow{
-			kind: item.Kind, name: name, version: item.Version, origin: item.Origin,
-			status: status, missing: missing, err: errText, ready: ready,
+			id: item.ID, kind: item.Kind, name: name, version: item.Version, origin: item.Origin,
+			status: status, source: item.Source, description: item.Snapshot.Manifest.Description,
+			repo: resourceRepo(item.Snapshot.Manifest.Source), missing: missing, err: errText, ready: ready,
 		})
 	}
 	sort.SliceStable(rows, func(a, b int) bool {
@@ -158,26 +181,20 @@ func resourceSummary(rows []resourceRow) string {
 	return strconv.Itoa(ready) + " / " + strconv.Itoa(len(rows)) + " 可用 · " + strconv.Itoa(pending) + " 个待配置"
 }
 
-type configDocument struct {
-	Revision int             `json:"revision"`
-	Config   json.RawMessage `json:"config"`
-}
-
 type catalogRoot struct {
 	CapabilityRoot string `json:"capabilityRoot"`
 }
 
 type resourceState struct {
-	api        apiClient
-	status     string
-	root       string
-	document   json.RawMessage
-	revision   int
-	autoUpdate bool
-	openPath   func(string) error
-	window     *mygo.Window
-	rows       []resourceRow
-	list       ui.ListState
+	api          apiClient
+	status       string
+	root         string
+	search       string
+	kind         string
+	showAllFound bool
+	openPath     func(string) error
+	window       *mygo.Window
+	rows         []resourceRow
 }
 
 func newResourceState(address, token string) *resourceState {
@@ -200,61 +217,29 @@ func (s *resourceState) load() {
 		return
 	}
 	s.rows = rows
-	s.reloadConfig()
+	s.reloadRoot()
 	s.status = ""
 	s.frame()
 }
 
-func (s *resourceState) reloadConfig() {
-	if payload, err := s.api.get("/api/settings"); err == nil {
-		var named catalogRoot
-		if json.Unmarshal(payload, &named) == nil {
-			s.root = strings.TrimSpace(named.CapabilityRoot)
-		}
+func (s *resourceState) refresh() {
+	if _, err := s.api.post("/api/catalog/refresh", nil); err != nil {
+		s.status = "刷新失败：" + err.Error()
+		s.frame()
+		return
 	}
-	payload, err := s.api.get("/api/config")
+	s.load()
+}
+
+func (s *resourceState) reloadRoot() {
+	payload, err := s.api.get("/api/settings")
 	if err != nil {
 		return
 	}
-	var document configDocument
-	if json.Unmarshal(payload, &document) != nil || len(document.Config) == 0 {
-		return
+	var named catalogRoot
+	if json.Unmarshal(payload, &named) == nil {
+		s.root = strings.TrimSpace(named.CapabilityRoot)
 	}
-	var shaped map[string]any
-	if json.Unmarshal(document.Config, &shaped) != nil {
-		return
-	}
-	s.document = document.Config
-	s.revision = document.Revision
-	s.autoUpdate, _ = shaped["piExtensionAutoUpdate"].(bool)
-}
-
-func (s *resourceState) toggleAutoUpdate() {
-	if len(s.document) == 0 {
-		s.status = "读不到配置，暂时改不了这个开关"
-		s.frame()
-		return
-	}
-	var shaped map[string]any
-	if err := json.Unmarshal(s.document, &shaped); err != nil {
-		s.status = "配置不是预期结构：" + err.Error()
-		s.frame()
-		return
-	}
-	shaped["piExtensionAutoUpdate"] = !s.autoUpdate
-	body := map[string]any{"expectedRevision": s.revision, "document": shaped}
-	if _, err := s.api.post("/api/config", body); err != nil {
-		var rejected errStatus
-		if errors.As(err, &rejected) {
-			s.status = "写入被拒绝：" + err.Error() + "（配置可能已被别处改过，重进资源页会重读）"
-		} else {
-			s.status = "写入失败：" + err.Error()
-		}
-		s.frame()
-		return
-	}
-	s.status = ""
-	s.load()
 }
 
 func (s *resourceState) openDirectory() {
@@ -276,39 +261,4 @@ func (s *resourceState) frame() {
 	if s.window != nil {
 		s.window.Update(func() {})
 	}
-}
-
-func (s *resourceState) view(ctx *ui.Context) {
-	t := ctx.Theme()
-	ui.Column(ctx).Fill().Padding(16).Gap(10).Children(func() {
-		if s.status != "" {
-			ui.Text(ctx, s.status).FontSize(12).TextColor(t.TextMuted)
-			return
-		}
-		ui.Text(ctx, "资源库 · "+resourceSummary(s.rows)).FontSize(12).TextColor(t.TextMuted)
-		ui.Row(ctx).Gap(8).AlignItems(ui.Center).Children(func() {
-			if ui.Button(ctx, "打开能力目录").Clicked() {
-				go s.openDirectory()
-			}
-			label := "扩展自动更新：关"
-			if s.autoUpdate {
-				label = "扩展自动更新：开"
-			}
-			if ui.Button(ctx, label).Clicked() {
-				go s.toggleAutoUpdate()
-			}
-			if s.root != "" {
-				ui.Text(ctx, s.root).FontSize(11).TextColor(t.TextMuted).Grow(1)
-			}
-		})
-		lines := resourceRows(s.rows)
-		ui.List(ctx, &s.list, len(lines), func(index int) {
-			line := lines[index]
-			if line.header {
-				ui.Text(ctx, line.kind).FontSize(12).TextColor(t.TextMuted)
-				return
-			}
-			ui.Text(ctx, resourceLabel(line.row)).FontSize(12)
-		}).Grow(1)
-	})
 }
