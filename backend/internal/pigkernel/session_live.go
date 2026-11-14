@@ -197,7 +197,7 @@ func entryToolReports(messages []ai.Message) []map[string]any {
 					report["toolName"] = call.Name
 				}
 				if call.Arguments != nil {
-					report["args"] = call.Arguments
+					report["args"] = map[string]any(call.Arguments)
 				}
 				reports = append(reports, report)
 			}
@@ -228,28 +228,26 @@ func (session *Session) publishEntries(ctx context.Context, seen *liveShape) {
 	if session.conversation == nil {
 		return
 	}
-	if seen.lastEntry == 0 {
-		page, err := session.conversation.Entries(ctx, durable.EntryQuery{ConversationId: session.conversation.Id()}, 1, nil)
-		if err != nil {
-			return
-		}
-		if len(page.Items) == 0 {
-			return
-		}
-		seen.lastEntry = page.Items[0].Id
-		return
-	}
-	order := durable.ScanAscending
-	oldest := seen.lastEntry
-	page, err := session.conversation.Entries(ctx, durable.EntryQuery{ConversationId: session.conversation.Id(), MinEntryId: &oldest, Order: &order}, 50, nil)
+	page, err := session.conversation.Entries(ctx, durable.EntryQuery{ConversationId: session.conversation.Id()}, 50, nil)
 	if err != nil {
 		return
 	}
-	for _, entry := range page.Items {
+	if len(page.Items) > 0 && seen.lastEntry == 0 {
+		seen.lastEntry = page.Items[0].Id
+		return
+	}
+	fresh := []durable.EntryRecord{}
+	for index := len(page.Items) - 1; index >= 0; index-- {
+		entry := page.Items[index]
 		if entry.Id <= seen.lastEntry {
 			continue
 		}
-		seen.lastEntry = entry.Id
+		fresh = append(fresh, entry)
+	}
+	if len(fresh) > 0 {
+		seen.lastEntry = fresh[len(fresh)-1].Id
+	}
+	for _, entry := range fresh {
 		for _, message := range entry.Model {
 			if _, ok := message.(ai.AssistantMessage); ok {
 				session.OnEvent(map[string]any{"type": "message_end", "message": messageMap(message)})
@@ -259,4 +257,5 @@ func (session *Session) publishEntries(ctx context.Context, seen *liveShape) {
 			}
 		}
 	}
+
 }

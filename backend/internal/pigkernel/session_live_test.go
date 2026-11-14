@@ -114,7 +114,7 @@ func TestEntryToolReportsCarryNameArgumentsAndResult(t *testing.T) {
 	if len(reports) != 1 || reports[0]["type"] != "tool_execution_start" || reports[0]["toolName"] != "bash" {
 		t.Fatalf("the assistant entry reports its tool call, got %v", reports)
 	}
-	args, _ := reports[0]["args"].(ai.JsonObject)
+	args, _ := reports[0]["args"].(map[string]any)
 	if args["command"] != "echo hi" {
 		t.Fatalf("the call reports its arguments, got %v", reports[0]["args"])
 	}

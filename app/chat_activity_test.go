@@ -141,9 +141,54 @@ func TestAToolRowShowsItsArgumentsAndReturnValue(t *testing.T) {
 		t.Fatalf("open the tool row: %v", err)
 	}
 	tester = frames(tester)
-	for _, want := range []string{"graph_inspect", `{"query":"SELECT 1"}`, "answer", "成功"} {
+	for _, want := range []string{"graph_inspect", "参数", `{"query":"SELECT 1"}`, "输出", "answer", "成功"} {
 		if !tester.HasText(want) {
 			t.Fatalf("the panel shows %q, texts %q", want, tester.Texts())
 		}
+	}
+}
+
+func TestAShellRowKeepsItsCommandOutOfTheArgumentsBlock(t *testing.T) {
+	state := newChatState("http://127.0.0.1:1", "tok")
+	message := activityTool("bash", "bash: echo hi", "done")
+	message.Data.Args = `{"command":"echo hi","timeout":15000}`
+	message.Data.Output = "hi"
+	message.Data.ToolCallID = "call-3"
+	message.CreatedAt = 1_000_000
+	state.messages = []transcriptMessage{message}
+	tester := frames(ui.NewTester(state.view, 760, 620))
+	if err := tester.Click("1 次工具调用"); err != nil {
+		t.Fatalf("open the activity: %v", err)
+	}
+	tester = frames(tester)
+	if err := tester.Click("已运行 echo hi"); err != nil {
+		t.Fatalf("open the shell row: %v", err)
+	}
+	tester = frames(tester)
+	for _, want := range []string{"Shell", "$ echo hi", "输出", "hi"} {
+		if !tester.HasText(want) {
+			t.Fatalf("the panel shows %q, texts %q", want, tester.Texts())
+		}
+	}
+	if tester.HasText("参数") {
+		t.Fatalf("a shell command is not repeated as arguments, texts %q", tester.Texts())
+	}
+}
+
+func TestAToolRowFallsBackToItsArgumentsForTheCommand(t *testing.T) {
+	state := newChatState("http://127.0.0.1:1", "tok")
+	message := activityTool("bash", "bash: bash", "done")
+	message.Data.Args = `{"command":"uname -s","timeout":15000}`
+	message.Data.Output = "Darwin"
+	message.Data.ToolCallID = "call-4"
+	message.CreatedAt = 1_000_000
+	state.messages = []transcriptMessage{message}
+	tester := frames(ui.NewTester(state.view, 760, 620))
+	if err := tester.Click("1 次工具调用"); err != nil {
+		t.Fatalf("open the activity: %v", err)
+	}
+	tester = frames(tester)
+	if !tester.HasText("已运行 uname -s") {
+		t.Fatalf("the row reads its command from the arguments, texts %q", tester.Texts())
 	}
 }

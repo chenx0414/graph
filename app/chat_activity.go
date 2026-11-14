@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
@@ -69,6 +70,9 @@ func codexActivities(run transcriptRun) []codexActivity {
 	for _, message := range run.messages {
 		name := message.Data.Tool
 		payload := message.Data.Command
+		if payload == "" {
+			payload = commandFromArgs(message.Data.Args)
+		}
 		if payload == "" {
 			payload = codexToolPayload(message.Text, name)
 		}
@@ -155,6 +159,23 @@ func runElapsed(run transcriptRun) time.Duration {
 		return 0
 	}
 	return time.Duration(end-start) * time.Millisecond
+}
+
+func commandFromArgs(args string) string {
+	trimmed := strings.TrimSpace(args)
+	if trimmed == "" {
+		return ""
+	}
+	var values map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &values); err != nil {
+		return ""
+	}
+	for _, key := range []string{"command", "cmd", "path", "query", "url", "pattern"} {
+		if value, ok := values[key].(string); ok && strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func argsText(values []string) string {
@@ -245,11 +266,13 @@ func (c *chatState) activityPanel(ctx *ui.Context, activity codexActivity) {
 		if activity.command != "" {
 			kit.Text(ctx, "$ "+activity.command, t.Text.Xs).Font(gwtheme.MonoFont).TextColor(t.Foreground)
 		}
-		if activity.command == "" && activity.args != "" {
-			kit.Text(ctx, activity.args, t.Text.Xs).Font(gwtheme.MonoFont).TextColor(t.Muted)
+		if args := activityArguments(activity); args != "" {
+			kit.Text(ctx, "参数", t.Text.Xs).TextColor(t.Muted).Padding(0, 0, th.Space(0.5), 0)
+			kit.Text(ctx, args, t.Text.Xs).Font(gwtheme.MonoFont).TextColor(t.Foreground)
 		}
-		if activity.output != "" {
-			kit.Text(ctx, activity.output, t.Text.Xs).Font(gwtheme.MonoFont).TextColor(t.Muted)
+		if output := activityOutput(activity.output); output != "" {
+			kit.Text(ctx, "输出", t.Text.Xs).TextColor(t.Muted).Padding(0, 0, th.Space(0.5), 0)
+			kit.Text(ctx, output, t.Text.Xs).Font(gwtheme.MonoFont).TextColor(t.Muted)
 		}
 		ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center).Justify(ui.End).Children(func() {
 			if activity.failed {
@@ -261,6 +284,54 @@ func (c *chatState) activityPanel(ctx *ui.Context, activity codexActivity) {
 			kit.Text(ctx, "成功", t.Text.Xs).TextColor(t.Muted)
 		})
 	})
+}
+
+func activityArguments(activity codexActivity) string {
+	args := strings.TrimSpace(activity.args)
+	if args == "" || args == "{}" || args == "null" {
+		return ""
+	}
+	if activity.command != "" {
+		if compact := commandArgumentOnly(args, activity.command); compact == "" {
+			return ""
+		}
+	}
+	return args
+}
+
+func commandArgumentOnly(args, command string) string {
+	var values map[string]any
+	if err := json.Unmarshal([]byte(args), &values); err != nil {
+		return args
+	}
+	delete(values, "command")
+	delete(values, "cmd")
+	delete(values, "timeout")
+	if len(values) == 0 {
+		return ""
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return args
+	}
+	return string(encoded)
+}
+
+func activityOutput(output string) string {
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return ""
+	}
+	lines := strings.Split(trimmed, "\n")
+	if len(lines) > 24 {
+		lines = append(lines[:24], "… 还有 "+strconv.Itoa(len(lines)-24)+" 行")
+	}
+	kept := strings.Join(lines, "\n")
+	runes := []rune(kept)
+	if len(runes) > 3_000 {
+		kept = string(runes[:3_000]) + "…"
+	}
+	return kept
 }
 
 func chatRightFade() ui.LinearGradient {
