@@ -2,20 +2,11 @@ package main
 
 import (
 	"encoding/json"
-	"sort"
 	"strconv"
-	"strings"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
-
-type credentialRow struct {
-	id         string
-	name       string
-	secretRef  string
-	configured bool
-}
 
 type projectRow struct {
 	id       string
@@ -30,7 +21,6 @@ type settingsSnapshot struct {
 	defaultModel string
 	revision     int
 	modelCount   int
-	credentials  []credentialRow
 	projects     []projectRow
 }
 
@@ -55,18 +45,7 @@ type settingsPayload struct {
 	} `json:"projects"`
 }
 
-type configPayload struct {
-	Revision int `json:"revision"`
-	Config   struct {
-		Credentials map[string]struct {
-			DisplayName string `json:"displayName"`
-			SecretRef   string `json:"secretRef"`
-			Configured  bool   `json:"configured"`
-		} `json:"credentials"`
-	} `json:"config"`
-}
-
-func parseSettings(startup, settings, config []byte) (settingsSnapshot, error) {
+func parseSettings(startup, settings []byte) (settingsSnapshot, error) {
 	snapshot := settingsSnapshot{}
 	var began startupPayload
 	if err := json.Unmarshal(startup, &began); err != nil {
@@ -89,21 +68,6 @@ func parseSettings(startup, settings, config []byte) (settingsSnapshot, error) {
 		}
 		snapshot.projects = append(snapshot.projects, projectRow{id: project.ID, state: state, archived: project.ArchivedAt != nil})
 	}
-	var wired configPayload
-	if err := json.Unmarshal(config, &wired); err != nil {
-		return snapshot, err
-	}
-	if wired.Revision > 0 {
-		snapshot.revision = wired.Revision
-	}
-	for id, credential := range wired.Config.Credentials {
-		name := strings.TrimSpace(credential.DisplayName)
-		if name == "" {
-			name = id
-		}
-		snapshot.credentials = append(snapshot.credentials, credentialRow{id: id, name: name, secretRef: credential.SecretRef, configured: credential.Configured})
-	}
-	sort.Slice(snapshot.credentials, func(a, b int) bool { return snapshot.credentials[a].name < snapshot.credentials[b].name })
 	return snapshot, nil
 }
 
@@ -112,14 +76,6 @@ func shortCommit(commit string) string {
 		return commit[:8]
 	}
 	return commit
-}
-
-func credentialLabel(row credentialRow) string {
-	mark := "○"
-	if row.configured {
-		mark = "●"
-	}
-	return mark + " " + row.name
 }
 
 func projectLabel(row projectRow) string {
@@ -131,19 +87,15 @@ func projectLabel(row projectRow) string {
 }
 
 type settingsState struct {
-	api         apiClient
-	status      string
-	editing     string
-	secretDraft string
-	login       providerLogin
-	openURL     func(string) error
-	window      *mygo.Window
-	rows        settingsSnapshot
-	list        ui.ListState
+	api    apiClient
+	status string
+	window *mygo.Window
+	rows   settingsSnapshot
+	list   ui.ListState
 }
 
 func newSettingsState(address, token string) *settingsState {
-	return &settingsState{api: newAPIClient(address, token), status: "正在读取设置…", openURL: mygo.Shell.OpenExternal}
+	return &settingsState{api: newAPIClient(address, token), status: "正在读取设置…"}
 }
 
 func (s *settingsState) load() {
@@ -157,12 +109,7 @@ func (s *settingsState) load() {
 		s.status = "读不到设置：" + err.Error()
 		return
 	}
-	config, err := s.api.get("/api/config")
-	if err != nil {
-		s.status = "读不到配置：" + err.Error()
-		return
-	}
-	snapshot, err := parseSettings(startup, settings, config)
+	snapshot, err := parseSettings(startup, settings)
 	if err != nil {
 		s.status = "设置不是预期的 JSON：" + err.Error()
 		return
@@ -179,26 +126,6 @@ func (s *settingsState) post(path string) {
 	}
 	s.status = ""
 	s.load()
-}
-
-func (s *settingsState) saveSecret(row credentialRow) {
-	value := strings.TrimSpace(s.secretDraft)
-	if value == "" || row.secretRef == "" {
-		s.status = "凭据要填一个值，而且这条凭据得先声明 secretRef"
-		s.frame()
-		return
-	}
-	body := map[string]any{"ref": row.secretRef, "value": value, "persisted": true}
-	if _, err := s.api.post("/api/app/secret", body); err != nil {
-		s.status = "保存失败：" + err.Error()
-		s.frame()
-		return
-	}
-	s.editing = ""
-	s.secretDraft = ""
-	s.load()
-	s.status = "已保存 " + row.name
-	s.frame()
 }
 
 func (s *settingsState) toggleProject(row projectRow) {
@@ -221,7 +148,7 @@ func (s *settingsState) view(ctx *ui.Context) {
 		if s.status != "" {
 			ui.Text(ctx, s.status).FontSize(12).TextColor(t.TextMuted)
 		}
-		if s.rows.mode == "" && len(s.rows.credentials) == 0 && len(s.rows.projects) == 0 {
+		if s.rows.mode == "" && len(s.rows.projects) == 0 {
 			return
 		}
 		ui.Text(ctx, "运行 · "+s.rows.mode+" · 配置版本 "+strconv.Itoa(s.rows.revision)).FontSize(12).TextColor(t.TextMuted)
@@ -229,39 +156,7 @@ func (s *settingsState) view(ctx *ui.Context) {
 		if s.rows.defaultModel != "" {
 			ui.Text(ctx, "默认模型 · "+s.rows.defaultModel).FontSize(12).TextColor(t.TextMuted)
 		}
-		ui.Text(ctx, "订阅凭据").FontSize(13)
-		for _, credential := range s.rows.credentials {
-			row := credential
-			ui.Row(ctx).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Text(ctx, credentialLabel(row)).FontSize(12).Grow(1)
-				action := "填写 " + row.id
-				if row.configured {
-					action = "更换 " + row.id
-				}
-				if ui.Button(ctx, action).Clicked() {
-					s.editing = row.id
-					s.secretDraft = ""
-					s.status = ""
-				}
-				if ui.Button(ctx, "登录 "+row.id).Clicked() {
-					go s.startLogin(row)
-				}
-			})
-			if s.editing != row.id {
-				continue
-			}
-			ui.Row(ctx).Gap(8).AlignItems(ui.End).Children(func() {
-				ui.TextInput(ctx, &s.secretDraft).Placeholder("粘贴 " + row.secretRef + " 的值…").Label("凭据 " + row.id).Grow(1)
-				if ui.PrimaryButton(ctx, "保存凭据").Clicked() {
-					go s.saveSecret(row)
-				}
-				if ui.Button(ctx, "取消填写").Clicked() {
-					s.editing = ""
-					s.secretDraft = ""
-				}
-			})
-		}
-		s.loginSection(ctx)
+		ui.Text(ctx, "凭据在「供应商」页管理 · 与 magpie 同一套").FontSize(12).TextColor(t.TextMuted)
 		ui.Text(ctx, "项目").FontSize(13)
 		ui.List(ctx, &s.list, len(s.rows.projects), func(index int) {
 			row := s.rows.projects[index]
