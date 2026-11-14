@@ -27,6 +27,7 @@ type shellState struct {
 	modelMeta        map[string]modelMeta
 	modelMetaLoading bool
 	modelMetaError   string
+	providers        providersPageState
 	promptScope      string
 	promptRecord     *promptRecord
 	promptError      string
@@ -198,6 +199,7 @@ func (s *shellState) selectConversation(id string) {
 	s.chatMu.Unlock()
 	state := newChatState(s.api.address, s.api.token)
 	state.window = s.window
+	state.providerOn = s.providersEnabled
 	state.open(id)
 	s.chatMu.Lock()
 	if s.activeID == id {

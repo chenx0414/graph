@@ -344,6 +344,7 @@ func (s *shellState) activeChatCapabilities() chatCapabilities {
 func (s *shellState) installAgentChat(source agentChatSource, agent fleetAgent) {
 	state := newChatState(s.api.address, s.api.token)
 	state.window = s.window
+	state.providerOn = s.providersEnabled
 	if agent.ID != "" {
 		state.agentTitle = fleetAgentLabel(agent)
 		state.agentStatus = agent.Status

@@ -63,6 +63,8 @@ func (s *shellState) boardPanelBody(ctx *ui.Context, panel *boardPanel) {
 		s.panelModels(ctx)
 	case "questions":
 		s.panelQuestions(ctx)
+	case "providers":
+		s.panelProviders(ctx)
 	case "capabilities":
 		s.panelCapabilities(ctx)
 	case "settings":

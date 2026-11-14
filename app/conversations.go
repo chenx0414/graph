@@ -329,6 +329,16 @@ func (c *chatState) composer(ctx *ui.Context) {
 			c.composerMenuView(ctx, c.composerMenuItems(c.menuTrigger))
 			ui.Box(ctx).Height(th.Space(1.5))
 		})
+		pickerSlot := ui.Column(ctx).FillWidth()
+		pickerSlot.Children(func() {
+			if !c.modelPicker.open {
+				ui.Box(ctx).Height(0)
+				return
+			}
+			align := ui.Row(ctx).FillWidth().Justify(ui.End)
+			align.Children(func() { c.modelPickerView(ctx) })
+			ui.Box(ctx).Height(th.Space(1.5))
+		})
 		card := ui.Column(ctx).FillWidth().Padding(th.Space(3)).Gap(th.Space(2)).
 			Radius(t.Radius.X2l).Background(t.Background).Border(gwtheme.Stroke, t.Input).Clip()
 		kit.Elevate(ctx, card, composerShadow)
@@ -419,9 +429,19 @@ func (c *chatState) modelChip(ctx *ui.Context) {
 	if text == "" {
 		text = "模型"
 	}
-	ui.Row(ctx).Gap(th.Space(1)).PaddingX(th.Space(1)).AlignItems(ui.Center).Label("模型").Tooltip("模型切换在白板").Children(func() {
+	chip := ui.Row(ctx).Gap(th.Space(1)).PaddingX(th.Space(1)).AlignItems(ui.Center).Label("模型").
+		Focusable().Radius(t.Radius.Sm)
+	if c.modelPicker.open {
+		chip.Background(t.Hover)
+	}
+	chip.OnClick(func() {
+		c.modelPicker.open = !c.modelPicker.open
+		c.frame()
+	})
+	chip.Children(func() {
 		ui.Icon(ctx, iconSpark).Size(gwtheme.IconSm, gwtheme.IconSm).TextColor(t.Muted)
-		kit.Text(ctx, text, t.Text.Sm).FontWeight(500).TextColor(t.Muted)
+		kit.Text(ctx, text, t.Text.Sm).FontWeight(500).TextColor(t.Muted).SingleLine()
+		ui.Icon(ctx, iconChevron).Size(gwtheme.IconXs, gwtheme.IconXs).TextColor(t.Muted)
 	})
 }
 

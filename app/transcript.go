@@ -124,6 +124,8 @@ type chatState struct {
 	pathLoading     bool
 	skillItems      []composerSkillEntry
 	skillsLoading   bool
+	modelPicker     modelPickerState
+	providerOn      func(string) bool
 	projectID       string
 	projectRoot     string
 	attachments     []composerAttachment

@@ -176,8 +176,17 @@ func TestTheBoardRemembersItsLayout(t *testing.T) {
 }
 
 func TestTheRailNoLongerOffersHistoryOrConversationPages(t *testing.T) {
-	if len(railItems) != 5 {
-		t.Fatalf("the rail keeps five module entries, got %d", len(railItems))
+	if len(railItems) != 6 {
+		t.Fatalf("the rail keeps six module entries, got %d", len(railItems))
+	}
+	providers := false
+	for _, item := range railItems {
+		if item.kind == "providers" {
+			providers = true
+		}
+	}
+	if !providers {
+		t.Fatal("the rail offers the providers page")
 	}
 	for _, item := range railItems {
 		if item.kind == "graph" {

@@ -154,6 +154,8 @@ func boardPanelTitle(kind string) string {
 	case "agent":
 		return "Agent 面板"
 
+	case "providers":
+		return "供应商"
 	case "capabilities":
 		return "能力库"
 	case "settings":
