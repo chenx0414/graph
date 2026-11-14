@@ -26,6 +26,7 @@ type PiAdapterActivityRecord struct {
 	State      string `json:"state,omitempty"`
 	Message    string `json:"message,omitempty"`
 	Output     string `json:"output,omitempty"`
+	Args       any    `json:"args,omitempty"`
 	Ordinal    int    `json:"ordinal"`
 }
 

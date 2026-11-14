@@ -50,7 +50,7 @@ func parseNodeRunEntries(payload []byte) ([]transcriptMessage, bool, error) {
 			Text: text, State: entry.State, CreatedAt: entry.CreatedAt,
 		}
 		if message.Role == "tool" {
-			name, command, ok := nodeToolCallText(text)
+			name, command, args, ok := nodeToolCallText(text)
 			if !ok {
 				name = entry.Data.ToolName
 				command = text
@@ -61,6 +61,7 @@ func parseNodeRunEntries(payload []byte) ([]transcriptMessage, bool, error) {
 			message.Data.Tool = name
 			message.Data.ToolCallID = entry.Data.ToolCallID
 			message.Data.Command = command
+			message.Data.Args = args
 			message.Data.Output = outputs[entry.Data.ToolCallID]
 			message.Data.Error = failed[entry.Data.ToolCallID]
 			message.State = "running"
@@ -79,23 +80,24 @@ func parseNodeRunEntries(payload []byte) ([]transcriptMessage, bool, error) {
 	return messages, raw.HasOlder, nil
 }
 
-func nodeToolCallText(text string) (name, command string, ok bool) {
+func nodeToolCallText(text string) (name, command, args string, ok bool) {
 	var call struct {
 		Name string          `json:"name"`
 		Args json.RawMessage `json:"args"`
 	}
 	if err := json.Unmarshal([]byte(text), &call); err != nil || call.Name == "" {
-		return "", "", false
+		return "", "", "", false
 	}
-	var args map[string]any
-	if err := json.Unmarshal(call.Args, &args); err == nil {
+	args = strings.TrimSpace(string(call.Args))
+	var body map[string]any
+	if err := json.Unmarshal(call.Args, &body); err == nil {
 		for _, key := range []string{"command", "cmd", "path", "query", "url", "pattern"} {
-			if value, ok := args[key].(string); ok && value != "" {
-				return call.Name, value, true
+			if value, ok := body[key].(string); ok && value != "" {
+				return call.Name, value, args, true
 			}
 		}
 	}
-	return call.Name, "", true
+	return call.Name, "", args, true
 }
 
 func nodeToolResultText(text string) string {

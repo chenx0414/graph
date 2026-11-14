@@ -143,6 +143,25 @@ func (live *piAdapterLiveTurn) handle(event map[string]any) {
 	case "tool_execution_start":
 		toolName, _ := event["toolName"].(string)
 		toolCallId, _ := event["toolCallId"].(string)
+		if live.conversation != nil {
+			if _, seen := live.toolOrdinals[toolCallId]; seen {
+				if toolName == "" || event["args"] == nil {
+					return
+				}
+				summary := summarizeToolCall(toolName, event["args"])
+				live.toolSummaries[toolCallId] = summary
+				for index := range live.activity {
+					if live.activity[index].ToolCallId == toolCallId {
+						live.activity[index].Name = toolName
+						live.activity[index].Summary = summary
+						live.activity[index].Args = event["args"]
+					}
+				}
+				PersistConversationActivity(live.store, live.conversation.Id, live.operation.Id, live.operation.Attempt,
+					ConversationActivityRecords(live.activity, ""), live.activeConversationTools, deferredRunningIds(nil))
+				return
+			}
+		}
 		if live.persistEntries {
 			AppendNodeEntry(live.store, NodeEntryInput{
 				TaskID: live.operation.TaskId, NodeID: live.operation.NodeId, InstanceID: live.instanceId,
@@ -161,6 +180,7 @@ func (live *piAdapterLiveTurn) handle(event map[string]any) {
 		live.toolOrdinals[toolCallId] = callOrdinal
 		live.activity = append(live.activity, PiAdapterActivityRecord{
 			Type: "tool", ToolCallId: toolCallId, Name: toolName, Summary: summary, State: "done", Ordinal: callOrdinal,
+			Args: event["args"],
 		})
 		live.flushDeltas(true)
 		live.activeConversationTools[toolCallId] = true
@@ -201,6 +221,9 @@ func (live *piAdapterLiveTurn) handle(event map[string]any) {
 			})
 		}
 		if live.conversation == nil {
+			return
+		}
+		if !live.activeConversationTools[toolCallId] {
 			return
 		}
 		summary := live.toolSummaries[toolCallId]

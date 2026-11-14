@@ -51,7 +51,7 @@ func TestCodexWorkedForFormatsDurations(t *testing.T) {
 	}
 }
 
-func TestTheToolActivityFoldsUnderItsDurationHeader(t *testing.T) {
+func TestTheToolActivityStartsFoldedUnderItsDurationHeader(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
 	first := activityTool("bash", "bash: echo hi", "done")
 	first.CreatedAt = 1_000_000
@@ -62,15 +62,22 @@ func TestTheToolActivityFoldsUnderItsDurationHeader(t *testing.T) {
 	if !tester.HasText("用时 3m 1s") {
 		t.Fatalf("the run shows its duration header, texts %q", tester.Texts())
 	}
+	if tester.HasText("已运行 echo hi; go test ./...") {
+		t.Fatalf("the activity starts folded, texts %q", tester.Texts())
+	}
+	if err := tester.Click("用时 3m 1s"); err != nil {
+		t.Fatalf("open the activity: %v", err)
+	}
+	frames(tester)
 	if !tester.HasText("已运行 echo hi; go test ./...") {
-		t.Fatalf("the run lists its commands, texts %q", tester.Texts())
+		t.Fatalf("opening lists the commands, texts %q", tester.Texts())
 	}
 	if err := tester.Click("用时 3m 1s"); err != nil {
 		t.Fatalf("fold the activity: %v", err)
 	}
 	frames(tester)
 	if tester.HasText("已运行 echo hi; go test ./...") {
-		t.Fatalf("folding hides the rows, texts %q", tester.Texts())
+		t.Fatalf("folding hides the rows again, texts %q", tester.Texts())
 	}
 }
 
@@ -96,6 +103,10 @@ func TestAToolRowExpandsIntoTheCodexPanel(t *testing.T) {
 	message.CreatedAt = 1_000_000
 	state.messages = []transcriptMessage{message}
 	tester := frames(ui.NewTester(state.view, 760, 620))
+	if err := tester.Click("1 次工具调用"); err != nil {
+		t.Fatalf("open the activity: %v", err)
+	}
+	tester = frames(tester)
 	if !tester.HasText("已运行 echo hi") {
 		t.Fatalf("the row shows its command, texts %q", tester.Texts())
 	}
@@ -107,6 +118,30 @@ func TestAToolRowExpandsIntoTheCodexPanel(t *testing.T) {
 	}
 	frames(tester)
 	for _, want := range []string{"Shell", "$ echo hi", "hi there", "成功"} {
+		if !tester.HasText(want) {
+			t.Fatalf("the panel shows %q, texts %q", want, tester.Texts())
+		}
+	}
+}
+
+func TestAToolRowShowsItsArgumentsAndReturnValue(t *testing.T) {
+	state := newChatState("http://127.0.0.1:1", "tok")
+	message := activityTool("graph_inspect", "graph_inspect: graph_inspect", "done")
+	message.Data.Args = `{"query":"SELECT 1"}`
+	message.Data.Output = "answer"
+	message.Data.ToolCallID = "call-2"
+	message.CreatedAt = 1_000_000
+	state.messages = []transcriptMessage{message}
+	tester := frames(ui.NewTester(state.view, 760, 620))
+	if err := tester.Click("1 次工具调用"); err != nil {
+		t.Fatalf("open the activity: %v", err)
+	}
+	tester = frames(tester)
+	if err := tester.Click("graph_inspect已完成"); err != nil {
+		t.Fatalf("open the tool row: %v", err)
+	}
+	tester = frames(tester)
+	for _, want := range []string{"graph_inspect", `{"query":"SELECT 1"}`, "answer", "成功"} {
 		if !tester.HasText(want) {
 			t.Fatalf("the panel shows %q, texts %q", want, tester.Texts())
 		}

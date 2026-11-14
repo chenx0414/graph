@@ -346,8 +346,14 @@ func TestNodeChatLoadsPastAToolOnlyTailUntilItFindsAMessage(t *testing.T) {
 	if !tester.HasText("真正的回答在前面") {
 		t.Fatalf("the initial node chat must page past a tool-only tail to its message, texts %q", tester.Texts())
 	}
-	if !tester.HasText("1 次工具调用") || !tester.HasText("tool运行中") {
-		t.Fatalf("the tool tail stays available as a run, texts %q", tester.Texts())
+	if !tester.HasText("1 次工具调用") {
+		t.Fatalf("the tool tail stays available as a folded run, texts %q", tester.Texts())
+	}
+	runs := state.chat.runs()
+	state.chat.expanded[runKey(runs[len(runs)-1])] = true
+	tester = frames(tester)
+	if !tester.HasText("tool运行中") {
+		t.Fatalf("opening the run shows its running tool, texts %q", tester.Texts())
 	}
 }
 
@@ -407,6 +413,9 @@ func TestNodeChatMarksAnUnansweredToolCallAsRunning(t *testing.T) {
 	}
 	state, tester := nodeChatShell(t, mock)
 	state.openFleetAgentChat(node)
+	tester = frames(tester)
+	runs := state.chat.runs()
+	state.chat.expanded[runKey(runs[len(runs)-1])] = true
 	tester = frames(tester)
 	found := false
 	for _, text := range tester.Texts() {
@@ -471,7 +480,7 @@ func TestNodeToolEntriesDecodeIntoOneCodexActivity(t *testing.T) {
 		t.Fatalf("a call and its result fold into one activity, messages %+v", messages)
 	}
 	message := messages[0]
-	if message.Data.Tool != "bash" || message.Data.Command != "echo hi" || message.Data.Output != "hi" || message.State != "done" {
+	if message.Data.Tool != "bash" || message.Data.Command != "echo hi" || message.Data.Args != `{"command":"echo hi"}` || message.Data.Output != "hi" || message.State != "done" {
 		t.Fatalf("the activity carries tool, command, output and state, got %+v", message)
 	}
 }

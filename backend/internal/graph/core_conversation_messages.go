@@ -55,6 +55,11 @@ func ConversationActivityRecords(activity any, reply string) []ConversationActiv
 		if output := conversationActivityString(entry["output"]); strings.TrimSpace(output) != "" {
 			data["output"] = truncateRunes(output, 8_000)
 		}
+		if args, ok := entry["args"]; ok && args != nil {
+			if encoded, err := json.Marshal(args); err == nil && string(encoded) != "{}" && string(encoded) != "null" {
+				data["args"] = truncateRunes(string(encoded), 2_000)
+			}
+		}
 		record := ConversationActivityRecord{Kind: ConversationActivityTool, Text: text, Data: data}
 		if ordinal != nil {
 			record.Ordinal = ordinal

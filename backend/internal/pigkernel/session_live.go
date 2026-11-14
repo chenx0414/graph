@@ -143,11 +143,10 @@ func (session *Session) watchLive(ctx context.Context) func() {
 				return
 			case <-time.After(livePollInterval):
 			}
-			state, err := durable.Snapshot(ctx, session.kernel.Harness(), harness.LiveDoc, session.conversation.Id())
-			if err != nil {
-				continue
+			next := previous
+			if state, err := durable.Snapshot(ctx, session.kernel.Harness(), harness.LiveDoc, session.conversation.Id()); err == nil {
+				next = liveShapeOf(state)
 			}
-			next := liveShapeOf(state)
 			for _, report := range diffLive(previous, next) {
 				session.OnEvent(report)
 			}
@@ -158,6 +157,7 @@ func (session *Session) watchLive(ctx context.Context) func() {
 				session.reportCompactionEnd(reason, "")
 			}
 			session.publishEntries(ctx, &previous)
+			next.lastEntry = previous.lastEntry
 			previous = next
 		}
 	}()
@@ -182,28 +182,81 @@ func messageMap(message ai.Message) map[string]any {
 	return decoded
 }
 
-func (session *Session) publishEntries(ctx context.Context, seen *liveShape) {
-	query := durable.EntryQuery{ConversationId: session.conversation.Id()}
-	if seen.lastEntry > 0 {
-		oldest := seen.lastEntry
-		query.MinEntryId = &oldest
+func entryToolReports(messages []ai.Message) []map[string]any {
+	reports := []map[string]any{}
+	for _, message := range messages {
+		switch typed := message.(type) {
+		case ai.AssistantMessage:
+			for _, block := range typed.Content {
+				call, ok := block.(ai.ToolCall)
+				if !ok || call.ID == "" {
+					continue
+				}
+				report := map[string]any{"type": "tool_execution_start", "toolCallId": call.ID}
+				if call.Name != "" {
+					report["toolName"] = call.Name
+				}
+				if call.Arguments != nil {
+					report["args"] = call.Arguments
+				}
+				reports = append(reports, report)
+			}
+		case ai.ToolResultMessage:
+			if typed.ToolCallID == "" {
+				continue
+			}
+			content := []any{}
+			for _, part := range typed.Content {
+				if text, ok := part.(ai.TextContent); ok && text.Text != "" {
+					content = append(content, map[string]any{"type": "text", "text": text.Text})
+				}
+			}
+			report := map[string]any{
+				"type": "tool_execution_end", "toolCallId": typed.ToolCallID, "isError": typed.IsError,
+				"result": map[string]any{"content": content},
+			}
+			if typed.ToolName != "" {
+				report["toolName"] = typed.ToolName
+			}
+			reports = append(reports, report)
+		}
 	}
-	page, err := session.conversation.Entries(ctx, query, 50, nil)
+	return reports
+}
+
+func (session *Session) publishEntries(ctx context.Context, seen *liveShape) {
+	if session.conversation == nil {
+		return
+	}
+	if seen.lastEntry == 0 {
+		page, err := session.conversation.Entries(ctx, durable.EntryQuery{ConversationId: session.conversation.Id()}, 1, nil)
+		if err != nil {
+			return
+		}
+		if len(page.Items) == 0 {
+			return
+		}
+		seen.lastEntry = page.Items[0].Id
+		return
+	}
+	order := durable.ScanAscending
+	oldest := seen.lastEntry
+	page, err := session.conversation.Entries(ctx, durable.EntryQuery{ConversationId: session.conversation.Id(), MinEntryId: &oldest, Order: &order}, 50, nil)
 	if err != nil {
 		return
 	}
 	for _, entry := range page.Items {
-		if entry.Id < seen.lastEntry {
+		if entry.Id <= seen.lastEntry {
 			continue
 		}
-		if entry.Id > seen.lastEntry {
-			seen.lastEntry = entry.Id
-		}
+		seen.lastEntry = entry.Id
 		for _, message := range entry.Model {
-			if _, ok := message.(ai.AssistantMessage); !ok {
-				continue
+			if _, ok := message.(ai.AssistantMessage); ok {
+				session.OnEvent(map[string]any{"type": "message_end", "message": messageMap(message)})
 			}
-			session.OnEvent(map[string]any{"type": "message_end", "message": messageMap(message)})
+			for _, report := range entryToolReports([]ai.Message{message}) {
+				session.OnEvent(report)
+			}
 		}
 	}
 }

@@ -270,8 +270,17 @@ func TestToolRunsExpandAndCollapse(t *testing.T) {
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
+	if tester.HasText("已运行 ls") {
+		t.Fatalf("a folded run must not show its commands, texts %q", tester.Texts())
+	}
+	if err := tester.Click("1 次工具调用"); err != nil {
+		t.Fatalf("open the run: %v", err)
+	}
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
 	if !tester.HasText("已运行 ls") {
-		t.Fatalf("the run lists its commands, texts %q", tester.Texts())
+		t.Fatalf("an open run shows its commands, texts %q", tester.Texts())
 	}
 	if err := tester.Click("1 次工具调用"); err != nil {
 		t.Fatalf("fold the run: %v", err)
@@ -280,7 +289,7 @@ func TestToolRunsExpandAndCollapse(t *testing.T) {
 		tester.Frame()
 	}
 	if tester.HasText("已运行 ls") {
-		t.Fatalf("a folded run must not show its commands, texts %q", tester.Texts())
+		t.Fatalf("a folded run hides its commands again, texts %q", tester.Texts())
 	}
 }
 

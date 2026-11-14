@@ -104,3 +104,30 @@ func TestDiffLiveReportsToolNamesAndArguments(t *testing.T) {
 		t.Fatalf("the end report names its tool, got %v", last)
 	}
 }
+
+func TestEntryToolReportsCarryNameArgumentsAndResult(t *testing.T) {
+	assistant := ai.AssistantMessage{Content: []ai.AssistantContentBlock{
+		ai.TextContent{Text: "跑一下"},
+		ai.ToolCall{ID: "call-1", Name: "bash", Arguments: ai.JsonObject{"command": "echo hi"}},
+	}}
+	reports := entryToolReports([]ai.Message{assistant})
+	if len(reports) != 1 || reports[0]["type"] != "tool_execution_start" || reports[0]["toolName"] != "bash" {
+		t.Fatalf("the assistant entry reports its tool call, got %v", reports)
+	}
+	args, _ := reports[0]["args"].(ai.JsonObject)
+	if args["command"] != "echo hi" {
+		t.Fatalf("the call reports its arguments, got %v", reports[0]["args"])
+	}
+	result := ai.ToolResultMessage{
+		ToolCallID: "call-1", ToolName: "bash",
+		Content: []ai.ToolResultMessageContent{ai.TextContent{Text: "hi"}},
+	}
+	reports = entryToolReports([]ai.Message{result})
+	if len(reports) != 1 || reports[0]["type"] != "tool_execution_end" || reports[0]["toolCallId"] != "call-1" {
+		t.Fatalf("the result entry reports its completion, got %v", reports)
+	}
+	content, _ := reports[0]["result"].(map[string]any)["content"].([]any)
+	if len(content) != 1 || content[0].(map[string]any)["text"] != "hi" {
+		t.Fatalf("the completion carries the return value, got %v", reports[0]["result"])
+	}
+}

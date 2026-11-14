@@ -16,6 +16,7 @@ type codexActivity struct {
 	text    string
 	label   string
 	command string
+	args    string
 	output  string
 	failed  bool
 	key     string
@@ -51,6 +52,7 @@ func codexToolPayload(text, tool string) string {
 func codexActivities(run transcriptRun) []codexActivity {
 	activities := []codexActivity{}
 	commands := []string{}
+	argsValues := []string{}
 	outputs := []string{}
 	failed := false
 	key := ""
@@ -60,9 +62,9 @@ func codexActivities(run transcriptRun) []codexActivity {
 		}
 		activities = append(activities, codexActivity{
 			kind: "command", text: "已运行 " + strings.Join(commands, "; "), label: "Shell",
-			command: strings.Join(commands, "; "), output: strings.Join(outputs, "\n\n"), failed: failed, key: key,
+			command: strings.Join(commands, "; "), args: argsText(argsValues), output: strings.Join(outputs, "\n\n"), failed: failed, key: key,
 		})
-		commands, outputs, failed, key = nil, nil, false, ""
+		commands, argsValues, outputs, failed, key = nil, nil, nil, false, ""
 	}
 	for _, message := range run.messages {
 		name := message.Data.Tool
@@ -88,6 +90,9 @@ func codexActivities(run transcriptRun) []codexActivity {
 			if message.Data.Output != "" {
 				outputs = append(outputs, message.Data.Output)
 			}
+			if message.Data.Args != "" {
+				argsValues = append(argsValues, message.Data.Args)
+			}
 			if message.Data.Error {
 				failed = true
 			}
@@ -97,7 +102,7 @@ func codexActivities(run transcriptRun) []codexActivity {
 			if running {
 				text = "正在查看图像"
 			}
-			activities = append(activities, codexActivity{kind: "image", text: text, label: "Image", output: message.Data.Output, key: message.Data.ToolCallID})
+			activities = append(activities, codexActivity{kind: "image", text: text, label: "Image", args: message.Data.Args, output: message.Data.Output, key: message.Data.ToolCallID})
 		case codexEditTools[name]:
 			flushCommands()
 			text := "已编辑文件"
@@ -110,7 +115,7 @@ func codexActivities(run transcriptRun) []codexActivity {
 					text = "正在编辑 " + payload
 				}
 			}
-			activities = append(activities, codexActivity{kind: "edit", text: text, label: "Edit", command: payload, output: message.Data.Output, failed: message.Data.Error, key: message.Data.ToolCallID})
+			activities = append(activities, codexActivity{kind: "edit", text: text, label: "Edit", command: payload, args: message.Data.Args, output: message.Data.Output, failed: message.Data.Error, key: message.Data.ToolCallID})
 		default:
 			flushCommands()
 			label := name
@@ -121,7 +126,7 @@ func codexActivities(run transcriptRun) []codexActivity {
 			if running {
 				text = label + "运行中"
 			}
-			activities = append(activities, codexActivity{kind: "tool", text: text, label: codexActivityLabel(name), output: message.Data.Output, failed: message.Data.Error, key: message.Data.ToolCallID})
+			activities = append(activities, codexActivity{kind: "tool", text: text, label: codexActivityLabel(name), args: message.Data.Args, output: message.Data.Output, failed: message.Data.Error, key: message.Data.ToolCallID})
 		}
 	}
 	flushCommands()
@@ -152,6 +157,16 @@ func runElapsed(run transcriptRun) time.Duration {
 	return time.Duration(end-start) * time.Millisecond
 }
 
+func argsText(values []string) string {
+	kept := []string{}
+	for _, value := range values {
+		if value != "" {
+			kept = append(kept, value)
+		}
+	}
+	return strings.Join(kept, "\n")
+}
+
 func codexWorkedFor(elapsed time.Duration) string {
 	seconds := int64(elapsed / time.Second)
 	if seconds <= 0 {
@@ -172,10 +187,7 @@ func codexWorkedFor(elapsed time.Duration) string {
 func (c *chatState) toolRow(ctx *ui.Context, run transcriptRun) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	key := runKey(run)
-	expanded, known := c.expanded[key]
-	if !known {
-		expanded = true
-	}
+	expanded := c.expanded[key]
 	worked := ""
 	if elapsed := runElapsed(run); elapsed > 0 {
 		worked = codexWorkedFor(elapsed)
@@ -231,7 +243,10 @@ func (c *chatState) activityPanel(ctx *ui.Context, activity codexActivity) {
 	panel.Children(func() {
 		kit.Text(ctx, activity.label, t.Text.Xs).TextColor(t.Muted)
 		if activity.command != "" {
-			kit.Text(ctx, "$ "+activity.command, t.Text.Xs).Font(gwtheme.MonoFont).TextColor(t.PrimaryText)
+			kit.Text(ctx, "$ "+activity.command, t.Text.Xs).Font(gwtheme.MonoFont).TextColor(t.Foreground)
+		}
+		if activity.command == "" && activity.args != "" {
+			kit.Text(ctx, activity.args, t.Text.Xs).Font(gwtheme.MonoFont).TextColor(t.Muted)
 		}
 		if activity.output != "" {
 			kit.Text(ctx, activity.output, t.Text.Xs).Font(gwtheme.MonoFont).TextColor(t.Muted)

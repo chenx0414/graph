@@ -15,6 +15,7 @@ type transcriptMessageData struct {
 	Output     string `json:"output"`
 	Message    string `json:"message"`
 	Command    string `json:"command"`
+	Args       string `json:"args"`
 	Error      bool   `json:"error"`
 }
 
