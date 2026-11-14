@@ -47,6 +47,11 @@ const boardLayoutVersion = 16
 
 const boardDefaultTitle = "白板"
 
+const (
+	boardContextRowWeight = 1.75
+	boardNetworkRowWeight = 3.25
+)
+
 const boardMinPaneWidth = 140
 
 const boardMinPaneHeight = 90
@@ -62,8 +67,8 @@ func defaultBoardPanels() []boardPanel {
 
 func defaultBoardLayout() boardNode {
 	return boardNode{Kind: "split", Axis: "column", Children: []boardSlot{
-		{Weight: 1.5, Node: boardNode{Kind: "panel", PanelID: "context-overview"}},
-		{Weight: 3.5, Node: boardNode{Kind: "panel", PanelID: "agent-network"}},
+		{Weight: boardContextRowWeight, Node: boardNode{Kind: "panel", PanelID: "context-overview"}},
+		{Weight: boardNetworkRowWeight, Node: boardNode{Kind: "panel", PanelID: "agent-network"}},
 		{Weight: 3.0, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
 			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "agent"}},
 			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "trajectory"}},
@@ -267,6 +272,9 @@ func (s *shellState) loadBoard(stateDir string) {
 	}
 	s.board.pages = dedupeBoardModulePages(s.board.pages)
 	for index := range s.board.pages {
+		rebalanceBoardDashboardRows(&s.board.pages[index])
+	}
+	for index := range s.board.pages {
 		page := &s.board.pages[index]
 		for panel := range page.Panels {
 			if page.Panels[panel].Kind == "fleet-network" {
@@ -318,6 +326,28 @@ func (s *shellState) loadBoard(stateDir string) {
 	s.board.active = clampIndex(file.Active, len(s.board.pages))
 	s.pinBoardPages()
 	s.saveBoard()
+}
+
+func rebalanceBoardDashboardRows(page *boardPage) {
+	if page.Kind != "" {
+		return
+	}
+	layout := &page.Layout
+	if layout.Kind != "split" || layout.Axis != "column" || len(layout.Children) < 2 {
+		return
+	}
+	first, second := layout.Children[0].Node, layout.Children[1].Node
+	if first.Kind != "panel" || first.PanelID != "context-overview" {
+		return
+	}
+	if second.Kind != "panel" || second.PanelID != "agent-network" {
+		return
+	}
+	if layout.Children[0].Weight != 1.5 || layout.Children[1].Weight != 3.5 {
+		return
+	}
+	layout.Children[0].Weight = boardContextRowWeight
+	layout.Children[1].Weight = boardNetworkRowWeight
 }
 
 func dedupeBoardModulePages(pages []boardPage) []boardPage {

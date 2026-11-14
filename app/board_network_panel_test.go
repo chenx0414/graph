@@ -384,3 +384,120 @@ func TestTheGraphAgentNetworkPanelKeepsTheTopologyItLoaded(t *testing.T) {
 		t.Fatalf("the panel must not reload the same topology every frame, asked %d times", asked)
 	}
 }
+
+func TestTheNetworkHighlightClearsWhenThePointerLeaves(t *testing.T) {
+	mock := &nodeChatMock{
+		fleet: networkPanelFleet(),
+		conv: map[string]string{
+			"g1": `{"messages":[{"id":"m1","seq":1,"role":"assistant","kind":"message","text":"Main 在这里","createdAt":1}]}`,
+		},
+	}
+	state, tester := nodeChatShell(t, mock)
+	state.selectConversation("g1")
+	tester = frames(frames(tester))
+	state.fleet.hoverID = "p1"
+	tester = frames(tester)
+	if state.fleet.hoverID != "" {
+		t.Fatalf("the network keeps a stale highlight after the pointer leaves, hoverID %q", state.fleet.hoverID)
+	}
+}
+
+func TestTheNetworkEdgesStayVisibleAroundAHover(t *testing.T) {
+	restWidth, restAlpha := fleetEdgePaint("b", "c", "", float32(1), 0.45)
+	if restAlpha < 0.4 {
+		t.Fatalf("without a hover the edges are visible, got alpha %v", restAlpha)
+	}
+	width, alpha := fleetEdgePaint("a", "b", "a", 1, 0.45)
+	if width <= restWidth || alpha < 0.8 {
+		t.Fatalf("the hovered edge is the brightest, got %v/%v", width, alpha)
+	}
+	_, dimmed := fleetEdgePaint("b", "c", "a", 1, 0.45)
+	if dimmed <= 0.08 || dimmed >= restAlpha {
+		t.Fatalf("an unrelated edge stays faintly visible, got alpha %v", dimmed)
+	}
+}
+
+func TestTheCanvasFitFillsThePanelWithTheContent(t *testing.T) {
+	view := infiniteCanvas{}
+	view.setContent(ui.Rect{X: 100, Y: 50, W: 1000, H: 500})
+	view.fitWorld(1200, 700, 400, 400)
+	wantZoom := float32(384) / 1000
+	if diff := view.zoom - wantZoom; diff > 0.005 || diff < -0.005 {
+		t.Fatalf("the fit uses the whole panel, zoom %v want %v", view.zoom, wantZoom)
+	}
+	centerX := view.x + (100+500)*view.zoom
+	centerY := view.y + (50+250)*view.zoom
+	if diff := centerX - 200; diff > 1 || diff < -1 {
+		t.Fatalf("the content is centered horizontally, center %v", centerX)
+	}
+	if diff := centerY - 200; diff > 1 || diff < -1 {
+		t.Fatalf("the content is centered vertically, center %v", centerY)
+	}
+}
+
+func TestTheCanvasFitKeepsItsZoomFloor(t *testing.T) {
+	view := infiniteCanvas{}
+	view.setContent(ui.Rect{W: 5000, H: 5000})
+	view.fitWorld(5000, 5000, 300, 300)
+	if view.zoom != canvasMinZoom {
+		t.Fatalf("the fit stops at the zoom floor, got %v", view.zoom)
+	}
+}
+
+func TestTheCanvasRefitsWhenThePanelGrows(t *testing.T) {
+	shell := newShellState("http://127.0.0.1:1", "")
+	view := &infiniteCanvas{fit: true}
+	view.setContent(ui.Rect{W: 1000, H: 500})
+	edges := []canvasEdge{{From: "a", To: "b", Points: [][2]float32{{0, 0}, {10, 10}}, Color: ui.RGB(0, 200, 0)}}
+	narrow := frames(ui.NewTester(func(ctx *ui.Context) {
+		shell.infiniteView(ctx, view, 1000, 500, edges, nil, func(*ui.Context, *infiniteCanvas) {})
+	}, 480, 400))
+	narrow.Frame()
+	before := view.zoom
+	wide := frames(ui.NewTester(func(ctx *ui.Context) {
+		shell.infiniteView(ctx, view, 1000, 500, edges, nil, func(*ui.Context, *infiniteCanvas) {})
+	}, 960, 400))
+	wide.Frame()
+	if view.zoom <= before {
+		t.Fatalf("the canvas refits when the panel grows, zoom %v -> %v", before, view.zoom)
+	}
+}
+
+func TestAZoomKeepsTheManualView(t *testing.T) {
+	view := infiniteCanvas{zoom: 1}
+	view.zoomAt(-10, -10, 1.2)
+	if view.fit {
+		t.Fatal("a manual zoom leaves the auto fit")
+	}
+}
+
+func TestTheThreadRingUsesAWidePanel(t *testing.T) {
+	wideX, _ := threadRingRadii(1200, 360)
+	squareX, _ := threadRingRadii(640, 640)
+	if wideX <= netThreadRx || wideX <= squareX {
+		t.Fatalf("a wide panel spreads the ring, wide %v square %v", wideX, squareX)
+	}
+	_, tallY := threadRingRadii(400, 900)
+	if tallY >= netThreadRy {
+		t.Fatalf("a tall panel tightens the ring, got %v", tallY)
+	}
+}
+
+func TestTheFleetRingSpreadsAcrossAWidePanel(t *testing.T) {
+	shell := newShellState("http://127.0.0.1:1", "")
+	data := networkPanelFleet()
+	shell.boardNet.view.viewW, shell.boardNet.view.viewH = 1200, 360
+	wide := shell.fleetNetScene(data)
+	shell.boardNet.view.viewW, shell.boardNet.view.viewH = 640, 640
+	square := shell.fleetNetScene(data)
+	wideBounds, squareBounds := wide.contentBounds(), square.contentBounds()
+	if wideBounds.W <= squareBounds.W {
+		t.Fatalf("the ring uses the horizontal space, wide %+v square %+v", wideBounds, squareBounds)
+	}
+	if stretch := ringStretch(1200, 360, 600, 400); stretch <= 1 {
+		t.Fatalf("a wide panel stretches the ring, got %v", stretch)
+	}
+	if stretch := ringStretch(640, 640, 600, 400); stretch != 1 {
+		t.Fatalf("a square panel keeps the ring round, got %v", stretch)
+	}
+}

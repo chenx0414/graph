@@ -58,8 +58,8 @@ func (s *shellState) fleetGraphCanvas(ctx *ui.Context, data *fleetTopologyData) 
 	}
 	s.fleetHoverScope(s.boardPage().ID)
 	view := &s.graph.view
-	if view.fit && view.worldW > 0 && view.worldW != data.Width {
-		view.fit = false
+	if view.worldW == 0 || view.worldW != data.Width || view.worldH != data.Height {
+		view.fit = true
 	}
 	edges := make([]canvasEdge, 0, len(data.Edges))
 	for _, edge := range data.Edges {
@@ -86,6 +86,17 @@ func (s *shellState) fleetGraphCanvas(ctx *ui.Context, data *fleetTopologyData) 
 	}
 	t := gwtheme.Of(ctx)
 	kit.Text(ctx, "拖拽平移 · 滚轮缩放", t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
+	if len(data.Nodes) > 0 {
+		minX, minY := data.Nodes[0].X, data.Nodes[0].Y
+		maxX, maxY := data.Nodes[0].X+data.Nodes[0].W, data.Nodes[0].Y+data.Nodes[0].H
+		for _, node := range data.Nodes[1:] {
+			minX = minFleetFloat(minX, node.X)
+			minY = minFleetFloat(minY, node.Y)
+			maxX = maxFleetFloat(maxX, node.X+node.W)
+			maxY = maxFleetFloat(maxY, node.Y+node.H)
+		}
+		view.setContent(ui.Rect{X: minX, Y: minY, W: maxX - minX, H: maxY - minY})
+	}
 	s.infiniteView(ctx, view, data.Width, data.Height, edges, hit, func(ctx *ui.Context, view *infiniteCanvas) {
 		for index := range data.Nodes {
 			node := data.Nodes[index]

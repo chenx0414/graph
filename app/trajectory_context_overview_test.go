@@ -196,3 +196,28 @@ func TestTheModelMetaMatchesProviderQualifiedIDs(t *testing.T) {
 		}
 	}
 }
+
+func TestTheContextCardFitsItsLegendAtTheDefaultWidth(t *testing.T) {
+	shell := contextOverviewShell(t, contextOverviewSettings)
+	const width float32 = 760
+	tester := ui.NewTester(func(ctx *ui.Context) {
+		ui.Box(ctx).FillWidth().Height(220).Children(func() {
+			shell.panelContextOverview(ctx)
+		})
+	}, int(width), 220)
+	tester = frames(tester)
+	for _, text := range []string{"当前上下文", "上下文", "System Prompt", "工具声明", "48.9%", "上下文已用"} {
+		if !tester.HasText(text) {
+			t.Fatalf("the card shows %q at %vpx", text, width)
+		}
+	}
+	for _, label := range []string{"系统提示词", "工具定义", "用户消息", "注入内容", "助手消息", "工具结果"} {
+		rect, ok := tester.Find(label)
+		if !ok {
+			t.Fatalf("the legend lost %q at %vpx", label, width)
+		}
+		if rect.X < 0 || rect.X+rect.W > width+0.5 {
+			t.Fatalf("the legend item %q is clipped at %vpx: %+v", label, width, rect)
+		}
+	}
+}

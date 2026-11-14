@@ -11,7 +11,8 @@ const (
 	fleetRestBorderAlpha = 0.45
 	fleetHoverEdgeWidth  = 2
 	fleetHoverEdgeAlpha  = 0.95
-	fleetDimEdgeAlpha    = 0.05
+	fleetRestEdgeAlpha   = 0.45
+	fleetDimEdgeAlpha    = 0.14
 	fleetDimOpacity      = 0.45
 )
 
@@ -33,9 +34,13 @@ func (s *shellState) fleetHoverScope(scope string) {
 }
 
 func (s *shellState) fleetHoverCard(card ui.Element, id string, accent ui.Color, t gwtheme.Tokens) {
-	if card.Hovered() && s.fleet.hoverID != id {
+	hovered := card.Hovered()
+	if hovered && s.fleet.hoverID != id {
 		s.fleet.hoverID = id
 		s.frame()
+	}
+	if !hovered && s.fleet.hoverID == id {
+		s.fleet.hoverID = ""
 	}
 	if s.fleet.hoverID == id {
 		card.Background(t.Hover).Border(fleetHoverStroke, accent)
