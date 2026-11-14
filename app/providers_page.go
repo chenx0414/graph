@@ -192,39 +192,76 @@ func providerTint(id string) ui.Color {
 	return colors[sum%len(colors)]
 }
 
-func (s *shellState) providerToggle(ctx *ui.Context, entry providerEntry, t gwtheme.Tokens) {
+func (s *shellState) providerToggle(ctx *ui.Context, entry providerEntry, pal magpiePalette) {
 	enabled := s.providersEnabled(entry.ID)
 	label := "停用 " + entry.Label
 	if !enabled {
 		label = "启用 " + entry.Label
 	}
-	track := ui.Box(ctx).Width(36).Height(20).Radius(t.Radius.Full).Label(label).Focusable()
+	track := ui.Box(ctx).Width(32).Height(19).Radius(10).Label(label).Focusable()
 	if enabled {
-		track.Background(t.Primary)
+		track.Background(pal.Mark)
 	} else {
-		track.Background(t.Input)
+		track.Background(pal.Line)
 	}
 	track.OnClick(func() {
 		s.providers.enabled[entry.ID] = !enabled
 		s.frame()
 	})
 	track.Children(func() {
-		knob := ui.Box(ctx).Size(16, 16).Radius(t.Radius.Full).Background(t.Background)
+		knob := ui.Box(ctx).Size(15, 15).Radius(10).Background(pal.Card)
 		if enabled {
-			knob.Translate(18, 2)
+			knob.Translate(15, 2)
 		} else {
 			knob.Translate(2, 2)
 		}
 	})
 }
 
-func (s *shellState) providerRow(ctx *ui.Context, entry providerEntry, t gwtheme.Tokens, last bool) {
+func (s *shellState) providerKeyPill(ctx *ui.Context, entry providerEntry, pal magpiePalette) {
+	enabled := s.providersEnabled(entry.ID)
 	status := entry.Status
-	if entry.Configured && !s.providersEnabled(entry.ID) {
+	if entry.Configured && !enabled {
 		status = "未启用"
 	}
-	row := ui.Row(ctx).FillWidth().Height(50).PaddingX(16).Gap(12).AlignItems(ui.Center).
+	pill := ui.Row(ctx).Width(128).Height(22).Radius(6).PaddingX(8).Gap(6).AlignItems(ui.Center)
+	dot := pal.Green
+	text := pal.Muted
+	switch {
+	case !entry.Configured:
+		pill.Background(pal.AmberSoft)
+		dot, text = pal.Amber, pal.Amber
+	case !enabled:
+		pill.Opacity(0.45)
+		dot = pal.Faint
+	}
+	pill.Children(func() {
+		ui.Box(ctx).Width(6).Height(6).Radius(10).Background(dot)
+		kit.Text(ctx, status, 11).TextColor(text).SingleLine().Ellipsis("…").Grow(1)
+	})
+}
+
+func (s *shellState) providerHandle(ctx *ui.Context, entry providerEntry, pal magpiePalette) {
+	handle := ui.Box(ctx).Size(28, 28).Radius(6).Center()
+	if icon := providerBrandIcon(entry.ID); icon != nil {
+		handle.Children(func() {
+			ui.Icon(ctx, icon).Size(22, 22).TextColor(pal.Foreground)
+		})
+		return
+	}
+	tint := providerTint(entry.ID)
+	handle.Background(tint.Alpha(0.14))
+	handle.Children(func() {
+		kit.Text(ctx, providerInitial(entry.Label), 12).FontWeight(600).TextColor(tint)
+	})
+}
+
+func (s *shellState) providerRow(ctx *ui.Context, entry providerEntry, pal magpiePalette, last bool) {
+	row := ui.Row(ctx).FillWidth().Height(48).Padding(7, 12, 7, 14).Gap(12).AlignItems(ui.Center).
 		Label("用 " + entry.Label + " 的模型").Focusable()
+	if row.Hovered() {
+		row.Background(pal.Card2)
+	}
 	row.OnClick(func() {
 		active := s.active()
 		if active == nil {
@@ -237,59 +274,73 @@ func (s *shellState) providerRow(ctx *ui.Context, entry providerEntry, t gwtheme
 		s.frame()
 	})
 	row.Children(func() {
-		tile := ui.Box(ctx).Size(24, 24).Radius(t.Radius.Sm).Background(providerTint(entry.ID).Alpha(0.16)).Center()
-		tile.Children(func() {
-			kit.Text(ctx, providerInitial(entry.Label), t.Text.Xs).FontWeight(600).TextColor(providerTint(entry.ID))
-		})
-		ui.Column(ctx).Grow(1).Gap(2).Children(func() {
-			ui.Row(ctx).Gap(8).AlignItems(ui.Center).Children(func() {
-				kit.Text(ctx, entry.Label, t.Text.Sm).FontWeight(600).TextColor(t.Foreground).SingleLine().Ellipsis("…")
-				badge := ui.Row(ctx).PaddingX(6).PaddingY(1).Radius(t.Radius.Xs).Background(t.Hover)
+		s.providerHandle(ctx, entry, pal)
+		ui.Column(ctx).Grow(1).Gap(1).Children(func() {
+			ui.Row(ctx).Gap(6).AlignItems(ui.Center).Children(func() {
+				kit.Text(ctx, entry.Label, 13).FontWeight(500).LetterSpacing(-0.06).TextColor(pal.Foreground).
+					SingleLine().Ellipsis("…")
+				badge := ui.Row(ctx).PaddingX(5).PaddingY(1).Radius(4).Background(pal.Pill).AlignItems(ui.Center)
 				badge.Children(func() {
-					kit.Text(ctx, entry.Badge, t.Text.Xs).TextColor(t.Muted).SingleLine()
+					kit.Text(ctx, entry.Badge, 9.5).FontWeight(600).LetterSpacing(0.2).TextColor(pal.Muted).SingleLine()
 				})
 			})
-			kit.Text(ctx, entry.Subtitle, t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
+			kit.Text(ctx, entry.Subtitle, 11.5).TextColor(pal.Muted).SingleLine().Ellipsis("…")
 		})
 		for _, protocol := range s.providers.protocols[entry.ID] {
-			chip := ui.Box(ctx).Size(20, 20).Radius(t.Radius.Sm).Background(t.Hover).Center()
+			chip := ui.Box(ctx).Size(26, 26).Radius(8).Background(pal.Pill).Border(gwtheme.Stroke, pal.Line2).Center()
 			chip.Children(func() {
-				kit.Text(ctx, protocol, t.Text.Xs).TextColor(t.Muted).SingleLine()
+				kit.Text(ctx, protocol, 11).TextColor(pal.Muted).SingleLine()
 			})
 		}
-		ui.Box(ctx).Width(6).Height(6).Radius(t.Radius.Full).
-			Background(func() ui.Color {
-				if entry.Configured && s.providersEnabled(entry.ID) {
-					return palette.Green500.Color()
-				}
-				return t.Muted
-			}())
-		kit.Text(ctx, status, t.Text.Xs).TextColor(t.Muted).SingleLine().Width(52)
-		s.providerToggle(ctx, entry, t)
-		ui.Icon(ctx, iconChevron).Size(gwtheme.IconXs, gwtheme.IconXs).TextColor(t.Muted)
+		s.providerKeyPill(ctx, entry, pal)
+		s.providerToggle(ctx, entry, pal)
+		ui.Icon(ctx, iconChevron).Size(11, 11).TextColor(pal.Faint)
 	})
 	if !last {
-		ui.Box(ctx).FillWidth().Height(gwtheme.Stroke).Background(t.Border)
+		ui.Box(ctx).FillWidth().Height(1).Background(pal.Line2)
 	}
+}
+func (s *shellState) providerRowsCard(ctx *ui.Context, pal magpiePalette) {
+	card := ui.Column(ctx).FillWidth().Background(pal.Card).Radius(12).
+		Border(gwtheme.Stroke, pal.Line).Clip()
+	card.Children(func() {
+		if len(s.providers.entries) == 0 {
+			kit.Text(ctx, "没有匹配的供应商。", 13).TextColor(pal.Muted).Padding(18, 2)
+			return
+		}
+		for index, entry := range s.providers.entries {
+			s.providerRow(ctx, entry, pal, index == len(s.providers.entries)-1)
+		}
+	})
+}
+
+func (s *shellState) providerSearch(ctx *ui.Context, pal magpiePalette) {
+	field := ui.TextInputBase(ctx, &s.providers.search)
+	field.Width(220).Height(26).PaddingX(9).Radius(7).Border(gwtheme.Stroke, pal.Line).
+		Background(pal.Card).FontSize(12).Placeholder("查找供应商").Label("查找供应商").FocusRing(false)
+	chip := ui.Row(ctx).Height(26).PaddingX(9).Radius(7).Border(gwtheme.Stroke, pal.Line).
+		Background(pal.Card).Gap(6).AlignItems(ui.Center).Label("账号打包").Focusable()
+	chip.Children(func() {
+		ui.Icon(ctx, iconEye).Size(14, 14).TextColor(pal.Muted)
+		kit.Text(ctx, "账号打包", 12).TextColor(pal.Muted).SingleLine()
+	})
 }
 
 func (s *shellState) panelProviders(ctx *ui.Context) {
 	t := gwtheme.Of(ctx)
+	pal := magpiePaletteFor(t.Dark)
 	s.ensureProviders()
-	ui.Column(ctx).FillWidth().Padding(16).Gap(12).Children(func() {
+	page := ui.Column(ctx).FillWidth().Padding(2, 16, 8, 16)
+	page.Children(func() {
 		head := ui.Row(ctx).FillWidth().Gap(8).AlignItems(ui.Center)
 		head.Children(func() {
-			kit.Text(ctx, "模型", t.Text.Xs).TextColor(t.Muted).SingleLine()
-			kit.Text(ctx, "/", t.Text.Xs).TextColor(t.Muted).SingleLine()
-			kit.Text(ctx, "供应商", t.Text.Xs).TextColor(t.Foreground).SingleLine()
+			kit.Text(ctx, "模型", 12).TextColor(pal.Muted).SingleLine()
+			kit.Text(ctx, "/", 12).TextColor(pal.Muted).SingleLine()
+			kit.Text(ctx, "供应商", 12).TextColor(pal.Foreground2).SingleLine()
 			ui.Spacer(ctx)
-			search := kit.Input(ctx, &s.providers.search, kit.InputOpts{Placeholder: "查找供应商"})
-			search.Width(240)
-			chip := ui.Row(ctx).PaddingX(10).PaddingY(6).Radius(t.Radius.Sm).Border(gwtheme.Hairline, t.Border).Gap(6).AlignItems(ui.Center)
-			chip.Children(func() {
-				kit.Text(ctx, "账号打包", t.Text.Xs).TextColor(t.Muted).SingleLine()
-			})
+			s.providerSearch(ctx, pal)
 		})
+		ui.Box(ctx).Height(10)
 		if strings.TrimSpace(s.providers.search) != "" {
 			query := strings.ToLower(strings.TrimSpace(s.providers.search))
 			filtered := make([]providerEntry, 0, len(s.providers.entries))
@@ -299,32 +350,17 @@ func (s *shellState) panelProviders(ctx *ui.Context) {
 				}
 			}
 			s.providers.entries, filtered = filtered, s.providers.entries
-			s.providerRowsCard(ctx, t)
+			s.providerRowsCard(ctx, pal)
 			s.providers.entries = filtered
 		} else {
-			s.providerRowsCard(ctx, t)
+			s.providerRowsCard(ctx, pal)
 		}
-		foot := ui.Row(ctx).FillWidth().AlignItems(ui.Center)
-		foot.Children(func() {
-			kit.Text(ctx, "+ 添加供应商", t.Text.Xs).TextColor(t.Muted).SingleLine()
-			ui.Spacer(ctx)
-			if s.providers.failed != "" {
-				kit.Text(ctx, "读不到供应商："+s.providers.failed, t.Text.Xs).TextColor(t.Danger).SingleLine().Ellipsis("…")
-			}
+		add := ui.Row(ctx).Padding(8, 2).AlignItems(ui.Center)
+		add.Children(func() {
+			kit.Text(ctx, "＋ 添加供应商", 13).TextColor(pal.Muted).SingleLine()
 		})
-	})
-}
-
-func (s *shellState) providerRowsCard(ctx *ui.Context, t gwtheme.Tokens) {
-	card := ui.Column(ctx).FillWidth().Background(t.Card).Radius(t.Radius.Md).
-		Border(gwtheme.Hairline, t.Border).Clip()
-	card.Children(func() {
-		if len(s.providers.entries) == 0 {
-			kit.Text(ctx, "没有匹配的供应商。", t.Text.Xs).TextColor(t.Muted).Padding(16, 16)
-			return
-		}
-		for index, entry := range s.providers.entries {
-			s.providerRow(ctx, entry, t, index == len(s.providers.entries)-1)
+		if s.providers.failed != "" {
+			kit.Text(ctx, "读不到供应商："+s.providers.failed, 12).TextColor(pal.Amber)
 		}
 	})
 }

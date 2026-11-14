@@ -15,6 +15,7 @@ var (
 	iconImage     = svgIcon(`<rect x="3" y="4" width="18" height="16" rx="2.4"/><circle cx="8.6" cy="9.6" r="1.6"/><path d="m4 17 5-5 4 4 3-3 4 4"/>`)
 	iconPencil    = svgIcon(`<path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17Z"/><path d="M14.5 5.5 18.5 9.5"/>`)
 	iconChevron   = svgIcon(`<path d="m6 9 6 6 6-6"/>`)
+	iconEye       = svgIcon(`<path d="M9.9 4.2A10.4 10.4 0 0 1 12 4c6.5 0 10 8 10 8a17.6 17.6 0 0 1-2.2 3.2M6.6 6.6C3.9 8.4 2 12 2 12s3.5 8 10 8a9.7 9.7 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M2 2l20 20"/>`)
 	iconCheck     = svgIcon(`<path d="m5 12.5 4.5 4.5L19 7"/>`)
 	iconGauge     = svgIcon(`<path d="M4.6 17a8.4 8.4 0 1 1 14.8 0"/><path d="M12 12.6 15.6 8"/><circle cx="12" cy="13.4" r="1.4" fill="currentColor" stroke="none"/>`)
 	iconNetwork   = svgIcon(`<path d="M12 3.2a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2Z"/><path d="M5 15.6a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2Z"/><path d="M19 15.6a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2Z"/><path d="m10.9 8.8-4.3 6.1"/><path d="m13.1 8.8 4.3 6.1"/>`)

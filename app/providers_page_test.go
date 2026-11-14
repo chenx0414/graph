@@ -107,3 +107,14 @@ func TestClickingAProviderOpensItsModels(t *testing.T) {
 		t.Fatalf("the row opens the picker on that provider, got %+v", chat.modelPicker)
 	}
 }
+
+func TestTheProviderRowsUseTheRealBrandIcons(t *testing.T) {
+	for _, id := range []string{"opencode-go", "command-goat", "deepseek", "chatgpt", "anthropic", "google-gemini", "openai", "openrouter", "grok"} {
+		if providerBrandIcon(id) == nil {
+			t.Fatalf("the provider %q has its brand icon", id)
+		}
+	}
+	if providerBrandIcon("self-host") != nil {
+		t.Fatalf("a custom provider falls back to a letter tile, not a brand icon")
+	}
+}
