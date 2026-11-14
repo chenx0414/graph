@@ -145,6 +145,7 @@ func (s *shellState) panelContextOverview(ctx *ui.Context) {
 		return
 	}
 	s.ensureModelMeta()
+	s.ensurePromptRecord()
 	parts := contextOverviewParts(contextOverviewComposition(data))
 	total := contextPartsTotal(parts)
 	model := s.contextOverviewModel()
@@ -174,6 +175,11 @@ func (s *shellState) panelContextOverview(ctx *ui.Context) {
 				}
 			})
 		})
+		s.contextTabRow(ctx)
+		if s.contextTab != contextTabContext {
+			s.contextPromptBody(ctx)
+			return
+		}
 		numbers := ui.Row(ctx).FillWidth().Gap(th.Space(1.5)).AlignItems(ui.End)
 		numbers.Children(func() {
 			left := ui.Row(ctx).Grow(1).Gap(th.Space(1.5)).AlignItems(ui.End)

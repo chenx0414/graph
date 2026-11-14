@@ -25,6 +25,7 @@ type nodeChatMock struct {
 	posted   []string
 	fleet    *fleetSnapshot
 	conv     map[string]string
+	prompt   string
 }
 
 func (m *nodeChatMock) server(t *testing.T) *httptest.Server {
@@ -66,6 +67,10 @@ func (m *nodeChatMock) server(t *testing.T) *httptest.Server {
 		m.asked = append(m.asked, r.URL.Path)
 		if strings.HasSuffix(r.URL.Path, "/graph/topology") {
 			_, _ = w.Write([]byte(m.topology))
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/prompt") {
+			_, _ = w.Write([]byte(m.prompt))
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, "/artifacts") {

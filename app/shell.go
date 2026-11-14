@@ -27,6 +27,12 @@ type shellState struct {
 	modelMeta        map[string]modelMeta
 	modelMetaLoading bool
 	modelMetaError   string
+	promptScope      string
+	promptRecord     *promptRecord
+	promptError      string
+	promptLoading    bool
+	promptFetchedAt  time.Time
+	contextTab       int
 	boardNet         netPanelState
 	conversations    []conversationSummary
 	supervisorID     string
