@@ -67,7 +67,9 @@ func TestSettingsPaneRendersAndArchivesAProject(t *testing.T) {
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
-	for _, wanted := range []string{"运行 · execute · 配置版本 42", "源码 · main@79a38ef0 · 模型 7 个可用", "13-Graph · ready",
+	for _, wanted := range []string{"运行设置", "运行状态、源码版本与项目归档", "管理供应商", "运行",
+		"运行模式", "execute", "配置版本", "42", "源码", "main@79a38ef0", "可用模型", "7 个", "默认模型", "deepseek",
+		"项目", "13-Graph", "ready", "归档的项目不再出现在会话列表里",
 		"凭据在「供应商」页管理 · 与 magpie 同一套"} {
 		if !tester.HasText(wanted) {
 			t.Fatalf("missing %q in texts %q", wanted, tester.Texts())
@@ -122,5 +124,29 @@ func TestShellSwitchesBetweenChatsAndSettings(t *testing.T) {
 	}
 	if state.activeBoardKind() != "trajectory" || tester.HasText("凭据在「供应商」页管理 · 与 magpie 同一套") {
 		t.Fatalf("the trajectory tab must come back, kind %q texts %q", state.activeBoardKind(), tester.Texts())
+	}
+}
+
+func TestTheSettingsPageFollowsTheGodwitLayout(t *testing.T) {
+	actions := map[string]int{}
+	server := settingsServer(t, actions)
+	defer server.Close()
+
+	state := newSettingsState(server.URL, "tok")
+	state.load()
+	tester := ui.NewTester(state.view, 1200, 800)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	rect, ok := tester.Find("运行设置")
+	if !ok {
+		t.Fatalf("the page has its heading, texts %q", tester.Texts())
+	}
+	want := (1200 - 760) / 2
+	if diff := rect.X - float32(want); diff > 8 || diff < -8 {
+		t.Fatalf("the settings column is 760 wide and centred, heading x %v want %v", rect.X, want)
+	}
+	if _, ok := tester.Find("归档 13-Graph"); !ok {
+		t.Fatalf("a project row keeps its action button, texts %q", tester.Texts())
 	}
 }

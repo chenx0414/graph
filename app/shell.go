@@ -147,6 +147,7 @@ func (s *shellState) ensureSettings() {
 	if s.settings == nil {
 		s.settings = newSettingsState(s.api.address, s.api.token)
 		s.settings.window = s.window
+		s.settings.openProviders = func() { s.openModule("providers") }
 		go s.settings.load()
 	}
 }

@@ -6,6 +6,8 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"graph/app/gwui/kit"
+	gwtheme "graph/app/gwui/theme"
 )
 
 type projectRow struct {
@@ -87,11 +89,12 @@ func projectLabel(row projectRow) string {
 }
 
 type settingsState struct {
-	api    apiClient
-	status string
-	window *mygo.Window
-	rows   settingsSnapshot
-	list   ui.ListState
+	api           apiClient
+	status        string
+	window        *mygo.Window
+	rows          settingsSnapshot
+	list          ui.ListState
+	openProviders func()
 }
 
 func newSettingsState(address, token string) *settingsState {
@@ -143,34 +146,114 @@ func (s *settingsState) frame() {
 }
 
 func (s *settingsState) view(ctx *ui.Context) {
-	t := ctx.Theme()
-	ui.Column(ctx).Fill().Padding(16).Gap(10).Children(func() {
-		if s.status != "" {
-			ui.Text(ctx, s.status).FontSize(12).TextColor(t.TextMuted)
-		}
-		if s.rows.mode == "" && len(s.rows.projects) == 0 {
-			return
-		}
-		ui.Text(ctx, "运行 · "+s.rows.mode+" · 配置版本 "+strconv.Itoa(s.rows.revision)).FontSize(12).TextColor(t.TextMuted)
-		ui.Text(ctx, "源码 · "+s.rows.branch+"@"+shortCommit(s.rows.commit)+" · 模型 "+strconv.Itoa(s.rows.modelCount)+" 个可用").FontSize(12).TextColor(t.TextMuted)
-		if s.rows.defaultModel != "" {
-			ui.Text(ctx, "默认模型 · "+s.rows.defaultModel).FontSize(12).TextColor(t.TextMuted)
-		}
-		ui.Text(ctx, "凭据在「供应商」页管理 · 与 magpie 同一套").FontSize(12).TextColor(t.TextMuted)
-		ui.Text(ctx, "项目").FontSize(13)
-		ui.List(ctx, &s.list, len(s.rows.projects), func(index int) {
-			row := s.rows.projects[index]
-			ui.Row(ctx).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Text(ctx, projectLabel(row)).FontSize(12).Grow(1)
-				action := "归档 " + row.id
-				if row.archived {
-					action = "恢复 " + row.id
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	ui.Column(ctx).FillWidth().Children(func() {
+		ui.Column(ctx).FillWidth().MaxWidth(760).AlignSelf(ui.Center).Gap(th.Space(8)).Children(func() {
+			if s.status != "" {
+				kit.Text(ctx, s.status, t.Text.Sm).TextColor(t.Muted)
+			}
+			s.pageHeading(ctx, "运行设置", "运行状态、源码版本与项目归档")
+			rows := []func(){
+				func() {
+					s.settingRow(ctx, "运行模式", "这个 daemon 负责的事", func() { s.settingValue(ctx, s.rows.mode) })
+				},
+				func() {
+					s.settingRow(ctx, "配置版本", "生效中的配置 revision", func() { s.settingValue(ctx, strconv.Itoa(s.rows.revision)) })
+				},
+				func() {
+					s.settingRow(ctx, "源码", "正在运行的构建", func() {
+						s.settingValue(ctx, s.rows.branch+"@"+shortCommit(s.rows.commit))
+					})
+				},
+				func() {
+					s.settingRow(ctx, "可用模型", "已启用的模型数量", func() { s.settingValue(ctx, strconv.Itoa(s.rows.modelCount)+" 个") })
+				},
+			}
+			if s.rows.defaultModel != "" {
+				rows = append(rows, func() {
+					s.settingRow(ctx, "默认模型", "新会话从这里开始", func() {
+						kit.Text(ctx, shortModel(s.rows.defaultModel), t.Text.Sm).Font(gwtheme.MonoFont).
+							TextColor(t.Muted).SingleLine().Ellipsis("…")
+					})
+				})
+			}
+			s.settingsSection(ctx, "运行", "", rows...)
+			if len(s.rows.projects) > 0 {
+				projects := make([]func(), 0, len(s.rows.projects))
+				for _, row := range s.rows.projects {
+					project := row
+					desc := project.state
+					if project.archived {
+						desc += " · 已归档"
+					}
+					projects = append(projects, func() {
+						s.settingRow(ctx, project.id, desc, func() {
+							action := "归档 " + project.id
+							if project.archived {
+								action = "恢复 " + project.id
+							}
+							if kit.Button(ctx, action, kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
+								go s.toggleProject(project)
+							}
+						})
+					})
 				}
-				if ui.Button(ctx, action).Clicked() {
-					target := row
-					go s.toggleProject(target)
-				}
-			})
-		}).Grow(1)
+				s.settingsSection(ctx, "项目", "归档的项目不再出现在会话列表里", projects...)
+			}
+			kit.Text(ctx, "凭据在「供应商」页管理 · 与 magpie 同一套", t.Text.Sm).TextColor(t.Muted).PaddingX(th.Space(4))
+		})
 	})
+}
+
+func (s *settingsState) pageHeading(ctx *ui.Context, title, sub string) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	ui.Row(ctx).FillWidth().Gap(th.Space(4)).AlignItems(ui.End).Children(func() {
+		ui.Column(ctx).Grow(1).Shrink(1).Gap(6).Children(func() {
+			kit.Text(ctx, title, t.Text.Display).FontWeight(600)
+			if sub != "" {
+				kit.Text(ctx, sub, t.Text.Body).TextColor(t.Muted)
+			}
+		})
+		if kit.Button(ctx, "管理供应商", kit.ButtonOpts{Variant: kit.Outline, Size: kit.SizeSm}).Clicked() {
+			s.openProviders()
+		}
+	})
+}
+
+func (s *settingsState) settingsSection(ctx *ui.Context, title, footnote string, rows ...func()) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	ui.Column(ctx).Gap(th.Space(2.5)).Children(func() {
+		kit.Text(ctx, title, t.Text.Body).FontWeight(600).PaddingX(th.Space(4))
+		body := ui.Column(ctx).FillWidth().Background(t.Card).Radius(t.Radius.Xl).
+			Border(gwtheme.Hairline, t.Border).Clip()
+		body.Children(func() {
+			for index, row := range rows {
+				if index > 0 {
+					kit.Separator(ctx, false).Shrink(0).MarginX(th.Space(4))
+				}
+				row()
+			}
+		})
+		if footnote != "" {
+			kit.Text(ctx, footnote, t.Text.Sm).TextColor(t.Muted).PaddingX(th.Space(4))
+		}
+	})
+}
+
+func (s *settingsState) settingRow(ctx *ui.Context, label, desc string, control func()) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	ui.Row(ctx).FillWidth().Gap(th.Space(6)).Padding(th.Space(2), th.Space(4)).
+		MinHeight(th.Space(12)).AlignItems(ui.Center).Children(func() {
+		ui.Column(ctx).Grow(1).Shrink(1).Gap(th.Space(0.5)).Children(func() {
+			kit.Text(ctx, label, t.Text.Body).FontWeight(500).SingleLine().Ellipsis("…")
+			if desc != "" {
+				kit.Text(ctx, desc, t.Text.Sm).TextColor(t.Muted).SingleLine().Ellipsis("…")
+			}
+		})
+		control()
+	})
+}
+
+func (s *settingsState) settingValue(ctx *ui.Context, value string) {
+	kit.Text(ctx, value, gwtheme.Of(ctx).Text.Sm).TextColor(gwtheme.Of(ctx).Muted)
 }
