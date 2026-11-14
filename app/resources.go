@@ -15,33 +15,87 @@ type resourceRow struct {
 	kind    string
 	name    string
 	version string
+	origin  string
+	status  string
 	missing []string
+	err     string
 	ready   bool
 }
 
-type resourceCatalogPayload struct {
+type resourceLibraryPayload struct {
+	Capabilities []struct {
+		ID      string `json:"id"`
+		Name    string `json:"name"`
+		Kind    string `json:"kind"`
+		Version string `json:"version"`
+		Origin  string `json:"origin"`
+		Status  string `json:"status"`
+		Error   string `json:"error"`
+	} `json:"capabilities"`
+	AgentCombinations []struct {
+		ID     string `json:"id"`
+		Name   string `json:"name"`
+		Status string `json:"status"`
+	} `json:"agentCombinations"`
+	AgentCombinationFile string `json:"agentCombinationFile"`
+}
+
+type resourceConfigPayload struct {
 	Items []struct {
 		ID      string   `json:"id"`
-		Name    string   `json:"name"`
 		Kind    string   `json:"kind"`
 		Version string   `json:"version"`
 		Missing []string `json:"missing"`
+		Error   string   `json:"error"`
 		Ready   bool     `json:"ready"`
 	} `json:"items"`
 }
 
-func parseResources(payload []byte) ([]resourceRow, error) {
-	var catalog resourceCatalogPayload
-	if err := json.Unmarshal(payload, &catalog); err != nil {
+func resourceConfigKey(id, version string) string {
+	return id + "@" + version
+}
+
+func parseResourceLibrary(catalog, config []byte) ([]resourceRow, error) {
+	var listed resourceLibraryPayload
+	if err := json.Unmarshal(catalog, &listed); err != nil {
 		return nil, err
 	}
-	rows := make([]resourceRow, 0, len(catalog.Items))
-	for _, item := range catalog.Items {
+	var wired resourceConfigPayload
+	if len(config) > 0 {
+		if err := json.Unmarshal(config, &wired); err != nil {
+			return nil, err
+		}
+	}
+	missingByID := map[string][]string{}
+	for _, item := range wired.Items {
+		missingByID[resourceConfigKey(item.ID, item.Version)] = item.Missing
+		if _, ok := missingByID[item.ID]; !ok {
+			missingByID[item.ID] = item.Missing
+		}
+	}
+	rows := make([]resourceRow, 0, len(listed.Capabilities))
+	for _, item := range listed.Capabilities {
+		if item.ID == "" {
+			continue
+		}
 		name := strings.TrimSpace(item.Name)
 		if name == "" {
 			name = item.ID
 		}
-		rows = append(rows, resourceRow{kind: item.Kind, name: name, version: item.Version, missing: item.Missing, ready: item.Ready})
+		missing := missingByID[resourceConfigKey(item.ID, item.Version)]
+		if missing == nil {
+			missing = missingByID[item.ID]
+		}
+		errText := strings.TrimSpace(item.Error)
+		status := item.Status
+		if status == "" {
+			status = "available"
+		}
+		ready := status == "available" && len(missing) == 0 && errText == ""
+		rows = append(rows, resourceRow{
+			kind: item.Kind, name: name, version: item.Version, origin: item.Origin,
+			status: status, missing: missing, err: errText, ready: ready,
+		})
 	}
 	sort.SliceStable(rows, func(a, b int) bool {
 		if rows[a].kind != rows[b].kind {
@@ -57,13 +111,15 @@ func resourceLabel(row resourceRow) string {
 	if row.version != "" {
 		label += " · v" + row.version
 	}
-	if row.ready {
-		return label + " · 就绪"
+	switch {
+	case len(row.missing) > 0:
+		label += " · 缺 " + strings.Join(row.missing, "、")
+	case row.err != "":
+		label += " · 加载失败：" + row.err
+	case !row.ready:
+		label += " · 不可用（" + row.status + "）"
 	}
-	if len(row.missing) > 0 {
-		return label + " · 缺 " + strings.Join(row.missing, "、")
-	}
-	return label + " · 未就绪"
+	return label
 }
 
 type resourceLine struct {
@@ -73,12 +129,16 @@ type resourceLine struct {
 }
 
 func resourceRows(rows []resourceRow) []resourceLine {
-	lines := make([]resourceLine, 0, len(rows))
+	counts := map[string]int{}
+	for _, row := range rows {
+		counts[row.kind]++
+	}
+	lines := make([]resourceLine, 0, len(rows)+len(counts))
 	kind := ""
 	for _, row := range rows {
 		if row.kind != kind {
 			kind = row.kind
-			lines = append(lines, resourceLine{kind: kind, header: true})
+			lines = append(lines, resourceLine{kind: kind + " · " + strconv.Itoa(counts[kind]), header: true})
 		}
 		lines = append(lines, resourceLine{row: row})
 	}
@@ -86,13 +146,16 @@ func resourceRows(rows []resourceRow) []resourceLine {
 }
 
 func resourceSummary(rows []resourceRow) string {
-	ready := 0
+	ready, pending := 0, 0
 	for _, row := range rows {
 		if row.ready {
 			ready++
 		}
+		if len(row.missing) > 0 {
+			pending++
+		}
 	}
-	return strconv.Itoa(ready) + " / " + strconv.Itoa(len(rows)) + " 就绪"
+	return strconv.Itoa(ready) + " / " + strconv.Itoa(len(rows)) + " 可用 · " + strconv.Itoa(pending) + " 个待配置"
 }
 
 type configDocument struct {
@@ -118,18 +181,22 @@ type resourceState struct {
 }
 
 func newResourceState(address, token string) *resourceState {
-	return &resourceState{api: newAPIClient(address, token), status: "正在读取能力库…", openPath: mygo.Shell.OpenPath}
+	return &resourceState{api: newAPIClient(address, token), status: "正在读取资源库…", openPath: mygo.Shell.OpenPath}
 }
 
 func (s *resourceState) load() {
-	payload, err := s.api.get("/api/capabilities/config")
+	catalog, err := s.api.get("/api/catalog")
 	if err != nil {
-		s.status = "读不到能力库：" + err.Error()
+		s.status = "读不到资源库：" + err.Error()
 		return
 	}
-	rows, err := parseResources(payload)
+	config, configErr := s.api.get("/api/capabilities/config")
+	if configErr != nil {
+		config = nil
+	}
+	rows, err := parseResourceLibrary(catalog, config)
 	if err != nil {
-		s.status = "能力库不是预期的 JSON：" + err.Error()
+		s.status = "资源库不是预期的 JSON：" + err.Error()
 		return
 	}
 	s.rows = rows
@@ -218,7 +285,7 @@ func (s *resourceState) view(ctx *ui.Context) {
 			ui.Text(ctx, s.status).FontSize(12).TextColor(t.TextMuted)
 			return
 		}
-		ui.Text(ctx, "能力库 · "+resourceSummary(s.rows)).FontSize(12).TextColor(t.TextMuted)
+		ui.Text(ctx, "资源库 · "+resourceSummary(s.rows)).FontSize(12).TextColor(t.TextMuted)
 		ui.Row(ctx).Gap(8).AlignItems(ui.Center).Children(func() {
 			if ui.Button(ctx, "打开能力目录").Clicked() {
 				go s.openDirectory()

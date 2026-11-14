@@ -20,7 +20,13 @@ var usageFixtures = map[string]string{
 		{"name":"OpenCode Go","status":"ok","configured":true,"models":[{"id":"beam-free"},{"id":"cat-jam-free"}]},
 		{"name":"Grok","status":"error","configured":false,"models":[]}
 	]}`,
-	"/api/capabilities/config": `{"items":[{"kind":"mcp","ready":true},{"kind":"mcp","ready":false},{"kind":"skills","ready":false}]}`,
+	"/api/catalog": `{"capabilities":[
+		{"id":"browser-use","kind":"mcp","version":"1","name":"Browser Use","status":"available"},
+		{"id":"exa","kind":"mcp","version":"1","name":"Exa","status":"available"},
+		{"id":"pstack","kind":"skill","version":"local","name":"pstack","status":"available"},
+		{"id":"other","kind":"skill","version":"local","name":"Other","status":"available"}
+	]}`,
+	"/api/capabilities/config": `{"items":[{"id":"browser-use","version":"1","kind":"mcp","missing":["BROWSER_USE_API_KEY"],"ready":false}]}`,
 }
 
 func usageServer(t *testing.T) *httptest.Server {
@@ -36,7 +42,7 @@ func usageServer(t *testing.T) *httptest.Server {
 }
 
 func TestUsageSnapshotCountsAndFormats(t *testing.T) {
-	snapshot, err := parseUsage([]byte(usageFixtures["/api/insights"]), []byte(usageFixtures["/api/usage"]), []byte(usageFixtures["/api/capabilities/config"]))
+	snapshot, err := parseUsage([]byte(usageFixtures["/api/insights"]), []byte(usageFixtures["/api/usage"]), []byte(usageFixtures["/api/catalog"]), []byte(usageFixtures["/api/capabilities/config"]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +67,7 @@ func TestUsageSnapshotCountsAndFormats(t *testing.T) {
 	if planLabel(snapshot.plans[0]) != "OpenCode Go · ok · 2 个模型" {
 		t.Fatalf("plan label %q", planLabel(snapshot.plans[0]))
 	}
-	if snapshot.capabilities.ready != 1 || snapshot.capabilities.missing != 2 {
+	if snapshot.capabilities.ready != 3 || snapshot.capabilities.total != 4 || snapshot.capabilities.missing != 1 {
 		t.Fatalf("capabilities %+v", snapshot.capabilities)
 	}
 }
@@ -86,7 +92,7 @@ func TestShellOpensTheUsagePane(t *testing.T) {
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
-	for _, wanted := range []string{"用量", "$119.23", "缓存命中", "96.0%", "能力库", "1/3", "tokens", "1.29B"} {
+	for _, wanted := range []string{"用量", "$119.23", "缓存命中", "96.0%", "资源库", "3/4", "tokens", "1.29B"} {
 		if !tester.HasText(wanted) {
 			t.Fatalf("the overview must present %q, texts %q", wanted, tester.Texts())
 		}

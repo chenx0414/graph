@@ -127,10 +127,10 @@ func (s *shellState) panelOverview(ctx *ui.Context) {
 		capabilityValue := "—"
 		if s.usage != nil {
 			ready := s.usage.rows.capabilities.ready
-			missing := s.usage.rows.capabilities.missing
-			capabilityValue = strconv.Itoa(ready) + "/" + strconv.Itoa(ready+missing)
+			total := s.usage.rows.capabilities.total
+			capabilityValue = strconv.Itoa(ready) + "/" + strconv.Itoa(total)
 		}
-		s.statCard(ctx, "能力库", capabilityValue)
+		s.statCard(ctx, "资源库", capabilityValue)
 		s.statCard(ctx, "tokens", tokens)
 	})
 	if active := s.active(); active != nil {
@@ -318,7 +318,7 @@ func (s *shellState) panelQuestions(ctx *ui.Context) {
 func (s *shellState) panelCapabilities(ctx *ui.Context) {
 	if s.resources == nil {
 		s.ensureResources()
-		s.boardNote(ctx, "正在读取能力库…")
+		s.boardNote(ctx, "正在读取资源库…")
 		return
 	}
 	s.resources.view(ctx)

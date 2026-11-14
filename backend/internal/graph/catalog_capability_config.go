@@ -2,6 +2,8 @@ package graph
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -86,6 +88,17 @@ func capabilityConfigObject(value any) map[string]any {
 	return object
 }
 
+func capabilityConfigManifestForConfig(record CapabilityRecord) map[string]any {
+	path := filepath.Join(record.Source, "capability.json")
+	if _, err := os.Stat(path); err != nil {
+		if record.Kind == CapabilityKindSkill {
+			return nil
+		}
+		Raise("invalid_capability", "Cannot read "+path+": "+err.Error())
+	}
+	return capabilityConfigObject(ReadCapabilityManifest(record.Source))
+}
+
 func CapabilityConfigViewOf(record CapabilityRecord, values map[string]string) (view CapabilityConfigView) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -105,7 +118,7 @@ func CapabilityConfigViewOf(record CapabilityRecord, values map[string]string) (
 		manifest = capabilityConfigObject(snapshot["manifest"])
 	}
 	if manifest == nil {
-		manifest = capabilityConfigObject(ReadCapabilityManifest(record.Source))
+		manifest = capabilityConfigManifestForConfig(record)
 	}
 	fields := []CapabilityConfigField{}
 	seen := map[string]bool{}

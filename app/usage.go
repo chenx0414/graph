@@ -24,6 +24,7 @@ type planRow struct {
 
 type capabilityTally struct {
 	ready   int
+	total   int
 	missing int
 }
 
@@ -69,14 +70,7 @@ type usagePayload struct {
 	} `json:"plans"`
 }
 
-type capabilitiesPayload struct {
-	Items []struct {
-		Kind  string `json:"kind"`
-		Ready bool   `json:"ready"`
-	} `json:"items"`
-}
-
-func parseUsage(insights, usage, capabilities []byte) (usageSnapshot, error) {
+func parseUsage(insights, usage, catalog, capabilities []byte) (usageSnapshot, error) {
 	snapshot := usageSnapshot{}
 	var counted insightsPayload
 	if err := json.Unmarshal(insights, &counted); err != nil {
@@ -107,16 +101,18 @@ func parseUsage(insights, usage, capabilities []byte) (usageSnapshot, error) {
 		}
 		snapshot.plans = append(snapshot.plans, planRow{name: plan.Name, state: state, modelCount: len(plan.Models)})
 	}
-	var catalog capabilitiesPayload
-	if err := json.Unmarshal(capabilities, &catalog); err != nil {
+	libraryRows, err := parseResourceLibrary(catalog, capabilities)
+	if err != nil {
 		return snapshot, err
 	}
-	for _, item := range catalog.Items {
-		if item.Ready {
+	for _, row := range libraryRows {
+		snapshot.capabilities.total++
+		if row.ready {
 			snapshot.capabilities.ready++
-			continue
 		}
-		snapshot.capabilities.missing++
+		if len(row.missing) > 0 {
+			snapshot.capabilities.missing++
+		}
 	}
 	return snapshot, nil
 }
@@ -179,12 +175,17 @@ func (s *usageState) load() {
 		s.status = "读不到订阅额度：" + err.Error()
 		return
 	}
-	capabilities, err := s.api.get("/api/capabilities/config")
+	catalog, err := s.api.get("/api/catalog")
 	if err != nil {
-		s.status = "读不到能力库：" + err.Error()
+		s.status = "读不到资源库：" + err.Error()
 		return
 	}
-	snapshot, err := parseUsage(insights, usage, capabilities)
+	capabilities, err := s.api.get("/api/capabilities/config")
+	if err != nil {
+		s.status = "读不到资源库：" + err.Error()
+		return
+	}
+	snapshot, err := parseUsage(insights, usage, catalog, capabilities)
 	if err != nil {
 		s.status = "用量不是预期的 JSON：" + err.Error()
 		return

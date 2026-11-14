@@ -11,10 +11,16 @@ import (
 )
 
 var resourceFixtures = map[string]string{
+	"/api/catalog": `{"capabilities":[
+		{"id":"exa-web-search","kind":"mcp","version":"3.4.1","name":"Exa Web Search","status":"available"},
+		{"id":"browser-use","kind":"mcp","version":"2026.9.17","name":"Browser Use","status":"available"},
+		{"id":"pstack","kind":"skill","version":"local","name":"pstack","status":"available"},
+		{"id":"principle-first-principles","kind":"skill","version":"local","status":"available"},
+		{"id":"broken-prompt","kind":"prompt","version":"1","name":"Broken Prompt","status":"available","error":"manifest unreadable"}
+	],"agentCombinations":[{"id":"reviewer","name":"Alice_reviewer","status":"valid"}],"agentCombinationFile":"/Users/macmini/.graph/agent-combinations.json"}`,
 	"/api/capabilities/config": `{"items":[
-		{"id":"browser-use","name":"Browser Use","kind":"mcp","version":"2026.9.17","missing":["BROWSER_USE_API_KEY"],"ready":false},
-		{"id":"browserbase","name":"Browserbase","kind":"mcp","version":"2.4.3","missing":["BROWSERBASE_API_KEY","BROWSERBASE_PROJECT_ID"],"ready":false},
-		{"id":"agent-browser-native","name":"","kind":"skill","version":"0.6.17","missing":[],"ready":true}
+		{"id":"browser-use","version":"2026.9.17","kind":"mcp","missing":["BROWSER_USE_API_KEY"],"ready":false},
+		{"id":"pstack","version":"local","kind":"skill","missing":[],"ready":false,"error":"Cannot read capability.json"}
 	]}`,
 	"/api/settings": `{"capabilityRoot":"/Users/macmini/.graph/capabilities"}`,
 	"/api/config":   `{"revision":428,"config":{"configured":true,"piExtensionAutoUpdate":false,"models":{"entries":[]}}}`,
@@ -32,36 +38,40 @@ func resourceServer(t *testing.T) *httptest.Server {
 	}))
 }
 
-func TestResourceCatalogSortsAndLabels(t *testing.T) {
-	rows, err := parseResources([]byte(resourceFixtures["/api/capabilities/config"]))
+func TestTheResourceLibraryCountsTheRealLibrary(t *testing.T) {
+	rows, err := parseResourceLibrary([]byte(resourceFixtures["/api/catalog"]), []byte(resourceFixtures["/api/capabilities/config"]))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 3 || rows[0].kind != "mcp" || rows[2].kind != "skill" {
-		t.Fatalf("rows must be grouped by kind, got %+v", rows)
+	if len(rows) != 5 {
+		t.Fatalf("the library has every capability, got %d", len(rows))
 	}
-	if rows[0].name != "Browser Use" || rows[1].name != "Browserbase" {
-		t.Fatalf("rows must sort by name inside a kind, got %+v", rows)
+	if rows[0].kind != "mcp" || rows[0].name != "Browser Use" || rows[1].name != "Exa Web Search" {
+		t.Fatalf("rows sort by kind then name, got %+v", rows)
+	}
+	if got := resourceSummary(rows); got != "3 / 5 可用 · 1 个待配置" {
+		t.Fatalf("summary %q", got)
 	}
 	if resourceLabel(rows[0]) != "Browser Use · v2026.9.17 · 缺 BROWSER_USE_API_KEY" {
 		t.Fatalf("label %q", resourceLabel(rows[0]))
 	}
-	if resourceLabel(rows[1]) != "Browserbase · v2.4.3 · 缺 BROWSERBASE_API_KEY、BROWSERBASE_PROJECT_ID" {
-		t.Fatalf("label %q", resourceLabel(rows[1]))
+	if resourceLabel(rows[1]) != "Exa Web Search · v3.4.1" {
+		t.Fatalf("a ready resource stays quiet, label %q", resourceLabel(rows[1]))
 	}
-	if resourceLabel(rows[2]) != "agent-browser-native · v0.6.17 · 就绪" {
-		t.Fatalf("an item without a name falls back to its id, got %q", resourceLabel(rows[2]))
+	pstack := rows[4]
+	if pstack.name != "pstack" || !pstack.ready {
+		t.Fatalf("a plain skill is not broken by the old config noise, got %+v", pstack)
 	}
-	if resourceSummary(rows) != "1 / 3 就绪" {
-		t.Fatalf("summary %q", resourceSummary(rows))
+	if brok := rows[2]; brok.ready || resourceLabel(brok) != "Broken Prompt · v1 · 加载失败：manifest unreadable" {
+		t.Fatalf("a load error is shown as such, got %q", resourceLabel(brok))
 	}
 	lines := resourceRows(rows)
-	if len(lines) != 5 || !lines[0].header || lines[0].kind != "mcp" || lines[1].header || !lines[3].header || lines[3].kind != "skill" || lines[4].row.name != "agent-browser-native" {
+	if len(lines) != 8 || !lines[0].header || lines[0].kind != "mcp · 2" || !lines[3].header || lines[3].kind != "prompt · 1" || !lines[5].header || lines[5].kind != "skill · 2" {
 		t.Fatalf("lines %+v", lines)
 	}
 }
 
-func TestResourcePaneRendersEveryCapability(t *testing.T) {
+func TestTheResourcePaneRendersTheRealLibrary(t *testing.T) {
 	server := resourceServer(t)
 	defer server.Close()
 
@@ -70,11 +80,12 @@ func TestResourcePaneRendersEveryCapability(t *testing.T) {
 	if state.status != "" {
 		t.Fatalf("status %q", state.status)
 	}
-	tester := ui.NewTester(state.view, 820, 620)
+	tester := ui.NewTester(state.view, 860, 620)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
-	for _, wanted := range []string{"能力库 · 1 / 3 就绪", "mcp", "skill", "Browser Use · v2026.9.17 · 缺 BROWSER_USE_API_KEY", "agent-browser-native · v0.6.17 · 就绪"} {
+	for _, wanted := range []string{"资源库 · 3 / 5 可用 · 1 个待配置", "mcp · 2", "skill · 2", "prompt · 1",
+		"Browser Use · v2026.9.17 · 缺 BROWSER_USE_API_KEY", "pstack · vlocal", "Broken Prompt · v1 · 加载失败：manifest unreadable"} {
 		if !tester.HasText(wanted) {
 			t.Fatalf("missing %q in texts %q", wanted, tester.Texts())
 		}
@@ -98,7 +109,7 @@ func TestShellOpensTheResourcePane(t *testing.T) {
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
-	if !tester.HasText("能力库 · 1 / 3 就绪") {
+	if !tester.HasText("资源库 · 3 / 5 可用 · 1 个待配置") {
 		t.Fatalf("the resource pane must render, texts %q", tester.Texts())
 	}
 }

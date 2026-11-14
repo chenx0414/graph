@@ -157,7 +157,7 @@ func boardPanelTitle(kind string) string {
 	case "providers":
 		return "供应商"
 	case "capabilities":
-		return "能力库"
+		return "资源库"
 	case "settings":
 		return "运行设置"
 	case "artifacts":
