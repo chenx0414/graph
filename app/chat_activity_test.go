@@ -192,3 +192,33 @@ func TestAToolRowFallsBackToItsArgumentsForTheCommand(t *testing.T) {
 		t.Fatalf("the row reads its command from the arguments, texts %q", tester.Texts())
 	}
 }
+
+func TestAGroupedCommandRowDoesNotRepeatItsArguments(t *testing.T) {
+	state := newChatState("http://127.0.0.1:1", "tok")
+	first := activityTool("bash", "bash: echo hi", "done")
+	first.Data.Args = `{"command":"echo hi","timeout":15000}`
+	first.Data.Output = "hi"
+	first.Data.ToolCallID = "call-5"
+	first.CreatedAt = 1_000_000
+	second := activityTool("bash", "bash: pwd", "done")
+	second.Data.Args = `{"command":"pwd","timeout":15000}`
+	second.Data.Output = "/repo"
+	second.Data.ToolCallID = "call-6"
+	second.CreatedAt = 1_001_000
+	state.messages = []transcriptMessage{first, second}
+	tester := frames(ui.NewTester(state.view, 760, 620))
+	if err := tester.Click("用时 1s"); err != nil {
+		t.Fatalf("open the activity: %v", err)
+	}
+	tester = frames(tester)
+	if err := tester.Click("已运行 echo hi; pwd"); err != nil {
+		t.Fatalf("open the grouped row: %v", err)
+	}
+	tester = frames(tester)
+	if !tester.HasText("$ echo hi; pwd") || !tester.HasText("输出") {
+		t.Fatalf("the panel shows the commands and their output, texts %q", tester.Texts())
+	}
+	if tester.HasText("参数") || tester.HasText(`{"command":"echo hi","timeout":15000}`) {
+		t.Fatalf("the arguments block stays out of a shell row, texts %q", tester.Texts())
+	}
+}

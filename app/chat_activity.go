@@ -291,12 +291,18 @@ func activityArguments(activity codexActivity) string {
 	if args == "" || args == "{}" || args == "null" {
 		return ""
 	}
-	if activity.command != "" {
-		if compact := commandArgumentOnly(args, activity.command); compact == "" {
-			return ""
-		}
+	if activity.command == "" {
+		return args
 	}
-	return args
+	kept := []string{}
+	for _, line := range strings.Split(args, "\n") {
+		compact := strings.TrimSpace(commandArgumentOnly(line, activity.command))
+		if compact == "" || compact == "{}" || compact == "null" {
+			continue
+		}
+		kept = append(kept, compact)
+	}
+	return strings.Join(kept, "\n")
 }
 
 func commandArgumentOnly(args, command string) string {
