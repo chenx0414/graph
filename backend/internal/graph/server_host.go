@@ -91,6 +91,7 @@ type GraphHost struct {
 	pump               func() ExecutionDispatch
 	lastProblemSweep   int64
 	lastUnsettledSweep int64
+	lastRetentionSweep int64
 }
 
 func graphDriveDelay(dispatched int) time.Duration {
@@ -187,6 +188,13 @@ func (h *GraphHost) drive() {
 			func() {
 				defer func() { _ = recover() }()
 				dispatched = h.pump().Dispatched
+			}()
+		}
+		if now := NowMillis(); now-h.lastRetentionSweep >= stateSweepIntervalMs() {
+			h.lastRetentionSweep = now
+			func() {
+				defer func() { _ = recover() }()
+				h.Runtime.execution.sweepState()
 			}()
 		}
 		time.Sleep(graphDriveDelay(dispatched))
