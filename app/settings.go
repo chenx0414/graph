@@ -17,6 +17,8 @@ type projectRow struct {
 }
 
 type settingsSnapshot struct {
+	autoUpdate   bool
+	document     json.RawMessage
 	mode         string
 	branch       string
 	commit       string
@@ -34,6 +36,11 @@ type startupPayload struct {
 		Branch string `json:"branch"`
 		Commit string `json:"commit"`
 	} `json:"source"`
+}
+
+type configEnvelope struct {
+	Revision int             `json:"revision"`
+	Config   json.RawMessage `json:"config"`
 }
 
 type settingsPayload struct {
@@ -95,6 +102,9 @@ type settingsState struct {
 	rows          settingsSnapshot
 	list          ui.ListState
 	openProviders func()
+	document      json.RawMessage
+	revision      int
+	autoUpdate    bool
 }
 
 func newSettingsState(address, token string) *settingsState {
@@ -118,8 +128,43 @@ func (s *settingsState) load() {
 		return
 	}
 	s.rows = snapshot
+	if payload, err := s.api.get("/api/config"); err == nil {
+		var envelope configEnvelope
+		if json.Unmarshal(payload, &envelope) == nil && len(envelope.Config) > 0 {
+			var shaped map[string]any
+			if json.Unmarshal(envelope.Config, &shaped) == nil {
+				s.document = envelope.Config
+				s.revision = envelope.Revision
+				s.autoUpdate, _ = shaped["piExtensionAutoUpdate"].(bool)
+				s.rows.autoUpdate = s.autoUpdate
+			}
+		}
+	}
 	s.status = ""
 	s.frame()
+}
+
+func (s *settingsState) toggleAutoUpdate() {
+	if len(s.document) == 0 {
+		s.status = "读不到配置，暂时改不了这个开关"
+		s.frame()
+		return
+	}
+	var shaped map[string]any
+	if err := json.Unmarshal(s.document, &shaped); err != nil {
+		s.status = "配置不是预期结构：" + err.Error()
+		s.frame()
+		return
+	}
+	shaped["piExtensionAutoUpdate"] = !s.autoUpdate
+	body := map[string]any{"expectedRevision": s.revision, "document": shaped}
+	if _, err := s.api.post("/api/config", body); err != nil {
+		s.status = "写入被拒绝：" + err.Error() + "（配置可能已被别处改过，重进设置页会重读）"
+		s.frame()
+		return
+	}
+	s.status = ""
+	s.load()
 }
 
 func (s *settingsState) post(path string) {
@@ -177,6 +222,11 @@ func (s *settingsState) view(ctx *ui.Context) {
 					})
 				})
 			}
+			rows = append(rows, func() {
+				s.settingRow(ctx, "扩展自动更新", "Pi 扩展有新版本时自动更新", func() {
+					s.autoUpdateSwitch(ctx)
+				})
+			})
 			s.settingsSection(ctx, "运行", "", rows...)
 			if len(s.rows.projects) > 0 {
 				projects := make([]func(), 0, len(s.rows.projects))
@@ -251,6 +301,29 @@ func (s *settingsState) settingRow(ctx *ui.Context, label, desc string, control 
 			}
 		})
 		control()
+	})
+}
+
+func (s *settingsState) autoUpdateSwitch(ctx *ui.Context) {
+	t := gwtheme.Of(ctx)
+	label := "关闭"
+	if s.autoUpdate {
+		label = "开启"
+	}
+	track := ui.Row(ctx).Height(ctx.Theme().Space(5)).PaddingX(6).Radius(t.Radius.Sm).Gap(6).
+		AlignItems(ui.Center).Focusable().Label("打开 扩展自动更新")
+	if s.autoUpdate {
+		track.Background(t.Primary)
+	} else {
+		track.Background(t.Hover)
+	}
+	track.OnClick(func() { go s.toggleAutoUpdate() })
+	track.Children(func() {
+		color := t.Foreground
+		if s.autoUpdate {
+			color = t.PrimaryText
+		}
+		kit.Text(ctx, label, t.Text.Xs).TextColor(color).SingleLine()
 	})
 }
 

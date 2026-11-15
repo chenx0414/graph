@@ -43,6 +43,7 @@ type shellState struct {
 	boardScrollTop   bool
 	window           *mygo.Window
 	list             ui.ListState
+	stateDir         string
 }
 
 func newShellState(address, token string) *shellState {
@@ -164,6 +165,8 @@ func (s *shellState) ensureResources() {
 	if s.resources == nil {
 		s.resources = newResourceState(s.api.address, s.api.token)
 		s.resources.window = s.window
+		s.resources.secretsPath = secretsPath(s.stateDir)
+		s.resources.appToken = appToken(s.stateDir)
 		go s.resources.load()
 	}
 }

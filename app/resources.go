@@ -20,6 +20,8 @@ type resourceRow struct {
 	source      string
 	description string
 	repo        string
+	fields      []resourceField
+	configured  []string
 	missing     []string
 	err         string
 	ready       bool
@@ -50,14 +52,23 @@ type resourceLibraryPayload struct {
 	AgentCombinationFile string `json:"agentCombinationFile"`
 }
 
+type resourceField struct {
+	Env    string `json:"env"`
+	Label  string `json:"label"`
+	Secret bool   `json:"secret"`
+	Reason string `json:"reason"`
+}
+
 type resourceConfigPayload struct {
 	Items []struct {
-		ID      string   `json:"id"`
-		Kind    string   `json:"kind"`
-		Version string   `json:"version"`
-		Missing []string `json:"missing"`
-		Error   string   `json:"error"`
-		Ready   bool     `json:"ready"`
+		ID         string          `json:"id"`
+		Kind       string          `json:"kind"`
+		Version    string          `json:"version"`
+		Fields     []resourceField `json:"fields"`
+		Configured []string        `json:"configured"`
+		Missing    []string        `json:"missing"`
+		Error      string          `json:"error"`
+		Ready      bool            `json:"ready"`
 	} `json:"items"`
 }
 
@@ -89,10 +100,16 @@ func parseResourceLibrary(catalog, config []byte) ([]resourceRow, error) {
 		}
 	}
 	missingByID := map[string][]string{}
+	fieldsByID := map[string][]resourceField{}
+	configuredByID := map[string][]string{}
 	for _, item := range wired.Items {
 		missingByID[resourceConfigKey(item.ID, item.Version)] = item.Missing
+		fieldsByID[resourceConfigKey(item.ID, item.Version)] = item.Fields
+		configuredByID[resourceConfigKey(item.ID, item.Version)] = item.Configured
 		if _, ok := missingByID[item.ID]; !ok {
 			missingByID[item.ID] = item.Missing
+			fieldsByID[item.ID] = item.Fields
+			configuredByID[item.ID] = item.Configured
 		}
 	}
 	rows := make([]resourceRow, 0, len(listed.Capabilities))
@@ -105,8 +122,16 @@ func parseResourceLibrary(catalog, config []byte) ([]resourceRow, error) {
 			name = item.ID
 		}
 		missing := missingByID[resourceConfigKey(item.ID, item.Version)]
+		fields := fieldsByID[resourceConfigKey(item.ID, item.Version)]
 		if missing == nil {
 			missing = missingByID[item.ID]
+		}
+		if fields == nil {
+			fields = fieldsByID[item.ID]
+		}
+		configured := configuredByID[resourceConfigKey(item.ID, item.Version)]
+		if configured == nil {
+			configured = configuredByID[item.ID]
 		}
 		errText := strings.TrimSpace(item.Error)
 		status := item.Status
@@ -117,7 +142,8 @@ func parseResourceLibrary(catalog, config []byte) ([]resourceRow, error) {
 		rows = append(rows, resourceRow{
 			id: item.ID, kind: item.Kind, name: name, version: item.Version, origin: item.Origin,
 			status: status, source: item.Source, description: item.Snapshot.Manifest.Description,
-			repo: resourceRepo(item.Snapshot.Manifest.Source), missing: missing, err: errText, ready: ready,
+			repo: resourceRepo(item.Snapshot.Manifest.Source), fields: fields, configured: configured,
+			missing: missing, err: errText, ready: ready,
 		})
 	}
 	sort.SliceStable(rows, func(a, b int) bool {
@@ -187,18 +213,110 @@ type catalogRoot struct {
 
 type resourceState struct {
 	api          apiClient
+	appToken     string
+	secretsPath  string
 	status       string
 	root         string
 	search       string
 	kind         string
 	showAllFound bool
+	selected     string
+	draftEnv     string
+	draftValue   string
+	saved        map[string]string
 	openPath     func(string) error
 	window       *mygo.Window
 	rows         []resourceRow
 }
 
+func (s *resourceState) resource(id string) *resourceRow {
+	for index := range s.rows {
+		if s.rows[index].id == id {
+			return &s.rows[index]
+		}
+	}
+	return nil
+}
+
+func (s *resourceState) selectedRow() *resourceRow {
+	if s.selected == "" {
+		return nil
+	}
+	return s.resource(s.selected)
+}
+
+func (s *resourceState) selectResource(id string) {
+	s.selected = id
+	s.draftEnv = ""
+	s.draftValue = ""
+	s.frame()
+}
+
+func (s *resourceState) saveEnv() {
+	ref := strings.TrimSpace(s.draftEnv)
+	value := strings.TrimSpace(s.draftValue)
+	if ref == "" {
+		s.status = "先选一个字段再保存"
+		s.frame()
+		return
+	}
+	if value == "" {
+		s.status = "这个字段的值不能为空"
+		s.frame()
+		return
+	}
+	body := map[string]any{"ref": ref, "value": value, "persisted": true}
+	if _, err := s.api.postApp("/api/app/secret", s.appToken, body); err != nil {
+		s.status = "保存失败：" + err.Error()
+		s.frame()
+		return
+	}
+	if s.secretsPath != "" {
+		if err := saveSecret(s.secretsPath, ref, &value); err != nil {
+			s.status = "保存失败：daemon 已接受，但本机没能落盘（" + err.Error() + "）"
+			s.frame()
+			return
+		}
+	}
+	if s.saved == nil {
+		s.saved = map[string]string{}
+	}
+	s.saved[ref] = value
+	s.draftValue = ""
+	s.status = ""
+	s.load()
+	s.frame()
+}
+
 func newResourceState(address, token string) *resourceState {
 	return &resourceState{api: newAPIClient(address, token), status: "正在读取资源库…", openPath: mygo.Shell.OpenPath}
+}
+
+func (s *resourceState) revokeEnv(ref string) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		s.status = "先选一个字段"
+		s.frame()
+		return
+	}
+	if _, err := s.api.postApp("/api/app/secret", s.appToken, map[string]any{"ref": ref, "value": nil}); err != nil {
+		s.status = "撤销失败：" + err.Error()
+		s.frame()
+		return
+	}
+	if s.secretsPath != "" {
+		if err := saveSecret(s.secretsPath, ref, nil); err != nil {
+			s.status = "撤销被 daemon 接受，但本机没能清理（" + err.Error() + "）"
+			s.frame()
+			return
+		}
+	}
+	delete(s.saved, ref)
+	s.draftEnv = ""
+	s.draftValue = ""
+	s.status = ""
+	s.load()
+	s.frame()
 }
 
 func (s *resourceState) load() {

@@ -174,6 +174,7 @@ func (s *resourceState) resourceRow(ctx *ui.Context, t gwtheme.Tokens, row resou
 	if item.Hovered() {
 		item.Background(t.Hover)
 	}
+	item.OnClick(func() { s.selectResource(row.id) })
 	item.Children(func() {
 		glyph := ui.Box(ctx).Size(th.Space(6), th.Space(6)).Radius(t.Radius.Sm).Background(t.Hover).Center()
 		glyph.Children(func() {
@@ -210,7 +211,12 @@ func (s *resourceState) resourceRow(ctx *ui.Context, t gwtheme.Tokens, row resou
 func (s *resourceState) resourceCard(ctx *ui.Context, t gwtheme.Tokens, row resourceRow) {
 	th := ctx.Theme()
 	card := ui.Column(ctx).Width(th.Space(59)).Padding(th.Space(3)).Gap(th.Space(2)).
-		Radius(t.Radius.Md).Border(gwtheme.Stroke, t.Border).Background(t.Card)
+		Radius(t.Radius.Md).Border(gwtheme.Stroke, t.Border).Background(t.Card).
+		Focusable().Label("资源 " + row.name)
+	if card.Hovered() {
+		card.Border(gwtheme.Stroke, t.Muted)
+	}
+	card.OnClick(func() { s.selectResource(row.id) })
 	card.Children(func() {
 		ui.Row(ctx).FillWidth().Gap(th.Space(2.5)).AlignItems(ui.Center).Children(func() {
 			glyph := ui.Box(ctx).Size(th.Space(6), th.Space(6)).Radius(t.Radius.Sm).Background(t.Hover).Center()
@@ -249,6 +255,10 @@ func (s *resourceState) resourceCard(ctx *ui.Context, t gwtheme.Tokens, row reso
 
 func (s *resourceState) view(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
+	if row := s.selectedRow(); row != nil {
+		s.detailView(ctx, t, *row)
+		return
+	}
 	rows := s.filteredRows()
 	found := make([]resourceRow, 0, len(rows))
 	discovered := make([]resourceRow, 0, len(rows))

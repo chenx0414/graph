@@ -150,3 +150,55 @@ func TestTheSettingsPageFollowsTheGodwitLayout(t *testing.T) {
 		t.Fatalf("a project row keeps its action button, texts %q", tester.Texts())
 	}
 }
+
+func TestTheRunSettingsOwnTheExtensionAutoUpdate(t *testing.T) {
+	actions := map[string]int{}
+	posted := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/config" {
+			payload := make([]byte, 8192)
+			read, _ := r.Body.Read(payload)
+			posted = string(payload[:read])
+			actions["config"]++
+			w.Write([]byte(`{"applied":true}`))
+			return
+		}
+		if r.URL.Path == "/api/config" {
+			w.Write([]byte(`{"revision":429,"config":{"configured":true,"piExtensionAutoUpdate":false,"models":{"entries":[]}}}`))
+			return
+		}
+		body, ok := settingsFixtures[r.URL.Path]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	state := newSettingsState(server.URL, "tok")
+	state.load()
+	tester := ui.NewTester(state.view, 900, 700)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if !tester.HasText("扩展自动更新") || !tester.HasText("关闭") {
+		t.Fatalf("the run settings own the switch, texts %q", tester.Texts())
+	}
+	if err := tester.Click("打开 扩展自动更新"); err != nil {
+		t.Fatalf("flip the switch: %v", err)
+	}
+	deadline := 0
+	for actions["config"] == 0 && deadline < 500 {
+		tester.Frame()
+		deadline++
+	}
+	if actions["config"] != 1 {
+		t.Fatalf("flipping writes the config, actions %v (%q)", actions, state.status)
+	}
+	for _, want := range []string{`"expectedRevision":429`, `"piExtensionAutoUpdate":true`} {
+		if !contains(posted, want) {
+			t.Fatalf("提交体缺 %q，实际 %q", want, posted)
+		}
+	}
+}

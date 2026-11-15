@@ -9,16 +9,23 @@ import (
 func writeCapabilityDir(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
+	if err := writeCapabilityFiles(dir, files); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func writeCapabilityFiles(dir string, files map[string]string) error {
 	for name, body := range files {
 		path := filepath.Join(dir, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-			t.Fatal(err)
+			return err
 		}
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-			t.Fatal(err)
+			return err
 		}
 	}
-	return dir
+	return nil
 }
 
 func TestAPlainSkillNeedsNoCapabilityJSON(t *testing.T) {

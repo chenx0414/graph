@@ -97,6 +97,7 @@ func (s *shell) openNative() {
 		return
 	}
 	state := newShellState(s.console, s.paths.SessionToken())
+	state.stateDir = s.paths.StateDir
 	state.loadBoard(s.paths.StateDir)
 	window := mygo.NewWindow(mygo.WindowOptions{
 		Title:                "Graph",
