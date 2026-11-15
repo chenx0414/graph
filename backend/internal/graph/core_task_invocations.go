@@ -39,9 +39,20 @@ func (s *TaskStore) InvocationExists(id string) bool {
 }
 
 func (s *TaskStore) OpenInvocation(id, operationID, instanceID, model, purpose string) {
+	taskID := ""
+	if row := kernelRow(s.Db, "SELECT task_id FROM operations WHERE id=?", operationID); row != nil {
+		taskID = kernelString(row["task_id"])
+	}
+	_, cached := taskInvocationCachedTotals(s, taskID)
 	if _, err := s.DB.Exec("INSERT INTO invocations(id,operation_id,instance_id,model,purpose,dispatched_at) VALUES(?,?,?,?,?,?)",
 		id, operationID, instanceID, model, purpose, NowMillis()); err != nil {
 		panic(err)
+	}
+	if taskID != "" && cached {
+		totals, _ := taskInvocationCachedTotals(s, taskID)
+		totals.Invocations++
+		totals.CostUnknown++
+		s.saveTaskInvocationTotals(taskID, totals)
 	}
 	if composition := invocationComposition(s, operationID); composition != "" {
 		if _, err := s.DB.Exec("UPDATE invocations SET composition=? WHERE id=?", composition, id); err != nil {
@@ -100,9 +111,43 @@ func (s *TaskStore) InvocationUsage(id string) (*string, bool) {
 }
 
 func (s *TaskStore) RecordInvocationUsage(id string, usage, cost any) {
-	if _, err := s.DB.Exec("UPDATE invocations SET usage=?,cost=?,settled_at=? WHERE id=?", usage, cost, NowMillis(), id); err != nil {
+	row := kernelRow(s.Db, `SELECT i.usage AS oldUsage,i.cost AS oldCost,i.purpose AS purpose,i.rowid AS rowid,
+       i.dispatched_at AS dispatchedAt,o.task_id AS taskId
+    FROM invocations i JOIN operations o ON o.id=i.operation_id WHERE i.id=?`, id)
+	if row == nil {
+		return
+	}
+	taskID := kernelString(row["taskId"])
+	cached := kernelRow(s.Db, "SELECT task_id FROM task_invocation_totals WHERE task_id=?", taskID) != nil
+	settled := NowMillis()
+	if _, err := s.DB.Exec("UPDATE invocations SET usage=?,cost=?,settled_at=? WHERE id=?", usage, cost, settled, id); err != nil {
 		panic(err)
 	}
+	if !cached {
+		s.ensureTaskInvocationTotals(taskID)
+		return
+	}
+	totals := s.ensureTaskInvocationTotals(taskID)
+	totals.apply(kernelString(row["oldUsage"]), kernelString(row["oldCost"]), kernelString(row["purpose"]),
+		kernelInt(row["rowid"]), kernelInt(row["dispatchedAt"]), 0, -1)
+	totals.apply(kernelString(usageToText(usage)), kernelString(costToText(cost)), kernelString(row["purpose"]),
+		kernelInt(row["rowid"]), kernelInt(row["dispatchedAt"]), settled, 1)
+	s.saveTaskInvocationTotals(taskID, totals)
+}
+
+func usageToText(value any) string {
+	if value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return text
+	}
+	payload, _ := json.Marshal(value)
+	return string(payload)
+}
+
+func costToText(value any) string {
+	return usageToText(value)
 }
 
 func (s *TaskStore) InvocationRows(taskID string) []InvocationRow {

@@ -1,0 +1,5 @@
+{
+  "conversation_p75_ms": 300,
+  "conversation_p50_ms": 150,
+  "note": "GET /api/conversations/{main}; 10 runs; p75 上限只许降"
+}

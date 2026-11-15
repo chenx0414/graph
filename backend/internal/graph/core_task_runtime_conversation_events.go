@@ -10,14 +10,21 @@ import (
 )
 
 func taskRuntimeTaskCost(runtime *TaskRuntime, taskId string) CostSummary {
-	costs := []any{}
-	for _, row := range InvocationRows(runtime.store, taskId) {
-		costs = append(costs, row.Cost)
+	totals := runtime.store.ensureTaskInvocationTotals(taskId)
+	amounts := totals.Costs
+	order := make([]string, 0, len(amounts))
+	for currency := range amounts {
+		order = append(order, currency)
+	}
+	for index := 1; index < len(order); index++ {
+		for back := index; back > 0 && order[back] < order[back-1]; back-- {
+			order[back], order[back-1] = order[back-1], order[back]
+		}
 	}
 	for range runtime.kernel.ProviderCalls(taskId) {
-		costs = append(costs, map[string]any{"unknown": true})
+		totals.CostUnknown++
 	}
-	return SumCosts(costs)
+	return costSummary(totals.CostUnknown > 0, amounts, order)
 }
 
 func (conversations *TaskRuntimeConversations) Proposal(conversationId string, version int) any {

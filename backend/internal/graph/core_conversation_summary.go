@@ -11,76 +11,84 @@ func NewConversationId() string {
 }
 
 func ConversationMasterUsage(store *TaskStore, conversationId string) ConversationMasterUsageView {
-	rows := kernelRows(store.Db, `SELECT i.usage AS usage,i.purpose AS purpose,o.settled_at AS settledAt
-    FROM invocations i
-    JOIN operations o ON o.id=i.operation_id
-    JOIN tasks t ON t.id=o.task_id
-    WHERE t.conversation_id=?
-      AND EXISTS (SELECT 1 FROM nodes n WHERE n.task_id=o.task_id AND n.id=o.node_id AND json_extract(n.spec,'$.role')='master')
-    ORDER BY i.rowid`, conversationId)
-	var cacheInput int64
-	var cachedInput int64
-	var contextTokens *int64
-	var cacheReadTokens *int64
-	var cacheUsedAt *int64
-	var requestCacheHitRate *float64
-	for _, row := range rows {
-		text := kernelString(row["usage"])
-		if text == "" {
-			continue
+	masterTasks := kernelRows(store.Db, `SELECT DISTINCT n.task_id AS taskId FROM nodes n
+    JOIN tasks t ON t.id=n.task_id
+    WHERE t.conversation_id=? AND json_extract(n.spec,'$.role')='master'`, conversationId)
+	view := ConversationMasterUsageView{}
+	var completion taskInvocationTotals
+	var throughput taskInvocationTotals
+	for _, row := range masterTasks {
+		totals := store.ensureTaskInvocationTotals(kernelString(row["taskId"]))
+		view.CachedInput += totals.UsageCacheRead
+		view.CacheInput += totals.UsageInput + totals.UsageCacheRead + totals.UsageCacheWrite
+		if totals.CompletionRowid >= completion.CompletionRowid {
+			completion = totals
 		}
-		usage := struct {
-			Input         *int64 `json:"input"`
-			CacheRead     *int64 `json:"cacheRead"`
-			CacheWrite    *int64 `json:"cacheWrite"`
-			ContextTokens *int64 `json:"contextTokens"`
-		}{}
-		if err := json.Unmarshal([]byte(text), &usage); err != nil {
-			panic(err)
+		if totals.ThroughputSettled >= throughput.ThroughputSettled {
+			throughput = totals
 		}
-		input := int64(0)
-		if usage.Input != nil {
-			input = *usage.Input
-		}
-		cacheRead := int64(0)
-		if usage.CacheRead != nil {
-			cacheRead = *usage.CacheRead
-		}
-		cacheWrite := int64(0)
-		if usage.CacheWrite != nil {
-			cacheWrite = *usage.CacheWrite
-		}
-		total := input + cacheRead + cacheWrite
-		cacheInput += total
-		cachedInput += cacheRead
-		if kernelString(row["purpose"]) == "completion" && total > 0 {
+	}
+	if completion.CompletionRowid > 0 {
+		record, ok := parseInvocationTotalsUsage(completion.CompletionUsage)
+		if ok {
+			total := int64(0)
+			if record.Input != nil {
+				total += *record.Input
+			}
+			if record.CacheRead != nil {
+				total += *record.CacheRead
+			}
+			if record.CacheWrite != nil {
+				total += *record.CacheWrite
+			}
 			value := total
-			if usage.ContextTokens != nil && *usage.ContextTokens > 0 {
-				value = *usage.ContextTokens
+			if record.ContextTokens != nil && *record.ContextTokens > 0 {
+				value = *record.ContextTokens
 			}
-			contextTokens = &value
-			requestRate := 0.0
-			if total > 0 {
-				requestRate = float64(cacheRead) / float64(total)
-			}
-			requestRateCopy := requestRate
-			if settled := kernelInt(row["settledAt"]); settled > 0 {
-				read := cacheRead
-				cacheReadTokens = &read
-				usedAt := settled
-				cacheUsedAt = &usedAt
-				requestCacheHitRate = &requestRateCopy
+			view.ContextTokens = &value
+			if completion.CompletionSettled > 0 {
+				read := int64(0)
+				if record.CacheRead != nil {
+					read = *record.CacheRead
+				}
+				usedAt := completion.CompletionSettled
+				rate := 0.0
+				if total > 0 {
+					rate = float64(read) / float64(total)
+				}
+				view.CacheReadTokens = &read
+				view.CacheUsedAt = &usedAt
+				view.RequestCacheHitRate = &rate
 			}
 		}
 	}
-	facts := masterThroughputFacts(store, conversationId)
-	return ConversationMasterUsageView{
-		CachedInput: cachedInput, CacheInput: cacheInput, ContextTokens: contextTokens,
-		RequestCacheHitRate: requestCacheHitRate,
-		CacheReadTokens: cacheReadTokens, CacheUsedAt: cacheUsedAt,
-		OutputTokens: facts.OutputTokens, LatencyMs: facts.LatencyMs, TokensPerSecond: facts.TokensPerSecond,
-		FirstTokenMs: facts.FirstTokenMs, UploadMs: facts.UploadMs, ServerWaitMs: facts.ServerWaitMs,
+	if throughput.ThroughputSettled > 0 {
+		record, ok := parseInvocationTotalsUsage(throughput.ThroughputUsage)
+		if ok && record.Output != nil && *record.Output > 0 {
+			latency := throughput.ThroughputSettled - throughput.ThroughputDispatched
+			decode := latency
+			if record.DurationMs != nil && *record.DurationMs > 0 {
+				decode = *record.DurationMs
+			}
+			output := *record.Output
+			facts := throughputFacts{
+				FirstTokenMs: record.FirstTokenMs, UploadMs: record.UploadMs, ServerWaitMs: record.ServerWaitMs,
+			}
+			if decode > 0 {
+				rate := float64(output) / (float64(decode) / 1000)
+				facts.OutputTokens = &output
+				facts.LatencyMs = &latency
+				facts.TokensPerSecond = &rate
+			}
+			view.OutputTokens = facts.OutputTokens
+			view.LatencyMs = facts.LatencyMs
+			view.TokensPerSecond = facts.TokensPerSecond
+			view.FirstTokenMs = facts.FirstTokenMs
+			view.UploadMs = facts.UploadMs
+			view.ServerWaitMs = facts.ServerWaitMs
+		}
 	}
+	return view
 }
 
 var (

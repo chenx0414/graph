@@ -31,14 +31,14 @@ type TaskRow struct {
 }
 
 type TaskStore struct {
-	DB        *sql.DB
-	Db        *sql.DB
-	Path      string
-	mu        sync.Mutex
-	listeners []func(string)
-	waiters   []chan struct{}
-	txDepth   int
-	txMu sync.Mutex
+	DB                *sql.DB
+	Db                *sql.DB
+	Path              string
+	mu                sync.Mutex
+	listeners         []func(string)
+	waiters           []chan struct{}
+	txDepth           int
+	txMu              sync.Mutex
 	agentExecutions   *executionSlotPool
 	programExecutions *executionSlotPool
 }
@@ -48,6 +48,7 @@ func NewTaskStore(db *sql.DB, path string) *TaskStore {
 		panic(err)
 	}
 	MigrateTaskSchema(db)
+	kernelExec(db, taskInvocationTotalsDDL)
 	store := &TaskStore{DB: db, Db: db, Path: path}
 	store.agentExecutions = newExecutionSlotPool(DefaultAgentExecutions)
 	store.programExecutions = newExecutionSlotPool(DefaultProgramExecutions)
