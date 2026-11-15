@@ -136,3 +136,26 @@ func TestTheModelChipOpensThePicker(t *testing.T) {
 		t.Fatalf("the chip opens the picker, texts %q", tester.Texts())
 	}
 }
+
+func TestCommandNumberSelectsTheModelTheChipAdvertises(t *testing.T) {
+	state, mock := pickerChat(t)
+	state.modelPicker.open = false
+	tester := frames(ui.NewTester(state.view, 900, 700))
+	if err := tester.Click("模型"); err != nil {
+		t.Fatalf("open the picker: %v", err)
+	}
+	frames(tester)
+	tester.Key(ui.Cmd, ui.Key2)
+	tester = frames(tester)
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.selected) == 0 {
+		t.Fatalf("⌘2 posts the second visible model, got %v (%q)", mock.selected, state.status)
+	}
+	if !strings.Contains(mock.selected[0], "opencode-go:deepseek-v4.1-flash") {
+		t.Fatalf("⌘2 picks the second visible model, got %s", mock.selected[0])
+	}
+	if state.modelPicker.open {
+		t.Fatal("picking by shortcut closes the picker")
+	}
+}

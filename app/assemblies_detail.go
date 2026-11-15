@@ -117,7 +117,19 @@ func (s *assemblyState) resourcesHead(ctx *ui.Context, t gwtheme.Tokens, row ass
 	ui.Row(ctx).FillWidth().Gap(th.Space(2)).AlignItems(ui.Center).Children(func() {
 		kit.Text(ctx, "资源", t.Text.Sm).FontWeight(600).TextColor(t.Foreground)
 		kit.Text(ctx, "装配引用的资源与解析结果", t.Text.Xs).TextColor(t.Muted).Grow(1)
+		label := "添加资源"
+		if s.resourcePickerOpen {
+			label = "收起资源库"
+		}
+		if kit.Button(ctx, label, kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
+			s.resourcePickerOpen = !s.resourcePickerOpen
+			s.resourceQuery = ""
+			s.frame()
+		}
 	})
+	if s.resourcePickerOpen {
+		s.resourcePicker(ctx, t, row)
+	}
 	card := ui.Column(ctx).FillWidth().Radius(t.Radius.Md).Border(gwtheme.Hairline, t.Border).Background(t.Card)
 	card.Children(func() {
 		for index, member := range row.resources {
@@ -158,6 +170,9 @@ func (s *assemblyState) resourceLine(ctx *ui.Context, t gwtheme.Tokens, row asse
 			kit.Text(ctx, "已解析", t.Text.Xs).TextColor(t.SuccessText).SingleLine()
 		} else {
 			kit.Text(ctx, "缺少", t.Text.Xs).TextColor(t.WarningText).SingleLine()
+		}
+		if kit.IconButton(ctx, iconClose, "移除 "+member.ResourceID, kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeXs}).Clicked() {
+			s.removeResource(row, member.ResourceID)
 		}
 	})
 }

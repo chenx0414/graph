@@ -21,6 +21,10 @@ var assemblyFixtures = map[string]string{
 			]},
 			{"id":"main","name":"Atlas_main","description":"持续面对用户、规划任务。","mode":"main","review":false,"tags":["main"],"resources":[],"status":"valid","issues":[],"resolved":[]}
 		],
+		"capabilities":[
+			{"id":"skill-helper","kind":"skill","version":"abc123","name":"helper","status":"available"},
+			{"id":"prompt-helper","kind":"prompt","version":"def456","name":"helper-prompt","status":"available"}
+		],
 		"agentCombinationFile":"/Users/macmini/.graph/agent-combinations.json",
 		"agentCombinationError":null
 	}`,
@@ -278,4 +282,83 @@ func TestTheDescriptionIsReadOnlyUntilItIsEdited(t *testing.T) {
 	}
 	state.editingDescription = false
 	state.frame()
+}
+
+func TestAddingAResourceSavesTheWholeRecipe(t *testing.T) {
+	actions := map[string]int{}
+	bodies := []string{}
+	server := assemblyServer(t, actions, &bodies)
+	defer server.Close()
+
+	state := newAssemblyState(server.URL, "tok")
+	state.load()
+	state.selectAssembly("coder")
+	tester := assemblyTester(state)
+	if err := tester.Click("添加资源"); err != nil {
+		t.Fatalf("open the resource picker: %v", err)
+	}
+	tester = frames(tester)
+	if err := tester.Click("添加 skill-helper"); err != nil {
+		t.Fatalf("pick a capability: %v", err)
+	}
+	for frame := 0; frame < 50 && actions["POST /api/catalog/combinations"] == 0; frame++ {
+		tester.Frame()
+	}
+	if actions["POST /api/catalog/combinations"] != 1 {
+		t.Fatalf("adding a resource saves the recipe, actions %v (%q)", actions, state.status)
+	}
+	body := bodies[0]
+	for _, want := range []string{`"id":"coder"`, `"name":"Bob_coder"`, `"resourceId":"gan"`, `"resourceId":"skill-helper"`, `"role":"skill"`, `"version":"abc123"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("the saved recipe carries %s, body %s", want, body)
+		}
+	}
+}
+
+func TestRemovingAResourceSavesTheWholeRecipeWithoutIt(t *testing.T) {
+	actions := map[string]int{}
+	bodies := []string{}
+	server := assemblyServer(t, actions, &bodies)
+	defer server.Close()
+
+	state := newAssemblyState(server.URL, "tok")
+	state.load()
+	state.selectAssembly("coder")
+	tester := assemblyTester(state)
+	if err := tester.Click("移除 gan"); err != nil {
+		t.Fatalf("remove a resource: %v", err)
+	}
+	for frame := 0; frame < 50 && actions["POST /api/catalog/combinations"] == 0; frame++ {
+		tester.Frame()
+	}
+	if actions["POST /api/catalog/combinations"] != 1 {
+		t.Fatalf("removing a resource saves the recipe, actions %v (%q)", actions, state.status)
+	}
+	body := bodies[0]
+	if strings.Contains(body, `"resourceId":"gan"`) {
+		t.Fatalf("the saved recipe drops the removed resource, body %s", body)
+	}
+	if !strings.Contains(body, `"resourceId":"missing-skill"`) {
+		t.Fatalf("the saved recipe keeps the rest, body %s", body)
+	}
+}
+
+func TestTheResourcePickerHidesASecondIdentityPrompt(t *testing.T) {
+	server := assemblyServer(t, nil, nil)
+	defer server.Close()
+
+	state := newAssemblyState(server.URL, "tok")
+	state.load()
+	state.selectAssembly("coder")
+	tester := assemblyTester(state)
+	if err := tester.Click("添加资源"); err != nil {
+		t.Fatalf("open the resource picker: %v", err)
+	}
+	tester = frames(tester)
+	if tester.HasText("添加 prompt-helper") {
+		t.Fatalf("the picker hides another identity prompt, texts %q", tester.Texts())
+	}
+	if !tester.HasText("添加 skill-helper") {
+		t.Fatalf("the picker keeps a skill, texts %q", tester.Texts())
+	}
 }

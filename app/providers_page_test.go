@@ -206,3 +206,39 @@ func TestTheProvidersPageDoesNotOfferFakeWriteActions(t *testing.T) {
 		t.Fatalf("the page says who owns them, texts %q", tester.Texts())
 	}
 }
+
+func TestTheProvidersPageRefreshesWhenMagpieChanges(t *testing.T) {
+	refreshed := false
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/providers/magpie" {
+			http.NotFound(w, r)
+			return
+		}
+		calls++
+		if !refreshed {
+			_, _ = w.Write([]byte(magpieProvidersFixture))
+			return
+		}
+		_, _ = w.Write([]byte(`{"available":true,"dir":"/Users/macmini/.config/magpie","gateway":"127.0.0.1:3425","models":{"codex":3,"deepseek":2,"grok":8},"providers":[
+		 {"id":"codex","label":"ChatGPT","badge":"套餐","keys":0,"configured":true,"accounts":[],"quotas":[]},
+		 {"id":"deepseek","label":"DeepSeek","badge":"按量付费","keys":2,"configured":true,"accounts":[],"quotas":[]},
+		 {"id":"gemini","label":"Google Gemini","badge":"套餐","keys":0,"configured":false,"accounts":[],"quotas":[]},
+		 {"id":"grok","label":"Grok","badge":"套餐","keys":0,"configured":true,"accounts":[],"quotas":[]}
+		]}`))
+	}))
+	defer server.Close()
+
+	shell := newShellState(server.URL, "")
+	shell.openModule("providers")
+	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) == 3 })
+	refreshed = true
+	if err := tester.Click("刷新供应商"); err != nil {
+		t.Fatalf("refresh providers: %v", err)
+	}
+	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) == 4 })
+	if calls < 2 || len(shell.providers.entries) != 4 {
+		t.Fatalf("the refresh reads magpie again, calls %d entries %d (%q)", calls, len(shell.providers.entries), shell.providers.failed)
+	}
+}

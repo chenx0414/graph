@@ -35,6 +35,9 @@ func layoutElk(graph map[string]any) map[string]any {
 		panic(err)
 	}
 	elkPath := filepath.Join(ApplicationRoot, "node_modules", "elkjs", "lib", "elk.bundled.js")
+	if _, err := os.Stat(elkPath); err != nil {
+		return layoutFallback(graph)
+	}
 	script := `import { createRequire } from 'node:module';
 const require = createRequire(process.cwd() + '/package.json');
 const ELK = require(process.env.GRAPH_ELK);

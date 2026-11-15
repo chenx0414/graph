@@ -430,6 +430,7 @@ func (c *chatState) modelChip(ctx *ui.Context) {
 	}
 	chip.OnClick(func() {
 		c.modelPicker.open = !c.modelPicker.open
+		c.modelPicker.focus = c.modelPicker.open
 		c.frame()
 	})
 	chip.Children(func() {

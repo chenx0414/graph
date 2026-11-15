@@ -16,6 +16,16 @@ type errStatus string
 
 func (e errStatus) Error() string { return "服务端拒绝：" + string(e) }
 
+func rejectionMessage(payload []byte) string {
+	var body struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(payload, &body) != nil {
+		return ""
+	}
+	return strings.TrimSpace(body.Message)
+}
+
 type apiClient struct {
 	address string
 	token   string
@@ -71,7 +81,11 @@ func (c apiClient) post(path string, body any) ([]byte, error) {
 		return payload, err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return payload, errStatus(response.Status)
+		detail := response.Status
+		if message := rejectionMessage(payload); message != "" {
+			detail += " · " + message
+		}
+		return payload, errStatus(detail)
 	}
 	return payload, nil
 }

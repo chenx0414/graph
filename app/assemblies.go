@@ -74,6 +74,9 @@ func parseAssemblies(payload []byte) ([]assemblyRow, string, string, error) {
 
 type assemblyState struct {
 	api                apiClient
+	capabilities       []assemblyCapability
+	resourcePickerOpen bool
+	resourceQuery      string
 	status             string
 	file               string
 	fileError          string
@@ -131,6 +134,7 @@ func (s *assemblyState) load() {
 		return
 	}
 	s.rows = rows
+	s.capabilities = parseAssemblyCapabilities(payload)
 	s.file = file
 	s.fileError = fileError
 	s.status = ""
@@ -153,6 +157,8 @@ func (s *assemblyState) selectAssembly(id string) {
 	s.draftDescription = ""
 	s.deleteArmed = ""
 	s.editorOpen = false
+	s.resourcePickerOpen = false
+	s.resourceQuery = ""
 	if row := s.assembly(id); row != nil {
 		s.draftDescription = row.description
 	}

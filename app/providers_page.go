@@ -201,6 +201,7 @@ func (s *shellState) providerRow(ctx *ui.Context, entry providerEntry, pal magpi
 		active.modelPicker.open = true
 		active.modelPicker.active = 0
 		active.modelPicker.showAll = false
+		active.modelPicker.focus = true
 		s.frame()
 	})
 	row.Children(func() {
@@ -261,6 +262,9 @@ func (s *shellState) panelProviders(ctx *ui.Context) {
 			kit.Text(ctx, "供应商", 12).TextColor(pal.Foreground2).SingleLine()
 			ui.Spacer(ctx)
 			s.providerSearch(ctx, pal)
+			if kit.IconButton(ctx, iconRefresh, "刷新供应商", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
+				s.refreshProviders()
+			}
 		})
 		sources := "数据源 · Magpie"
 		if dir := strings.TrimSpace(s.providers.source.Dir); dir != "" {

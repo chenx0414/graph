@@ -94,3 +94,16 @@ func TestAPIClientReportsThePathOfAFailedGet(t *testing.T) {
 		t.Fatalf("err %v", err)
 	}
 }
+
+func TestAPIClientReportsTheServerRejectionReason(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"code":"invalid_agent_combination","message":"Agent combination coder has more than one identity prompt"}`))
+	}))
+	defer server.Close()
+
+	_, err := newAPIClient(server.URL, "tok").post("/api/catalog/combinations", map[string]string{})
+	if err == nil || !strings.Contains(err.Error(), "more than one identity prompt") {
+		t.Fatalf("a rejected post keeps the server reason, err %v", err)
+	}
+}

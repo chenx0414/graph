@@ -15,7 +15,10 @@ type modelPickerState struct {
 	active   int
 	provider string
 	showAll  bool
+	focus    bool
 }
+
+var pickerShortcutKeys = []ui.Key{ui.Key1, ui.Key2, ui.Key3, ui.Key4}
 
 func reasoningLabel(level string) string {
 	if level == "" {
@@ -102,14 +105,7 @@ func (c *chatState) pickerRow(ctx *ui.Context, model modelChoice, index int, t g
 	if active {
 		row.Background(t.Hover)
 	}
-	row.OnClick(func() {
-		level := model.thinking
-		if model.id == c.currentModel && c.currentThinking != "" {
-			level = c.currentThinking
-		}
-		c.modelPicker.open = false
-		go c.selectModel(model, level)
-	})
+	row.OnClick(func() { c.chooseModel(model) })
 	row.Children(func() {
 		tint := providerTint(modelProviderID(model.id))
 		tile := ui.Box(ctx).Size(16, 16).Radius(t.Radius.Xs).Background(tint.Alpha(0.16)).Center()
@@ -163,12 +159,32 @@ func (c *chatState) pickerReasoning(ctx *ui.Context, t gwtheme.Tokens) {
 	})
 }
 
+func (c *chatState) chooseModel(model modelChoice) {
+	level := model.thinking
+	if model.id == c.currentModel && c.currentThinking != "" {
+		level = c.currentThinking
+	}
+	c.modelPicker.open = false
+	go c.selectModel(model, level)
+}
+
 func (c *chatState) modelPickerView(ctx *ui.Context) {
 	t := gwtheme.Of(ctx)
 	c.loadModels()
 	panel := ui.Row(ctx).Width(530).Height(346).Radius(t.Radius.Xl).Border(gwtheme.Hairline, t.Border).
 		Background(t.Card).Clip().Label("模型选择器")
 	kit.Elevate(ctx, panel, composerShadow)
+	for index, key := range pickerShortcutKeys {
+		models := c.pickerModels()
+		if index >= len(models) {
+			break
+		}
+		model := models[index]
+		panel.OnShortcut(ui.Cmd, key, func() {
+			c.chooseModel(model)
+			c.frame()
+		})
+	}
 	panel.Children(func() {
 		rail := ui.Column(ctx).Width(44).FillHeight().PaddingY(8).Gap(6).AlignItems(ui.Center).Background(t.Raised)
 		rail.Children(func() {
@@ -210,6 +226,10 @@ func (c *chatState) modelPickerView(ctx *ui.Context) {
 			search.Children(func() {
 				field := kit.Input(ctx, &c.modelPicker.query, kit.InputOpts{Bare: true, Placeholder: "Search models..."})
 				field.FillWidth()
+				if c.modelPicker.focus {
+					field.Focus()
+					c.modelPicker.focus = false
+				}
 				field.OnTextKey(func(k ui.TextKey) bool {
 					switch k.Key {
 					case ui.KeyEscape:
