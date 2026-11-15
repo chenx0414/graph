@@ -158,6 +158,8 @@ func boardPanelTitle(kind string) string {
 		return "供应商"
 	case "capabilities":
 		return "资源库"
+	case "assemblies":
+		return "能力装配"
 	case "settings":
 		return "运行设置"
 	case "artifacts":
@@ -653,6 +655,8 @@ func (s *shellState) ensureBoardPageData() {
 		s.ensureUsage()
 	case "capabilities":
 		s.ensureResources()
+	case "assemblies":
+		s.ensureAssemblies()
 	case "settings":
 		s.ensureSettings()
 	case "models":

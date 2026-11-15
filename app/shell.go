@@ -20,6 +20,7 @@ type shellState struct {
 	settings         *settingsState
 	usage            *usageState
 	resources        *resourceState
+	assemblies       *assemblyState
 	trajectory       trajectoryState
 	insights         insightsState
 	fleet            fleetState
@@ -158,6 +159,14 @@ func (s *shellState) ensureUsage() {
 		s.usage = newUsageState(s.api.address, s.api.token)
 		s.usage.window = s.window
 		go s.usage.load()
+	}
+}
+
+func (s *shellState) ensureAssemblies() {
+	if s.assemblies == nil {
+		s.assemblies = newAssemblyState(s.api.address, s.api.token)
+		s.assemblies.window = s.window
+		go s.assemblies.load()
 	}
 }
 

@@ -274,7 +274,7 @@ func TestTheFunctionRailStaysCompactAndCentered(t *testing.T) {
 		t.Fatalf("the rail must stay compact, width %.1f", railWidth)
 	}
 	center := float32(trafficLightPosition().X) + 6.5
-	for _, label := range []string{"轨迹", "洞察", "编队", "供应商", "资源", "设置"} {
+	for _, label := range []string{"轨迹", "洞察", "编队", "供应商", "资源", "装配", "设置"} {
 		rect, ok := tester.Find(label)
 		if !ok {
 			t.Fatalf("the rail lost %q, texts %q", label, tester.Texts())
@@ -289,7 +289,7 @@ func TestTheFunctionRailSpacesItsIconsApart(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 	previousBottom := float32(-1)
-	for _, label := range []string{"轨迹", "洞察", "编队", "供应商", "资源", "设置"} {
+	for _, label := range []string{"轨迹", "洞察", "编队", "供应商", "资源", "装配", "设置"} {
 		rect, ok := tester.Find(label)
 		if !ok {
 			t.Fatalf("the rail lost %q, texts %q", label, tester.Texts())

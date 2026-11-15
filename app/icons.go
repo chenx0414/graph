@@ -42,5 +42,7 @@ var (
 	iconSpark     = svgIcon(`<path d="M12 3.5l1.7 4.9 4.8 1.6-4.8 1.7L12 16.5l-1.7-4.8-4.8-1.7 4.8-1.6Z" fill="currentColor" stroke="none"/><path d="M18.5 14.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8Z" fill="currentColor" stroke="none"/>`)
 	iconFolder    = svgIcon(`<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>`)
 	iconCopy      = svgIcon(`<path d="M9 9h11v11H9Z"/><path d="M5 15H4V4h11v1"/>`)
+	iconLayers    = svgIcon(`<path d="m12 3 8.5 4.5L12 12 3.5 7.5Z"/><path d="m3.5 12 8.5 4.5 8.5-4.5"/><path d="m3.5 16.5 8.5 4.5 8.5-4.5"/>`)
+	iconAlert     = svgIcon(`<path d="M12 3.4 21 20H3Z"/><path d="M12 9.5v5"/><path d="M12 17.2h.01"/>`)
 	iconArchive   = svgIcon(`<path d="M4 7h16v13H4Z"/><path d="M2 3h20v4H2Z"/><path d="M10 12h4"/>`)
 )

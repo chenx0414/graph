@@ -67,6 +67,8 @@ func (s *shellState) boardPanelBody(ctx *ui.Context, panel *boardPanel) {
 		s.panelProviders(ctx)
 	case "capabilities":
 		s.panelCapabilities(ctx)
+	case "assemblies":
+		s.panelAssemblies(ctx)
 	case "settings":
 		s.panelSettings(ctx)
 	case "fleet-kpi":
@@ -322,6 +324,15 @@ func (s *shellState) panelCapabilities(ctx *ui.Context) {
 		return
 	}
 	s.resources.view(ctx)
+}
+
+func (s *shellState) panelAssemblies(ctx *ui.Context) {
+	if s.assemblies == nil {
+		s.ensureAssemblies()
+		s.boardNote(ctx, "正在读取能力装配…")
+		return
+	}
+	s.assemblies.view(ctx)
 }
 
 func (s *shellState) panelSettings(ctx *ui.Context) {
