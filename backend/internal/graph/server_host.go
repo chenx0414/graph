@@ -98,7 +98,7 @@ func graphDriveDelay(dispatched int) time.Duration {
 	if dispatched > 0 {
 		return 20 * time.Millisecond
 	}
-	return 200 * time.Millisecond
+	return 500 * time.Millisecond
 }
 
 func OpenGraphServer(options GraphServerOptions) *GraphHost {
