@@ -50,27 +50,27 @@ type AppOptions struct {
 }
 
 type GraphServerOptions struct {
-	StateDir      string
-	Projects      []ProjectConfig
-	Port          *int
-	AutoDrive     *bool
-	Origin        string
-	Startup       *StartupInfo
-	StartupInfo   func() StartupInfo
-	ConfigStore   *ConfigStore
-	ConfigEnv     map[string]*string
-	ConfigTest    func(modelId string) any
-	AppServices   *AppServices
-	Usage         UsageService
-	SystemContext *TaskRuntimeSystemContext
-	AgentContext  *AgentContextLibrary
-	Models        *TaskRuntimeModels
-	Master        *TaskRuntimeMaster
-	Limits        *TaskRuntimeLimits
-	Live          *TaskRuntimeLive
-	Rsi           *RsiService
-	Catalog       *TaskRuntimeCatalog
-	Codemode GraphCodemode
+	StateDir             string
+	Projects             []ProjectConfig
+	Port                 *int
+	AutoDrive            *bool
+	Origin               string
+	Startup              *StartupInfo
+	StartupInfo          func() StartupInfo
+	ConfigStore          *ConfigStore
+	ConfigEnv            map[string]*string
+	ConfigTest           func(modelId string) any
+	AppServices          *AppServices
+	Usage                UsageService
+	SystemContext        *TaskRuntimeSystemContext
+	AgentContext         *AgentContextLibrary
+	Models               *TaskRuntimeModels
+	Master               *TaskRuntimeMaster
+	Limits               *TaskRuntimeLimits
+	Live                 *TaskRuntimeLive
+	Rsi                  *RsiService
+	Catalog              *TaskRuntimeCatalog
+	Codemode             GraphCodemode
 	OnCredentialRejected func(request CredentialRecoveryRequest) bool
 }
 
@@ -82,15 +82,22 @@ type GraphHost struct {
 	Runtime *TaskRuntime
 	Url     string
 
-	mu       sync.Mutex
-	driving  bool
-	stopped  bool
-	closed   bool
-	loopDone chan struct{}
-	app      *GraphApp
-	pump     func()
-	lastProblemSweep int64
+	mu                 sync.Mutex
+	driving            bool
+	stopped            bool
+	closed             bool
+	loopDone           chan struct{}
+	app                *GraphApp
+	pump               func() ExecutionDispatch
+	lastProblemSweep   int64
 	lastUnsettledSweep int64
+}
+
+func graphDriveDelay(dispatched int) time.Duration {
+	if dispatched > 0 {
+		return 20 * time.Millisecond
+	}
+	return 200 * time.Millisecond
 }
 
 func OpenGraphServer(options GraphServerOptions) *GraphHost {
@@ -137,7 +144,7 @@ func OpenGraphServer(options GraphServerOptions) *GraphHost {
 	}
 	host := &GraphHost{
 		Runtime: runtime, Url: url, driving: autoDrive, loopDone: make(chan struct{}),
-		app: app, pump: func() { runtime.Host.Pump() },
+		app: app, pump: func() ExecutionDispatch { return runtime.Host.Pump() },
 	}
 	go host.drive()
 	return host
@@ -175,17 +182,14 @@ func (h *GraphHost) drive() {
 				h.Runtime.AbandonClosedUnsettledOperations(now)
 			}()
 		}
+		dispatched := 0
 		if driving {
 			func() {
 				defer func() { _ = recover() }()
-				h.pump()
+				dispatched = h.pump().Dispatched
 			}()
 		}
-		delay := 200 * time.Millisecond
-		if driving {
-			delay = 40 * time.Millisecond
-		}
-		time.Sleep(delay)
+		time.Sleep(graphDriveDelay(dispatched))
 	}
 }
 

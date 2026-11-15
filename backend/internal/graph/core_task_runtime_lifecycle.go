@@ -4,11 +4,11 @@ import (
 	"os"
 )
 
-func (runtime *TaskRuntime) pump() {
+func (runtime *TaskRuntime) pump() ExecutionDispatch {
 	if runtime.execution == nil {
-		return
+		return ExecutionDispatch{}
 	}
-	runtime.execution.Pump()
+	return runtime.execution.Pump()
 }
 
 func (runtime *TaskRuntime) ensureOpen() {
@@ -73,7 +73,7 @@ func (runtime *TaskRuntime) taskRuntimeInvocations(taskId string) []map[string]a
 			"model":       model,
 			"usage":       call.Usage,
 			"usageSource": "unknown",
-			"cost": map[string]any{"unknown": true},
+			"cost":        map[string]any{"unknown": true},
 		})
 	}
 	return out

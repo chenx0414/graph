@@ -13,12 +13,12 @@ type TaskRuntimeModels struct {
 }
 
 type TaskRuntimeLive struct {
-	Revision            func() int
-	Config              func() GraphConfig
-	Entries             func() []ConfiguredModel
-	CredentialFor       func(ConfiguredModel) *ResolvedCredential
-	MasterModel         func() string
-	Projects            func() []ProjectConfig
+	Revision      func() int
+	Config        func() GraphConfig
+	Entries       func() []ConfiguredModel
+	CredentialFor func(ConfiguredModel) *ResolvedCredential
+	MasterModel   func() string
+	Projects      func() []ProjectConfig
 }
 
 type TaskRuntimeMaster struct {
@@ -50,11 +50,11 @@ type TaskRuntimeHost struct {
 	runtime *TaskRuntime
 }
 
-func (h *TaskRuntimeHost) Pump() {
+func (h *TaskRuntimeHost) Pump() ExecutionDispatch {
 	if h == nil || h.runtime == nil {
-		return
+		return ExecutionDispatch{}
 	}
-	h.runtime.pump()
+	return h.runtime.pump()
 }
 
 func (h *TaskRuntimeHost) AckRsiRestart(id string) any {
@@ -114,29 +114,29 @@ func (h *TaskRuntimeHost) RecoverMasters() int {
 }
 
 type TaskRuntime struct {
-	options    GraphServerOptions
-	mu         sync.Mutex
-	store      *TaskStore
-	kernel     *KernelStore
-	catalog    *Catalog
-	git        *GitIntegration
-	artifacts  *ArtifactWorkspace
-	execution  *Execution
-	scheduler  *ModelScheduler
-	closed     bool
-	stateDir   string
-	projects   []ProjectConfig
-	live       *TaskRuntimeLive
-	models     *TaskRuntimeModels
-	master     *TaskRuntimeMaster
-	catalogOpt *TaskRuntimeCatalog
-	limits     *TaskRuntimeLimits
-	agentCtx   *AgentContextLibrary
-	systemCtx  *TaskRuntimeSystemContext
-	rsi        *RsiService
-	autoWake   bool
-	taskSetups *TaskSetupLedger
-	Host       *TaskRuntimeHost
+	options         GraphServerOptions
+	mu              sync.Mutex
+	store           *TaskStore
+	kernel          *KernelStore
+	catalog         *Catalog
+	git             *GitIntegration
+	artifacts       *ArtifactWorkspace
+	execution       *Execution
+	scheduler       *ModelScheduler
+	closed          bool
+	stateDir        string
+	projects        []ProjectConfig
+	live            *TaskRuntimeLive
+	models          *TaskRuntimeModels
+	master          *TaskRuntimeMaster
+	catalogOpt      *TaskRuntimeCatalog
+	limits          *TaskRuntimeLimits
+	agentCtx        *AgentContextLibrary
+	systemCtx       *TaskRuntimeSystemContext
+	rsi             *RsiService
+	autoWake        bool
+	taskSetups      *TaskSetupLedger
+	Host            *TaskRuntimeHost
 	graphLane       *GraphLane
 	laneTokenBudget *TokenBudget
 }
