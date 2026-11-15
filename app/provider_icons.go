@@ -21,9 +21,9 @@ var (
 
 func providerBrandIcon(id string) *ui.SVG {
 	switch {
-	case id == "openai" || id == "chatgpt":
+	case id == "openai" || id == "chatgpt" || id == "codex":
 		return iconBrandOpenAI
-	case id == "anthropic":
+	case id == "anthropic" || id == "claude":
 		return iconBrandAnthropic
 	case id == "deepseek":
 		return iconBrandDeepSeek
@@ -35,7 +35,7 @@ func providerBrandIcon(id string) *ui.SVG {
 		return iconBrandOpenCode
 	case id == "openrouter":
 		return iconBrandOpenRouter
-	case id == "command-goat":
+	case id == "command-goat" || id == "commandcode-plan":
 		return iconBrandCommandCode
 	}
 	return nil

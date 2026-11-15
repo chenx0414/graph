@@ -11,14 +11,14 @@ import (
 )
 
 const providersResolutionFixture = `{
- "platforms":[
-  {"id":"opencode-go","label":"OpenCode Go","api":"openai-completions","baseUrl":"https://opencode.ai/zen/go/v1","credentialKind":"subscription","credentialConfigured":true},
-  {"id":"deepseek","label":"DeepSeek","api":"openai-completions","baseUrl":"https://api.deepseek.com/v1","credentialKind":"apiKey","credentialConfigured":true}
- ],
- "credentials":{
-  "opencode-go":{"secretRef":"GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY","resolved":true,"displayName":"opencode-go-小宝宝"},
-  "deepseek":{"secretRef":"GRAPH_DEEPSEEK_KEY","resolved":false,"displayName":"deepseek-小宝宝"}
- }
+ "available":true,
+ "dir":"/Users/macmini/.config/magpie",
+ "gateway":"127.0.0.1:3425",
+ "models":{"opencode-go":2,"deepseek":1},
+ "providers":[
+  {"id":"opencode-go","label":"OpenCode Go","badge":"按量付费","chat":"https://opencode.ai/inference/go/openai/v1","host":"opencode.ai","keys":1,"configured":true,"accounts":[],"quotas":[]},
+  {"id":"deepseek","label":"DeepSeek","badge":"按量付费","chat":"https://api.deepseek.com/v1","host":"api.deepseek.com","keys":0,"configured":false,"accounts":[],"quotas":[]}
+ ]
 }`
 
 func providersFrameUntil(t *testing.T, tester *ui.Tester, done func() bool) {
@@ -30,13 +30,11 @@ func providersFrameUntil(t *testing.T, tester *ui.Tester, done func() bool) {
 	tester.Frame()
 }
 
-func TestTheProvidersPageSaysCredentialMissingWhenTheSecretIsGone(t *testing.T) {
+func TestTheProvidersPageReadsConfiguredStateFromMagpie(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/providers":
+		case "/api/providers/magpie":
 			_, _ = w.Write([]byte(providersResolutionFixture))
-		case "/api/settings":
-			_, _ = w.Write([]byte(`{"models":[]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -49,12 +47,12 @@ func TestTheProvidersPageSaysCredentialMissingWhenTheSecretIsGone(t *testing.T) 
 	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) == 2 })
 
 	if !tester.HasText("已连接") {
-		t.Fatalf("a resolved credential is connected, texts %q", tester.Texts())
+		t.Fatalf("a provider with a key is connected, texts %q", tester.Texts())
 	}
-	if !tester.HasText("凭据缺失") {
-		t.Fatalf("a configured provider whose secret is gone is not connected, texts %q", tester.Texts())
+	if !tester.HasText("未配置") {
+		t.Fatalf("a provider with no key and no account is unconfigured, texts %q", tester.Texts())
 	}
-	if got := shell.providerStateOf("deepseek").Label(); got != "凭据缺失" {
+	if got := shell.providerStateOf("deepseek").Label(); got != "未配置" {
 		t.Fatalf("deepseek reads %q", got)
 	}
 	if got := shell.providerStateOf("opencode-go").Label(); got != "已连接" {
@@ -67,15 +65,13 @@ func TestTheProvidersPageKeepsAReadFailureUntilRetry(t *testing.T) {
 	var healthy atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/providers":
+		case "/api/providers/magpie":
 			atomic.AddInt32(&hits, 1)
 			if !healthy.Load() {
 				http.Error(w, "boom", http.StatusInternalServerError)
 				return
 			}
 			_, _ = w.Write([]byte(providersResolutionFixture))
-		case "/api/settings":
-			_, _ = w.Write([]byte(`{"models":[]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -113,11 +109,9 @@ func TestTheProvidersPageDoesNotCallALoadingListEmpty(t *testing.T) {
 	release := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/providers":
+		case "/api/providers/magpie":
 			<-release
 			_, _ = w.Write([]byte(providersResolutionFixture))
-		case "/api/settings":
-			_, _ = w.Write([]byte(`{"models":[]}`))
 		default:
 			http.NotFound(w, r)
 		}

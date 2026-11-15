@@ -26,6 +26,7 @@ func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/providers/login/{id}/cancel", app.serveProviderLoginCancel)
 	mux.HandleFunc("POST /api/providers/disconnect", app.serveProviderDisconnect)
 	mux.HandleFunc("GET "+PROVIDER_ROUTES.List, app.serveProviders)
+	mux.HandleFunc("GET /api/providers/magpie", app.serveMagpieProviders)
 	mux.HandleFunc("POST "+PROVIDER_ROUTES.Probe, app.serveProviderProbe)
 	mux.HandleFunc("POST /api/app/secret", app.serveAppSecret)
 	mux.HandleFunc("GET /api/app/secret-requests", app.serveAppSecretRequests)

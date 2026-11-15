@@ -1,10 +1,6 @@
 package main
 
 import (
-	"encoding/json"
-	"net/url"
-	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -18,25 +14,11 @@ type providerEntry struct {
 	Label    string
 	Badge    string
 	Subtitle string
-	API      string
 	Models   int
 	Facts    providerFacts
-}
-
-type providersPayload struct {
-	Platforms []struct {
-		ID                   string `json:"id"`
-		Label                string `json:"label"`
-		API                  string `json:"api"`
-		BaseURL              string `json:"baseUrl"`
-		CredentialKind       string `json:"credentialKind"`
-		CredentialConfigured bool   `json:"credentialConfigured"`
-		Custom               bool   `json:"custom"`
-	} `json:"platforms"`
-	Credentials map[string]struct {
-		DisplayName string `json:"displayName"`
-		Resolved    bool   `json:"resolved"`
-	} `json:"credentials"`
+	Accounts []magpieProviderAccount
+	Quota    string
+	Off      bool
 }
 
 type providersPageState struct {
@@ -47,7 +29,8 @@ type providersPageState struct {
 	search          string
 	packageAccounts bool
 	enabled         map[string]bool
-	protocols       map[string][]string
+	source          magpieProvidersPayload
+	notice          string
 }
 
 func (s *shellState) providerStateOf(id string) providerState {
@@ -66,68 +49,12 @@ func (s *shellState) providersPhase() providersPhase {
 
 func (s *shellState) providersEnabled(id string) bool {
 	if s.providers.enabled == nil {
-		return false
+		return true
 	}
-	return s.providers.enabled[id]
-}
-
-func providerBadge(kind string, custom bool) string {
-	switch {
-	case custom:
-		return "自建"
-	case kind == "subscription":
-		return "套餐"
+	if enabled, known := s.providers.enabled[id]; known {
+		return enabled
 	}
-	return "按量付费"
-}
-
-func providerProtocols(api string) []string {
-	switch api {
-	case "anthropic-messages":
-		return []string{"A"}
-	case "openai-responses":
-		return []string{"R"}
-	}
-	return []string{"O"}
-}
-
-func providerHost(baseURL string) string {
-	parsed, err := url.Parse(baseURL)
-	if err != nil || parsed.Hostname() == "" {
-		return baseURL
-	}
-	return parsed.Hostname()
-}
-
-func parseProvidersPayload(payload []byte, models []modelChoice) ([]providerEntry, map[string]bool, error) {
-	var shaped providersPayload
-	if err := json.Unmarshal(payload, &shaped); err != nil {
-		return nil, nil, err
-	}
-	counts := map[string]int{}
-	for _, model := range models {
-		counts[modelProviderID(model.id)]++
-	}
-	entries := make([]providerEntry, 0, len(shaped.Platforms))
-	enabled := map[string]bool{}
-	for _, platform := range shaped.Platforms {
-		if platform.ID == "" {
-			continue
-		}
-		subtitle := providerHost(platform.BaseURL) + " · " + strconv.Itoa(counts[platform.ID]) + " 个模型"
-		facts := providerFacts{Configured: platform.CredentialConfigured}
-		if credential, ok := shaped.Credentials[platform.ID]; ok {
-			resolved := credential.Resolved
-			facts.Resolved = &resolved
-		}
-		entries = append(entries, providerEntry{
-			ID: platform.ID, Label: platform.Label, Badge: providerBadge(platform.CredentialKind, platform.Custom),
-			Subtitle: subtitle, API: platform.API, Models: counts[platform.ID], Facts: facts,
-		})
-		enabled[platform.ID] = platform.CredentialConfigured
-	}
-	sort.SliceStable(entries, func(a, b int) bool { return entries[a].Label < entries[b].Label })
-	return entries, enabled, nil
+	return true
 }
 
 func modelProviderID(id string) string {
@@ -158,44 +85,30 @@ func (s *shellState) refreshProviders() {
 func (s *shellState) loadProviders() {
 	s.providers.loading = true
 	api := s.api
-	var models []modelChoice
-	if active := s.active(); active != nil {
-		models = active.modelChoices()
-	}
 	go func() {
-		if len(models) == 0 {
-			if settingsPayload, err := api.get("/api/settings"); err == nil {
-				var listed modelListPayload
-				if json.Unmarshal(settingsPayload, &listed) == nil {
-					for _, model := range listed.Models {
-						if model.ID != "" {
-							models = append(models, modelChoice{id: model.ID, thinking: model.DefaultThinkingLevel})
-						}
-					}
-				}
-			}
-		}
-		payload, err := api.get("/api/providers")
+		payload, err := api.get("/api/providers/magpie")
 		var entries []providerEntry
 		var enabled map[string]bool
+		var source magpieProvidersPayload
 		if err == nil {
-			entries, enabled, err = parseProvidersPayload(payload, models)
+			entries, enabled, source, err = parseMagpieProviders(payload)
+			if err == nil && !source.Available && source.Error != "" {
+				err = errStatus(source.Error)
+			}
 		}
 		onUI(s.window, func() {
 			s.providers.loading = false
 			s.providers.attempted = true
 			if err != nil {
 				s.providers.failed = err.Error()
+				s.providers.source = source
 				s.frame()
 				return
 			}
 			s.providers.failed = ""
 			s.providers.entries = entries
 			s.providers.enabled = enabled
-			s.providers.protocols = map[string][]string{}
-			for _, entry := range entries {
-				s.providers.protocols[entry.ID] = providerProtocols(entry.API)
-			}
+			s.providers.source = source
 			s.frame()
 		})
 	}()
@@ -221,29 +134,21 @@ func providerTint(id string) ui.Color {
 	return colors[sum%len(colors)]
 }
 
-func (s *shellState) providerToggle(ctx *ui.Context, entry providerEntry, pal magpiePalette) {
+func (s *shellState) providerSwitchState(ctx *ui.Context, entry providerEntry, pal magpiePalette) {
 	enabled := s.providersEnabled(entry.ID)
-	label := "停用 " + entry.Label
-	if !enabled {
-		label = "启用 " + entry.Label
-	}
-	track := ui.Box(ctx).Width(32).Height(19).Radius(10).Label(label).Focusable()
-	if enabled {
-		track.Background(pal.Mark)
-	} else {
-		track.Background(pal.Line)
-	}
-	track.OnClick(func() {
-		s.providers.enabled[entry.ID] = !enabled
-		s.frame()
-	})
-	track.Children(func() {
-		knob := ui.Box(ctx).Size(15, 15).Radius(10).Background(pal.Card)
+	label := "在 Magpie 里开关 " + entry.Label
+	pill := ui.Row(ctx).Height(19).PaddingX(7).Radius(10).Gap(6).AlignItems(ui.Center).Label(label)
+	pill.Background(pal.Line)
+	pill.Children(func() {
+		dot := pal.Faint
+		text := pal.Muted
+		state := "关"
 		if enabled {
-			knob.Translate(15, 2)
-		} else {
-			knob.Translate(2, 2)
+			dot, text = pal.Green, pal.Mark
+			state = "开"
 		}
+		ui.Box(ctx).Width(6).Height(6).Radius(10).Background(dot)
+		kit.Text(ctx, "Magpie "+state, 10).TextColor(text).SingleLine()
 	})
 }
 
@@ -311,14 +216,11 @@ func (s *shellState) providerRow(ctx *ui.Context, entry providerEntry, pal magpi
 			})
 			kit.Text(ctx, entry.Subtitle, 11.5).TextColor(pal.Muted).SingleLine().Ellipsis("…")
 		})
-		for _, protocol := range s.providers.protocols[entry.ID] {
-			chip := ui.Box(ctx).Size(26, 26).Radius(8).Background(pal.Pill).Border(gwtheme.Stroke, pal.Line2).Center()
-			chip.Children(func() {
-				kit.Text(ctx, protocol, 11).TextColor(pal.Muted).SingleLine()
-			})
+		if entry.Quota != "" {
+			kit.Text(ctx, entry.Quota, 11).TextColor(pal.Muted).SingleLine()
 		}
 		s.providerKeyPill(ctx, entry, pal)
-		s.providerToggle(ctx, entry, pal)
+		s.providerSwitchState(ctx, entry, pal)
 		ui.Icon(ctx, iconChevron).Size(11, 11).TextColor(pal.Faint)
 	})
 	if !last {
@@ -343,12 +245,7 @@ func (s *shellState) providerSearch(ctx *ui.Context, pal magpiePalette) {
 	field := ui.TextInputBase(ctx, &s.providers.search)
 	field.Width(220).Height(26).PaddingX(9).Radius(7).Border(gwtheme.Stroke, pal.Line).
 		Background(pal.Card).FontSize(12).Placeholder("查找供应商").Label("查找供应商").FocusRing(false)
-	chip := ui.Row(ctx).Height(26).PaddingX(9).Radius(7).Border(gwtheme.Stroke, pal.Line).
-		Background(pal.Card).Gap(6).AlignItems(ui.Center).Label("账号打包").Focusable()
-	chip.Children(func() {
-		ui.Icon(ctx, iconEye).Size(14, 14).TextColor(pal.Muted)
-		kit.Text(ctx, "账号打包", 12).TextColor(pal.Muted).SingleLine()
-	})
+	kit.Text(ctx, "在 Magpie 里添加账号", 11).TextColor(pal.Faint).SingleLine()
 }
 
 func (s *shellState) panelProviders(ctx *ui.Context) {
@@ -365,6 +262,14 @@ func (s *shellState) panelProviders(ctx *ui.Context) {
 			ui.Spacer(ctx)
 			s.providerSearch(ctx, pal)
 		})
+		sources := "数据源 · Magpie"
+		if dir := strings.TrimSpace(s.providers.source.Dir); dir != "" {
+			sources += " · " + dir
+		}
+		ui.Row(ctx).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+			kit.Text(ctx, sources, 11).TextColor(pal.Faint).Grow(1).SingleLine().Ellipsis("…")
+			kit.Text(ctx, "开关在 Magpie 里 · 改完点右上刷新", 11).TextColor(pal.Faint).SingleLine()
+		})
 		ui.Box(ctx).Height(10)
 		phase := s.providersPhase()
 		switch phase {
@@ -380,10 +285,7 @@ func (s *shellState) panelProviders(ctx *ui.Context) {
 				kit.Text(ctx, "读不到供应商："+s.providers.failed, 12).TextColor(pal.Amber)
 			}
 		}
-		add := ui.Row(ctx).Padding(8, 2).AlignItems(ui.Center)
-		add.Children(func() {
-			kit.Text(ctx, "＋ 添加供应商", 13).TextColor(pal.Muted).SingleLine()
-		})
+		kit.Text(ctx, "供应商与账号都由 Magpie 管理 · 这里只读", 11).TextColor(pal.Faint).Padding(8, 2)
 	})
 }
 
