@@ -67,7 +67,10 @@ func (s *shellState) agentPanelTask(ctx *ui.Context, scope chatScope) {
 		for _, task := range chat.tasks {
 			kit.Text(ctx, taskLabel(task), t.Text.Sm).TextColor(t.Foreground).SingleLine().Ellipsis("…")
 			for _, node := range task.nodes {
-				kit.Text(ctx, "  "+nodeLabel(node), t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
+				ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center).Children(func() {
+					kit.Text(ctx, nodeLabel(node), t.Text.Xs).TextColor(t.Muted).Grow(1).SingleLine().Ellipsis("…")
+					s.definitionLink(ctx, t, node.definition)
+				})
 			}
 		}
 	})

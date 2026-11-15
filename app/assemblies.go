@@ -82,6 +82,7 @@ type assemblyState struct {
 	compiledVersion    string
 	draftDescription   string
 	deleteArmed        string
+	pendingSelect      string
 	editingDescription bool
 	editorOpen         bool
 	editorID           string
@@ -134,6 +135,7 @@ func (s *assemblyState) load() {
 	s.fileError = fileError
 	s.status = ""
 	s.refreshSelection()
+	s.applyPendingSelect()
 	s.frame()
 }
 

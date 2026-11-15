@@ -192,7 +192,7 @@ func (s *shellState) scopeLine(ctx *ui.Context, fallback string) {
 }
 
 func (s *shellState) panelTasks(ctx *ui.Context) {
-	t := gwtheme.Of(ctx)
+	t, th := gwtheme.Of(ctx), ctx.Theme()
 	s.scopeLine(ctx, "全体 Agent · 安装级")
 	active := s.active()
 	if active == nil || len(active.tasks) == 0 {
@@ -206,7 +206,10 @@ func (s *shellState) panelTasks(ctx *ui.Context) {
 	for _, task := range active.tasks {
 		kit.Text(ctx, taskLabel(task), t.Text.Sm).TextColor(t.Foreground)
 		for _, node := range task.nodes {
-			kit.Text(ctx, "  "+nodeLabel(node), t.Text.Xs).TextColor(t.Muted)
+			ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center).Children(func() {
+				kit.Text(ctx, nodeLabel(node), t.Text.Xs).TextColor(t.Muted).Grow(1).SingleLine().Ellipsis("…")
+				s.definitionLink(ctx, t, node.definition)
+			})
 		}
 	}
 }

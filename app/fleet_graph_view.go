@@ -158,7 +158,10 @@ func (s *shellState) fleetTopologyCard(ctx *ui.Context, data *fleetTopologyData,
 		if model == "" {
 			model = "—"
 		}
-		kit.Text(ctx, shortModel(model), t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
+		ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center).Children(func() {
+			kit.Text(ctx, shortModel(model), t.Text.Xs).TextColor(t.Muted).Grow(1).SingleLine().Ellipsis("…")
+			s.definitionLink(ctx, t, node.BoundDefinition)
+		})
 		tokens := int64(0)
 		cost := 0.0
 		if agent != nil {
@@ -169,7 +172,7 @@ func (s *shellState) fleetTopologyCard(ctx *ui.Context, data *fleetTopologyData,
 			kit.Text(ctx, formatTrajectoryCost(cost), t.Text.Xs).TextColor(t.Muted)
 		})
 		s.fleetGraphUsageBar(ctx, share, second, accent)
-		ui.Row(ctx).FillWidth().AlignItems(ui.Center).Children(func() {
+		ui.Row(ctx).FillWidth().AlignItems(ui.Center).Gap(th.Space(1)).Children(func() {
 			meta := strconv.Itoa(steps) + " 步 · " + formatTrajectoryCompactDuration(duration)
 			if agent == nil {
 				meta = fleetStatusLabel(status)
