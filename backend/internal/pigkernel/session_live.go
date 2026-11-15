@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/MichaelKinsy/PiG/ai"
@@ -130,11 +131,12 @@ func (session *Session) watchLive(ctx context.Context) func() {
 	if session.OnEvent == nil {
 		return func() {}
 	}
+	walk := &liveWalk{session: session}
+	walk.seed(ctx)
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		previous := liveShape{}
 		for {
 			select {
 			case <-stop:
@@ -143,22 +145,7 @@ func (session *Session) watchLive(ctx context.Context) func() {
 				return
 			case <-time.After(livePollInterval):
 			}
-			next := previous
-			if state, err := durable.Snapshot(ctx, session.kernel.Harness(), harness.LiveDoc, session.conversation.Id()); err == nil {
-				next = liveShapeOf(state)
-			}
-			for _, report := range diffLive(previous, next) {
-				session.OnEvent(report)
-			}
-			for _, reason := range startedCompactions(previous, next) {
-				session.OnEvent(map[string]any{"type": "compaction_start", "reason": reason})
-			}
-			for _, reason := range finishedCompactions(previous, next) {
-				session.reportCompactionEnd(reason, "")
-			}
-			session.publishEntries(ctx, &previous)
-			next.lastEntry = previous.lastEntry
-			previous = next
+			walk.poll(ctx)
 		}
 	}()
 	return func() {
@@ -167,7 +154,67 @@ func (session *Session) watchLive(ctx context.Context) func() {
 		case <-done:
 		case <-time.After(2 * time.Second):
 		}
+		walk.poll(context.WithoutCancel(ctx))
 	}
+}
+
+type liveWalk struct {
+	session *Session
+	mutex   sync.Mutex
+	seeded  bool
+	seen    liveShape
+}
+
+func (walk *liveWalk) seed(ctx context.Context) bool {
+	walk.mutex.Lock()
+	defer walk.mutex.Unlock()
+	session := walk.session
+	if session.conversation == nil {
+		return false
+	}
+	page, err := session.conversation.Entries(ctx, durable.EntryQuery{}, 1, nil)
+	if err != nil {
+		return false
+	}
+	if len(page.Items) > 0 {
+		walk.seen.lastEntry = page.Items[0].Id
+	}
+	walk.seeded = true
+	return true
+}
+
+func (walk *liveWalk) poll(ctx context.Context) {
+	walk.mutex.Lock()
+	seeded := walk.seeded
+	walk.mutex.Unlock()
+	if !seeded && !walk.seed(ctx) {
+		return
+	}
+	walk.mutex.Lock()
+	defer walk.mutex.Unlock()
+	session := walk.session
+	if session.conversation == nil {
+		return
+	}
+	previous := walk.seen
+	next := previous
+	if session.kernel != nil {
+		if state, err := durable.Snapshot(ctx, session.kernel.Harness(), harness.LiveDoc, session.conversation.Id()); err == nil {
+			next = liveShapeOf(state)
+		}
+	}
+	for _, report := range diffLive(previous, next) {
+		session.OnEvent(report)
+	}
+	for _, reason := range startedCompactions(previous, next) {
+		session.OnEvent(map[string]any{"type": "compaction_start", "reason": reason})
+	}
+	for _, reason := range finishedCompactions(previous, next) {
+		session.reportCompactionEnd(reason, "")
+	}
+	session.publishEntries(ctx, &previous)
+	next.lastEntry = previous.lastEntry
+	walk.seen = next
 }
 
 func messageMap(message ai.Message) map[string]any {
@@ -230,10 +277,6 @@ func (session *Session) publishEntries(ctx context.Context, seen *liveShape) {
 	}
 	page, err := session.conversation.Entries(ctx, durable.EntryQuery{ConversationId: session.conversation.Id()}, 50, nil)
 	if err != nil {
-		return
-	}
-	if len(page.Items) > 0 && seen.lastEntry == 0 {
-		seen.lastEntry = page.Items[0].Id
 		return
 	}
 	fresh := []durable.EntryRecord{}
