@@ -1,6 +1,22 @@
 package graph
 
+func kernelRecoveryNeeded(kernel *KernelStore) bool {
+	for _, query := range []string{
+		"SELECT 1 FROM kernel_executions WHERE state='running' LIMIT 1",
+		"SELECT 1 FROM kernel_module_operations WHERE state='dispatched' OR worker_active=1 LIMIT 1",
+		"SELECT 1 FROM kernel_provider_calls WHERE state='inflight' LIMIT 1",
+	} {
+		if kernelRow(kernel.Db, query) != nil {
+			return true
+		}
+	}
+	return false
+}
+
 func RecoverKernelExecutions(kernel *KernelStore) []string {
+	if !kernelRecoveryNeeded(kernel) {
+		return []string{}
+	}
 	interrupted := []string{}
 	kernel.ModuleTransaction(func() any {
 		ReconcileOperationResources(kernel)

@@ -194,6 +194,7 @@ CREATE TABLE IF NOT EXISTS kernel_module_operations(
 CREATE TABLE IF NOT EXISTS kernel_provider_calls(
   id TEXT PRIMARY KEY, task_id TEXT NOT NULL, node_id TEXT NOT NULL, execution_id TEXT NOT NULL,
   reserved INTEGER NOT NULL, state TEXT NOT NULL, usage TEXT, created_at INTEGER NOT NULL, settled_at INTEGER);
+CREATE INDEX IF NOT EXISTS kernel_provider_calls_state ON kernel_provider_calls(state);
 CREATE TABLE IF NOT EXISTS kernel_prompts(
   seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, node_id TEXT NOT NULL,
   execution_id TEXT, system_prompt TEXT NOT NULL, tools TEXT NOT NULL, created_at INTEGER NOT NULL);
