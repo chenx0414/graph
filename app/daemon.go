@@ -85,7 +85,8 @@ func (d *daemon) startThroughLaunchAgent() error {
 		if _, err := installLaunchAgent(d.paths); err != nil {
 			return err
 		}
-		return launchAgentBoot(d.paths)
+		err := launchAgentStart(d.paths)
+		return err
 	}
 	if _, err := installStableDaemon(d.paths.DaemonBin, stableDaemonPath(d.paths)); err != nil {
 		return err

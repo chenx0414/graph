@@ -210,24 +210,29 @@ func launchAgentService() string {
 }
 
 func launchAgentPlan(paths Paths, reload bool) [][]string {
-	if reload {
-		return [][]string{
-			{"bootout", launchAgentService()},
-			{"bootstrap", launchAgentDomain(), paths.agentFile()},
-			{"kickstart", "-k", launchAgentService()},
-		}
+	return [][]string{
+		{"bootout", launchAgentService()},
+		{"bootstrap", launchAgentDomain(), paths.agentFile()},
 	}
-	return [][]string{{"kickstart", "-k", launchAgentService()}}
 }
 
 func runLaunchAgentPlan(plan [][]string) error {
 	var failure error
 	for _, args := range plan {
-		if err := exec.Command("launchctl", args...).Run(); err != nil && len(args) > 0 && args[0] != "bootout" {
+		if len(args) > 0 {
+		}
+		err := exec.Command("launchctl", args...).Run()
+		if len(args) > 0 {
+		}
+		if err != nil && len(args) > 0 && args[0] != "bootout" {
 			failure = err
 		}
 	}
 	return failure
+}
+
+func launchAgentStart(paths Paths) error {
+	return runLaunchAgentPlan(launchAgentPlan(paths, true))
 }
 
 func launchAgentBoot(paths Paths) error {

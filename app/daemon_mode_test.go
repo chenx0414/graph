@@ -174,24 +174,32 @@ func TestTheBundleLauncherRemovesTheLeftoverCopy(t *testing.T) {
 	paths.dropStableDaemon()
 }
 
-func TestLaunchAgentReloadsTheJobWhenItsDefinitionChanged(t *testing.T) {
+func TestLaunchAgentReloadsTheJobWithoutKickstartingItAgain(t *testing.T) {
 	paths := Paths{StateDir: "/state", GraphHome: "/home", SourceRoot: "/src", DaemonBin: "/Applications/Graph.app/Contents/MacOS/Graph"}
-	reload := launchAgentPlan(paths, true)
-	if len(reload) != 3 {
-		t.Fatalf("a changed job definition must be booted out and bootstrapped again, otherwise kickstart restarts the old definition and launchd reports EX_CONFIG 78: %v", reload)
+	for _, reload := range []bool{true, false} {
+		plan := launchAgentPlan(paths, reload)
+		if len(plan) != 2 {
+			t.Fatalf("the job only needs unloading and loading, got %v", plan)
+		}
+		if strings.Join(plan[0], " ") != "bootout "+launchAgentService() {
+			t.Fatalf("the first step unloads the old definition, got %v", plan[0])
+		}
+		if strings.Join(plan[1], " ") != "bootstrap "+launchAgentDomain()+" "+paths.agentFile() {
+			t.Fatalf("the second step loads the plist that is now on disk, got %v", plan[1])
+		}
 	}
-	if strings.Join(reload[0], " ") != "bootout "+launchAgentService() {
-		t.Fatalf("the first step must unload the old definition, got %v", reload[0])
+}
+
+func TestLaunchAgentStartUsesRunAtLoadInsteadOfKickstartingAgain(t *testing.T) {
+	paths := Paths{StateDir: "/state", GraphHome: "/home", SourceRoot: "/src", DaemonBin: "/Applications/Graph.app/Contents/MacOS/Graph"}
+	start := launchAgentPlan(paths, true)
+	if len(start) != 2 {
+		t.Fatalf("a cold start only needs bootout and bootstrap, got %v", start)
 	}
-	if strings.Join(reload[1], " ") != "bootstrap "+launchAgentDomain()+" "+paths.agentFile() {
-		t.Fatalf("the second step must load the plist that is now on disk, got %v", reload[1])
-	}
-	if strings.Join(reload[2], " ") != "kickstart -k "+launchAgentService() {
-		t.Fatalf("the last step must start the job, got %v", reload[2])
-	}
-	plain := launchAgentPlan(paths, false)
-	if len(plain) != 1 || strings.Join(plain[0], " ") != "kickstart -k "+launchAgentService() {
-		t.Fatalf("an unchanged definition only needs a restart, got %v", plain)
+	for _, step := range start {
+		if len(step) > 0 && step[0] == "kickstart" {
+			t.Fatalf("RunAtLoad already starts the daemon; kickstart -k kills it and launchd throttles the restart for 10s: %v", start)
+		}
 	}
 }
 
