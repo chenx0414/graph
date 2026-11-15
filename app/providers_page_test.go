@@ -242,3 +242,20 @@ func TestTheProvidersPageRefreshesWhenMagpieChanges(t *testing.T) {
 		t.Fatalf("the refresh reads magpie again, calls %d entries %d (%q)", calls, len(shell.providers.entries), shell.providers.failed)
 	}
 }
+
+func TestTheProvidersPageOpensMagpieWhenTheSwitchLivesThere(t *testing.T) {
+	server := magpieProvidersServer(t)
+	shell := newShellState(server.URL, "")
+	opened := ""
+	shell.providers.openPath = func(path string) error { opened = path; return nil }
+	shell.openModule("providers")
+	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) > 0 })
+	if err := tester.Click("打开 Magpie 配置"); err != nil {
+		t.Fatalf("open magpie: %v", err)
+	}
+	frames(tester)
+	if opened != "/Users/macmini/.config/magpie/providers.json" {
+		t.Fatalf("the page opens magpie's providers file, got %q", opened)
+	}
+}

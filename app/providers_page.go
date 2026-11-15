@@ -1,8 +1,10 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"graph/app/gwui/kit"
 	"graph/app/gwui/palette"
@@ -31,6 +33,7 @@ type providersPageState struct {
 	enabled         map[string]bool
 	source          magpieProvidersPayload
 	notice          string
+	openPath        func(string) error
 }
 
 func (s *shellState) providerStateOf(id string) providerState {
@@ -262,6 +265,9 @@ func (s *shellState) panelProviders(ctx *ui.Context) {
 			kit.Text(ctx, "供应商", 12).TextColor(pal.Foreground2).SingleLine()
 			ui.Spacer(ctx)
 			s.providerSearch(ctx, pal)
+			if kit.Button(ctx, "打开 Magpie 配置", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
+				s.openMagpie()
+			}
 			if kit.IconButton(ctx, iconRefresh, "刷新供应商", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
 				s.refreshProviders()
 			}
@@ -291,6 +297,18 @@ func (s *shellState) panelProviders(ctx *ui.Context) {
 		}
 		kit.Text(ctx, "供应商与账号都由 Magpie 管理 · 这里只读", 11).TextColor(pal.Faint).Padding(8, 2)
 	})
+}
+
+func (s *shellState) openMagpie() {
+	dir := strings.TrimSpace(s.providers.source.Dir)
+	if dir == "" {
+		return
+	}
+	open := s.providers.openPath
+	if open == nil {
+		open = mygo.Shell.OpenPath
+	}
+	_ = open(filepath.Join(dir, "providers.json"))
 }
 
 func (s *shellState) providerFailure(ctx *ui.Context, pal magpiePalette) {
