@@ -159,6 +159,7 @@ type conversationTrajectory struct {
 	TaskId         string                `json:"taskId"`
 	Turns          []trajectoryTurn      `json:"turns"`
 	Requests       []trajectoryRequest   `json:"requests"`
+	RequestOffset  int                   `json:"requestOffset"`
 	Events         []trajectoryEvent     `json:"events"`
 	Totals         trajectoryTotals      `json:"totals"`
 	Composition    trajectoryComposition `json:"composition"`
@@ -211,6 +212,13 @@ func (s *shellState) ensureTrajectory() {
 		}
 		s.frame()
 	}()
+}
+
+func trajectoryRequestTotal(data *conversationTrajectory) int {
+	if data == nil {
+		return 0
+	}
+	return data.RequestOffset + len(data.Requests)
 }
 
 func trajectoryEndpoint(scope chatScope) (string, string) {

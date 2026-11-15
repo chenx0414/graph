@@ -13,15 +13,29 @@ func conversationTrajectorySignature(store *TaskStore, conversationId string) st
 	latest := func(table string) int64 {
 		return kernelInt(kernelRow(store.Db, "SELECT COALESCE(MAX(rowid),0) AS latest FROM "+table)["latest"])
 	}
-	return fmt.Sprintf("%s|%d|%d|%d|%d|%d|%d|%d|%d|%d",
+	return fmt.Sprintf("v2|%s|%d|%d|%d|%d|%d|%d|%d|%d|%d",
 		anchor, latest("messages"), latest("invocations"), latest("tool_calls"), latest("events"),
 		latest("node_entries"), latest("nodes"), latest("instances"), latest("artifacts"), latest("agents"))
+}
+
+func trimConversationTrajectoryForDisplay(trajectory *ConversationTrajectory) {
+	const turnsKept = 20
+	const requestsKept = 60
+	if len(trajectory.Turns) > turnsKept {
+		trajectory.Turns = trajectory.Turns[len(trajectory.Turns)-turnsKept:]
+	}
+	if len(trajectory.Requests) > requestsKept {
+		offset := len(trajectory.Requests) - requestsKept
+		trajectory.RequestOffset += offset
+		trajectory.Requests = trajectory.Requests[offset:]
+	}
 }
 
 func StoreConversationTrajectory(store *TaskStore, conversationId string, trajectory *ConversationTrajectory) {
 	if trajectory.TaskId == "" {
 		return
 	}
+	trimConversationTrajectoryForDisplay(trajectory)
 	payload, err := json.Marshal(trajectory)
 	if err != nil {
 		return

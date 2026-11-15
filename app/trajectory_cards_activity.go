@@ -19,7 +19,7 @@ func (s *shellState) trajectoryTrendCard(ctx *ui.Context) {
 	if len(requests) > 60 {
 		requests = requests[len(requests)-60:]
 	}
-	trajectoryCardHeader(ctx, iconActivity, strconv.Itoa(len(data.Requests))+" 次请求 · 峰值 "+formatTrajectoryTokens(data.Totals.Context.PeakTokens))
+	trajectoryCardHeader(ctx, iconActivity, strconv.Itoa(trajectoryRequestTotal(data))+" 次请求 · 峰值 "+formatTrajectoryTokens(data.Totals.Context.PeakTokens))
 	if len(requests) == 0 {
 		kit.Text(ctx, "还没有请求趋势。", t.Text.Sm).TextColor(t.Muted)
 		return
@@ -246,7 +246,7 @@ func (s *shellState) trajectoryRequestsCard(ctx *ui.Context) {
 	if len(requests) > 8 {
 		requests = requests[len(requests)-8:]
 	}
-	trajectoryCardHeader(ctx, iconClock, strconv.Itoa(len(data.Requests))+" 次请求")
+	trajectoryCardHeader(ctx, iconClock, strconv.Itoa(trajectoryRequestTotal(data))+" 次请求")
 	if len(requests) == 0 {
 		kit.Text(ctx, "还没有请求记录。", t.Text.Sm).TextColor(t.Muted)
 		return
@@ -305,7 +305,7 @@ func (s *shellState) trajectoryRequestDetailCard(ctx *ui.Context) {
 		index = len(data.Requests) - 1
 	}
 	request := data.Requests[index]
-	trajectoryCardHeader(ctx, iconDoc, "第 "+strconv.Itoa(index+1)+" 次 · "+formatTrajectoryClock(request.At))
+	trajectoryCardHeader(ctx, iconDoc, "第 "+strconv.Itoa(data.RequestOffset+index+1)+" 次 · "+formatTrajectoryClock(request.At))
 	values := ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center)
 	values.Children(func() {
 		kit.Text(ctx, formatTrajectoryTokens(request.ContextTokens), t.Text.Sm).FontWeight(600)

@@ -36,3 +36,25 @@ func TestConversationTrajectoryServesTheStoredSnapshotUntilHistoryChanges(t *tes
 		t.Fatalf("a new message rebuilds the trajectory, got %s", body)
 	}
 }
+
+func TestTrajectoryPayloadKeepsOnlyTheDisplayWindow(t *testing.T) {
+	requests := make([]TrajectoryRequest, 70)
+	for index := range requests {
+		requests[index] = TrajectoryRequest{At: int64(index)}
+	}
+	turns := make([]TrajectoryTurn, 25)
+	for index := range turns {
+		turns[index] = TrajectoryTurn{Index: index + 1}
+	}
+	trajectory := &ConversationTrajectory{Requests: requests, Turns: turns}
+	trimConversationTrajectoryForDisplay(trajectory)
+	if len(trajectory.Requests) != 60 || trajectory.RequestOffset != 10 {
+		t.Fatalf("the display window keeps the newest requests and remembers the prefix, got %d offset %d", len(trajectory.Requests), trajectory.RequestOffset)
+	}
+	if trajectory.Requests[0].At != 10 {
+		t.Fatalf("the first kept request is the 11th original, got %d", trajectory.Requests[0].At)
+	}
+	if len(trajectory.Turns) != 20 || trajectory.Turns[0].Index != 6 {
+		t.Fatalf("the display window keeps the newest turns, got %d first %d", len(trajectory.Turns), trajectory.Turns[0].Index)
+	}
+}

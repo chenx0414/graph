@@ -155,6 +155,7 @@ type ConversationTrajectory struct {
 	TaskId         string                `json:"taskId"`
 	Turns          []TrajectoryTurn      `json:"turns"`
 	Requests       []TrajectoryRequest   `json:"requests"`
+	RequestOffset  int                   `json:"requestOffset,omitempty"`
 	Events         []TrajectoryEvent     `json:"events"`
 	Totals         TrajectoryTotals      `json:"totals"`
 	Composition    TrajectoryComposition `json:"composition"`
