@@ -108,7 +108,7 @@ type fleetScope struct {
 }
 
 func (app *GraphApp) serveFleet(w http.ResponseWriter, r *http.Request) {
-	body := fleetPayload(app.runtime.store, r.URL.Query().Get("conversationId"))
+	body := fleetPayloadCached(app.runtime.store, r.URL.Query().Get("conversationId"))
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
