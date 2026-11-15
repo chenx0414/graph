@@ -19,9 +19,9 @@ func conversationVersion(store *TaskStore, conversationId string) string {
 		return kernelInt(kernelRow(store.Db, query, conversationId)["latest"])
 	}
 	events := latest("SELECT COALESCE(MAX(cursor),0) AS latest FROM events")
-	messages := latest("SELECT COALESCE(MAX(seq),0) AS latest FROM messages")
-	messagesUpdated := latest("SELECT COALESCE(MAX(updated_at),0) AS latest FROM messages")
-	streams := latest("SELECT COALESCE(MAX(updated_at),0) AS latest FROM conversation_streams")
+	messages := countForConversation("SELECT COALESCE(MAX(seq),0) AS latest FROM messages WHERE conversation_id=?")
+	messagesUpdated := countForConversation("SELECT COALESCE(MAX(updated_at),0) AS latest FROM messages WHERE conversation_id=?")
+	streams := countForConversation("SELECT COALESCE(MAX(updated_at),0) AS latest FROM conversation_streams WHERE conversation_id=?")
 	invocations := latest("SELECT COALESCE(MAX(rowid),0) AS latest FROM invocations")
 	artifacts := latest("SELECT COALESCE(MAX(rowid),0) AS latest FROM artifacts")
 	tasks := latest("SELECT COUNT(*) AS latest FROM tasks")

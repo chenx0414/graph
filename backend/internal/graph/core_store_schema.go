@@ -89,6 +89,11 @@ CREATE INDEX IF NOT EXISTS messages_queue ON messages(state) WHERE state IN ('pe
 PRAGMA user_version=63;
 `
 
+const schemaV64 = `
+CREATE INDEX IF NOT EXISTS messages_conversation_updated ON messages(conversation_id, updated_at);
+PRAGMA user_version=64;
+`
+
 const schemaV61 = `
 CREATE TABLE conversations_next(
   id TEXT PRIMARY KEY,

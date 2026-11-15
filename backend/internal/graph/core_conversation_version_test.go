@@ -3,6 +3,7 @@ package graph
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -18,5 +19,18 @@ func TestConversationVersionFollowsItsTranscript(t *testing.T) {
 	after := conversationVersion(store, "c")
 	if before == after {
 		t.Fatalf("a new message must advance the conversation version, before %q after %q", before, after)
+	}
+}
+
+func TestConversationVersionReadsMessagesThroughTheirConversationIndex(t *testing.T) {
+	store := openTaskStore(t, filepath.Join(t.TempDir(), "tasks.sqlite"))
+	defer store.Close()
+	rows := kernelRows(store.DB, "EXPLAIN QUERY PLAN SELECT COALESCE(MAX(updated_at),0) FROM messages WHERE conversation_id=?", "c")
+	detail := ""
+	for _, row := range rows {
+		detail += kernelString(row["detail"])
+	}
+	if !strings.Contains(detail, "messages_conversation_updated") {
+		t.Fatalf("the version probe must use the per-conversation timestamp index, got %s", detail)
 	}
 }
