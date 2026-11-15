@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -114,5 +115,37 @@ func TestGreenRunsDoNotLeaveTheirRootBehind(t *testing.T) {
 	releaseRoot(failed, false)
 	if _, err := os.Stat(failed); err != nil {
 		t.Fatalf("a failed run must keep its root for inspection: %v", err)
+	}
+}
+
+func TestTheEvalConfigPointsAtTheCaseProject(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "graph.config.json")
+	original := `{"version":1,"projects":[{"id":"graph","root":"."}],"credentials":{"opencode-go":{"secretRef":"OPENCODE_GO_API_KEY"}},"models":{"entries":[{"id":"deepseek-v4-flash","provider":"opencode-go"}]}}`
+	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := configWithProject(path, "/tmp/case-project")
+	if err != nil {
+		t.Fatalf("rewrite the config: %v", err)
+	}
+	var config struct {
+		Projects []struct {
+			ID   string `json:"id"`
+			Root string `json:"root"`
+		} `json:"projects"`
+		Models struct {
+			Entries []struct {
+				ID string `json:"id"`
+			} `json:"entries"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(payload, &config); err != nil {
+		t.Fatalf("parse the rewritten config: %v", err)
+	}
+	if len(config.Projects) != 1 || config.Projects[0].ID != "p" || config.Projects[0].Root != "/tmp/case-project" {
+		t.Fatalf("the case project replaces the repository project, got %+v", config.Projects)
+	}
+	if len(config.Models.Entries) != 1 || config.Models.Entries[0].ID != "deepseek-v4-flash" {
+		t.Fatalf("the real models stay in the config, got %+v", config.Models.Entries)
 	}
 }

@@ -77,6 +77,18 @@ func Run(options Options) Report {
 	}
 	configPath := options.ConfigPath
 	var provider *Provider
+	if configPath != "" {
+		payload, rewriteErr := configWithProject(configPath, project)
+		if rewriteErr != nil {
+			report.Error = rewriteErr.Error()
+			return report
+		}
+		configPath = filepath.Join(root, "eval-config.json")
+		if writeErr := os.WriteFile(configPath, payload, 0o600); writeErr != nil {
+			report.Error = writeErr.Error()
+			return report
+		}
+	}
 	if configPath == "" {
 		provider, err = StartProvider(caseScript)
 		if err != nil {
@@ -306,4 +318,17 @@ func ParseTimeout(value string) time.Duration {
 		return 120 * time.Second
 	}
 	return time.Duration(ms) * time.Millisecond
+}
+
+func configWithProject(path, project string) ([]byte, error) {
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var config map[string]any
+	if err := json.Unmarshal(payload, &config); err != nil {
+		return nil, err
+	}
+	config["projects"] = []any{map[string]any{"id": "p", "root": project}}
+	return json.Marshal(config)
 }
