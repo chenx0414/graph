@@ -14,7 +14,7 @@
     "backend/internal/harness/cases.go": "a750a30e41060ba1a7ba0bd6cba914215ade52eb0a7cc95f9006998d852194b1",
     "backend/internal/harness/gate.go": "74f0fa043f5960c58590bd4ed3d2f7563b4fc4db9e6bcc0ce7aaff237f23c9cc",
     "backend/internal/harness/provider.go": "90778e9de704a1c41bb969a4a10c916804475479ad392eb5190d04493cd38c75",
-    "backend/internal/harness/run.go": "6109c2b888158c6de16e665746350691f86299832a5c27b77e492096087757d8"
+    "backend/internal/harness/run.go": "8736a717959fd10a86dc04ce3bad28f2e7c615f94bf83621de9f15cee2f63386"
   },
-  "updatedAt": "2026-11-13T09:02:10.199074Z"
+  "updatedAt": "2026-11-15T14:54:22.469487Z"
 }
