@@ -2,6 +2,7 @@ package main
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 	"graph/app/gwui/kit"
@@ -13,7 +14,7 @@ func (s *shellState) panelTrajectory(ctx *ui.Context) {
 	state := &s.trajectory
 	s.scopeLine(ctx, "")
 	if state.data != nil && state.scopeKey != s.chatScope().key() {
-		if !state.loading {
+		if !state.loading() {
 			go s.ensureTrajectory()
 		}
 		kit.Text(ctx, "正在整理轨迹…", t.Text.Sm).TextColor(t.Muted)
@@ -25,7 +26,7 @@ func (s *shellState) panelTrajectory(ctx *ui.Context) {
 		} else {
 			kit.Text(ctx, "正在整理轨迹…", t.Text.Sm).TextColor(t.Muted)
 		}
-		if !state.loading && (state.failed == "" || state.scopeKey != s.chatScope().key()) {
+		if !state.loading() && (state.failed == "" || state.scopeKey != s.chatScope().key()) {
 			go s.ensureTrajectory()
 		}
 		return
@@ -95,11 +96,19 @@ func (s *shellState) trajectoryTurnRow(ctx *ui.Context, turn trajectoryTurn) {
 }
 
 func trajectoryStatusLabel(status string) string {
-	switch status {
-	case "done", "":
-		return "完成"
-	case "running":
+	switch workStatusOf(status) {
+	case workDone, workUnknown:
+		if strings.TrimSpace(status) == "" {
+			return "完成"
+		}
+	case workRunning, workPending:
 		return "进行中"
+	case workBlocked:
+		return "阻塞"
+	case workFailed:
+		return "失败"
+	case workStopped:
+		return "已停止"
 	}
 	return status
 }

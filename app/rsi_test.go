@@ -94,6 +94,10 @@ func (d *restartDaemon) adopt(int) {}
 
 func (d *restartDaemon) refresh() daemonRefresh { return daemonRefresh{} }
 
+func (d *restartDaemon) status() daemonStatus {
+	return daemonStatus{Phase: daemonOwned}
+}
+
 func (d *restartDaemon) restart(reload bool) (bool, string) {
 	d.reloads = append(d.reloads, reload)
 	d.restarts++

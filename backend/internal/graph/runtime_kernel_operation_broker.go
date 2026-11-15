@@ -208,8 +208,8 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 		}
 	}
 	unsubscribe := kernel.Store.OnEvent(func(string) {
-		phase := kernel.Store.Task(options.GraphId).Phase
-		if phase == "stopping" || phase == "stopped" {
+		phase := GraphPhase(kernel.Store.Task(options.GraphId).Phase)
+		if phase.Cancelling() {
 			abort()
 		}
 	})

@@ -252,8 +252,8 @@ func (k *KernelStore) settleNodeAfterStop(taskID, nodeID string) bool {
 	if !found {
 		return false
 	}
-	phase := kernelString(row["phase"])
-	if phase != "stopping" && phase != "stopped" {
+	phase := GraphPhase(kernelString(row["phase"]))
+	if !phase.Cancelling() {
 		return false
 	}
 	g5Exec(k.Db, "UPDATE kernel_nodes SET status='idle' WHERE task_id=? AND node_id=?", taskID, nodeID)

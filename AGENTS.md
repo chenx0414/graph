@@ -5,6 +5,7 @@
 - 分诊或调整分诊标签前，读取 [标签映射](docs/guides/triage-labels.md)。
 - 用 pstack 技能（`/skill:poteto-mode` 及其 playbook）给节点分配模型或思考档位前，读取 [pstack 角色与模型映射](docs/agent/pstack-models.md)。
 - 找实现、追调用链、判断改动影响面，先用 CodeGraph 索引：MCP 工具 `mcp__codegraph__codegraph_explore`，或 CLI `codegraph explore "<问题>"`；细则见下文「代码导航」。
+- 改状态、状态显示或状态转移前，读取 [状态机地图](docs/agent/state-machines.md)：注册表在 `backend/statemachine/machines.json`，`go -C backend run ./cmd/graphcheck machines` 判定源码与注册表是否一致。
 
 - 测试：单元、集成、E2E 都可以，唯一前提是**先写测试再写代码**；先红后绿，回归必须先演示失败。适用于我和所有子 Agent，细则见 [测试编写规则](CODING_STANDARDS.md#测试编写规则)。
 

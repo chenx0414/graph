@@ -40,14 +40,14 @@ func (e *Execution) runGuardedBool(action func() bool) (result bool, failure any
 func (e *Execution) laneTasks() []string {
 	rows := kernelRows(e.store.Db, `SELECT t.id FROM tasks t
       LEFT JOIN conversations c ON c.id=t.conversation_id
-      WHERE t.phase='chatting' AND c.archived_at IS NULL
+      WHERE `+taskPhaseIn("t.phase", PhaseChatting)+` AND c.archived_at IS NULL
       ORDER BY t.created_seq`)
 	chatting := []string{}
 	for _, row := range rows {
 		chatting = append(chatting, kernelString(row["id"]))
 	}
 	active := kernelString(kernelRow(e.store.Db, "SELECT active_task FROM runtime")["active_task"])
-	if active != "" && !containsString(chatting, active) && e.store.Task(active).Phase != "chatting" {
+	if active != "" && !containsString(chatting, active) && e.store.Task(active).Phase != string(PhaseChatting) {
 		chatting = append(chatting, active)
 	}
 	return chatting
@@ -119,7 +119,7 @@ func (e *Execution) readyNodes() []ExecutionNodeRow {
 
 func (e *Execution) readyNodesFor(taskId string) []ExecutionNodeRow {
 	task := e.store.Task(taskId)
-	if task.Phase == "chatting" {
+	if task.Phase == string(PhaseChatting) {
 		conversation := ConversationForTask(e.store, taskId)
 		if conversation == nil || conversation.ArchivedAt != nil || conversation.Role == ConversationHistory {
 			return nil
@@ -151,7 +151,7 @@ func (e *Execution) readyNodesFor(taskId string) []ExecutionNodeRow {
 		}
 		return out
 	}
-	if task.Phase != "discussing" {
+	if task.Phase != string(PhaseDiscussing) {
 		return nil
 	}
 	rows := kernelRows(e.store.Db, "SELECT * FROM nodes WHERE task_id=? AND status='pending' AND json_extract(spec,'$.role')='master' ORDER BY rowid", taskId)

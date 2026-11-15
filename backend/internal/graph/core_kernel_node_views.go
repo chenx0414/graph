@@ -399,12 +399,9 @@ func KernelNodeRun(kernel *KernelStore, graphID, nodeID string, query NodeEntryQ
 }
 
 func kernelNodePhase(kernel *KernelStore, graphID string) string {
-	phase := GraphPhase(kernel.Store.Task(graphID).Phase)
 	row := kernelRow(kernel.DB, "SELECT paused FROM tasks WHERE id=?", graphID)
-	if row != nil && kernelInt(row["paused"]) != 0 && phase != "completed" && phase != "stopping" && phase != "stopped" {
-		phase = "paused"
-	}
-	return string(phase)
+	paused := row != nil && kernelInt(row["paused"]) != 0
+	return string(displayPhase(kernel.Store.Task(graphID).Phase, paused))
 }
 
 func firstPresent(record map[string]any, keys ...string) any {

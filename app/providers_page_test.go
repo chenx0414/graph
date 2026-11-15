@@ -47,9 +47,7 @@ func TestTheProvidersPageListsTheRealProviders(t *testing.T) {
 	shell := newShellState(server.URL, "")
 	shell.openModule("providers")
 	tester := frames(ui.NewTester(shell.view, 1440, 900))
-	for attempt := 0; attempt < 30 && len(shell.providers.entries) == 0; attempt++ {
-		tester.Frame()
-	}
+	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) > 0 })
 	if len(shell.providers.entries) != 3 {
 		t.Fatalf("the page lists every platform, got %d (%q)", len(shell.providers.entries), shell.providers.failed)
 	}
@@ -68,9 +66,7 @@ func TestAProviderToggleFeedsTheModelPicker(t *testing.T) {
 	shell := newShellState(server.URL, "")
 	shell.openModule("providers")
 	tester := frames(ui.NewTester(shell.view, 1440, 900))
-	for attempt := 0; attempt < 30 && len(shell.providers.entries) == 0; attempt++ {
-		tester.Frame()
-	}
+	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) > 0 })
 	if !shell.providersEnabled("opencode-go") {
 		t.Fatalf("a configured provider starts enabled")
 	}
@@ -96,9 +92,7 @@ func TestClickingAProviderOpensItsModels(t *testing.T) {
 	shell.chat = chat
 	shell.openModule("providers")
 	tester := frames(ui.NewTester(shell.view, 1440, 900))
-	for attempt := 0; attempt < 30 && len(shell.providers.entries) == 0; attempt++ {
-		tester.Frame()
-	}
+	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) > 0 })
 	if err := tester.Click("用 OpenCode Go 的模型"); err != nil {
 		t.Fatalf("open the provider's models: %v", err)
 	}

@@ -281,7 +281,7 @@ func ConversationDigest(store *TaskStore, conversationId string) string {
 				conversationQuestionSummary(kernelString(problem["kind"]), data)))
 		}
 	}
-	tasks := kernelRows(store.Db, "SELECT id,phase,paused,request,integration_sha,accepted_proposal FROM tasks WHERE conversation_id=? AND phase!='chatting' ORDER BY created_seq", conversationId)
+	tasks := kernelRows(store.Db, "SELECT id,phase,paused,request,integration_sha,accepted_proposal FROM tasks WHERE conversation_id=? AND "+taskPhaseNotIn("phase", PhaseChatting)+" ORDER BY created_seq", conversationId)
 	if len(tasks) == 0 {
 		lines = append(lines, "Feature tasks: none (nothing has been dispatched)")
 	}

@@ -1,0 +1,245 @@
+{
+  "machines": [
+    {
+      "id": "message.state",
+      "title": "消息状态",
+      "store": "table",
+      "owner": "core_task_messages.go",
+      "targets": [
+        {
+          "table": "messages",
+          "column": "state"
+        }
+      ],
+      "initial": [
+        "pending",
+        "queued",
+        "running",
+        "done",
+        "failed"
+      ],
+      "states": [
+        {
+          "name": "pending",
+          "label": "待发送",
+          "tone": "idle"
+        },
+        {
+          "name": "queued",
+          "label": "排队中",
+          "tone": "idle"
+        },
+        {
+          "name": "delivered",
+          "label": "已送达",
+          "tone": "success"
+        },
+        {
+          "name": "running",
+          "label": "进行中",
+          "tone": "running"
+        },
+        {
+          "name": "failed",
+          "label": "失败",
+          "tone": "danger",
+          "terminal": true
+        },
+        {
+          "name": "cancelled",
+          "label": "已取消",
+          "tone": "muted",
+          "terminal": true
+        },
+        {
+          "name": "done",
+          "label": "已完成",
+          "tone": "success",
+          "terminal": true
+        }
+      ],
+      "transitions": [
+        {
+          "from": "pending",
+          "to": "queued",
+          "on": "queue"
+        },
+        {
+          "from": "pending",
+          "to": "running",
+          "on": "activity-started"
+        },
+        {
+          "from": "running",
+          "to": "done",
+          "on": "activity-settled"
+        },
+        {
+          "from": "running",
+          "to": "failed",
+          "on": "activity-failed"
+        },
+        {
+          "from": "pending",
+          "to": "delivered",
+          "on": "deliver"
+        },
+        {
+          "from": "pending",
+          "to": "cancelled",
+          "on": "cancel"
+        },
+        {
+          "from": "queued",
+          "to": "delivered",
+          "on": "deliver"
+        },
+        {
+          "from": "queued",
+          "to": "cancelled",
+          "on": "cancel"
+        },
+        {
+          "from": "delivered",
+          "to": "pending",
+          "on": "retract"
+        }
+      ]
+    },
+    {
+      "id": "question.status",
+      "title": "问题状态",
+      "store": "table",
+      "owner": "core_task_questions.go",
+      "targets": [
+        {
+          "table": "questions",
+          "column": "status"
+        }
+      ],
+      "initial": [
+        "open"
+      ],
+      "states": [
+        {
+          "name": "open",
+          "label": "待回答",
+          "tone": "blocked"
+        },
+        {
+          "name": "resolved",
+          "label": "已解决",
+          "tone": "success",
+          "terminal": true
+        }
+      ],
+      "transitions": [
+        {
+          "from": "open",
+          "to": "resolved",
+          "on": "answer"
+        }
+      ]
+    },
+    {
+      "id": "question.route_stage",
+      "title": "问题处理阶段",
+      "store": "table",
+      "owner": "core_question_routing.go",
+      "targets": [
+        {
+          "table": "questions",
+          "column": "route_stage"
+        }
+      ],
+      "initial": [
+        "project"
+      ],
+      "states": [
+        {
+          "name": "project",
+          "label": "项目主管",
+          "tone": "idle"
+        },
+        {
+          "name": "global",
+          "label": "全局主管",
+          "tone": "idle"
+        },
+        {
+          "name": "user",
+          "label": "用户",
+          "tone": "blocked",
+          "terminal": true
+        }
+      ],
+      "transitions": [
+        {
+          "from": "project",
+          "to": "global",
+          "on": "escalate"
+        },
+        {
+          "from": "project",
+          "to": "user",
+          "on": "escalate"
+        },
+        {
+          "from": "global",
+          "to": "user",
+          "on": "escalate"
+        }
+      ]
+    },
+    {
+      "id": "node_question.state",
+      "title": "节点问题状态",
+      "store": "table",
+      "owner": "core_node_questions.go",
+      "targets": [
+        {
+          "table": "node_questions",
+          "column": "state"
+        }
+      ],
+      "initial": [
+        "recorded"
+      ],
+      "states": [
+        {
+          "name": "recorded",
+          "label": "已记录",
+          "tone": "idle"
+        },
+        {
+          "name": "parked",
+          "label": "已挂起",
+          "tone": "blocked"
+        },
+        {
+          "name": "answered",
+          "label": "已回答",
+          "tone": "success",
+          "terminal": true
+        }
+      ],
+      "transitions": [
+        {
+          "from": "recorded",
+          "to": "parked",
+          "on": "park"
+        },
+        {
+          "from": "recorded",
+          "to": "answered",
+          "on": "answer"
+        },
+        {
+          "from": "parked",
+          "to": "answered",
+          "on": "answer"
+        }
+      ]
+    }
+  ]
+}

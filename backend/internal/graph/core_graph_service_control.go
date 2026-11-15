@@ -10,7 +10,7 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 	}
 	switch input.Action {
 	case "pause", "resume", "reopen", "retry", "skip", "cancel", "retry_preparation":
-		if phase == "completed" || phase == "stopping" || phase == "stopped" {
+		if phase.Closed() {
 			Raise("invalid_graph", "Ended graph cannot change its execution controls")
 		}
 	}

@@ -18,7 +18,7 @@ GRAPH_UPDATE_EVIDENCE=1 go -C backend test ./...
 
 运行 `python3 scripts/check-queue.py`。入口需要 Python 3（macOS/Linux），通过本机共享的文件锁让同一用户在本机的 Graph 工作树与克隆串行检查。等待期间不启动构建或测试。检查期间自动锁定工作树，防止其他会话清理正在使用的检出；完成后释放本次创建的工作树锁，保留已有锁。进程退出后自动释放名额，检查失败的退出码原样传回。检查步骤由排队脚本执行，不另设可绕过队列的全量检查入口。
 
-门禁的步骤就是 `go vet`、`go test`（`backend/` 与 `app/` 两个 module）和四个静态检查加一个行为门禁，遇到第一个失败即停止本轮。给命令设置超时时，把排队等待时间也算进去；不要因等待名额而重复启动门禁。安装排队入口时已经启动的检查会先完成。
+门禁的步骤就是 `go vet`、`go test`（`backend/` 与 `app/` 两个 module）和五个静态检查加一个行为门禁，遇到第一个失败即停止本轮。给命令设置超时时，把排队等待时间也算进去；不要因等待名额而重复启动门禁。安装排队入口时已经启动的检查会先完成。
 
 ## harness 行为门禁
 
@@ -87,6 +87,23 @@ go -C backend run ./cmd/graphcheck tokens src/core/task-runtime.ts
 
 这个检查不进 `python3 scripts/check-queue.py`：仓库里已存在历史大文件，而它要拦的是**本次改动**新写大
 文件。`GRAPH_FILE_TOKEN_LIMIT` 可临时改上限（默认 5000）。
+
+## 状态机登记检查
+
+`backend/statemachine/machines.json` 是索引，它列出的 `machines/*.json` 分片是全仓状态词汇的唯一登记处：每张表的 `state`/`status`/`phase`/`route_stage` 有哪些取值、允许哪些迁移、给界面与 Agent 看的中文标签和色调，都登记在那里。
+
+```sh
+go -C backend run ./cmd/graphcheck machines            # 登记处与源码对账
+go -C backend run ./cmd/graphcheck machines --verbose  # 逐条列出字面量与迁移的来源文件
+```
+
+它扫 `backend/`、`app/` 里的 SQL 字面量与 `CREATE TABLE ... CHECK(...)`，报三类问题：
+
+- `undeclared-machine`：源码里有状态列，登记处没有这台机器；
+- `undeclared-state`：机器已登记，但这个取值没有；
+- `illegal-transition`：`UPDATE` 的 `WHERE` 守卫与赋值构成一条未声明的迁移。
+
+新状态先登记再写进代码；迁移只能走已声明的边。检查只读源码，不改写 JSON。
 
 ## 表的归属检查
 

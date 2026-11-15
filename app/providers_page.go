@@ -14,14 +14,13 @@ import (
 )
 
 type providerEntry struct {
-	ID         string
-	Label      string
-	Badge      string
-	Subtitle   string
-	Status     string
-	API        string
-	Models     int
-	Configured bool
+	ID       string
+	Label    string
+	Badge    string
+	Subtitle string
+	API      string
+	Models   int
+	Facts    providerFacts
 }
 
 type providersPayload struct {
@@ -42,12 +41,27 @@ type providersPayload struct {
 
 type providersPageState struct {
 	loading         bool
+	attempted       bool
 	failed          string
 	entries         []providerEntry
 	search          string
 	packageAccounts bool
 	enabled         map[string]bool
 	protocols       map[string][]string
+}
+
+func (s *shellState) providerStateOf(id string) providerState {
+	for _, entry := range s.providers.entries {
+		if entry.ID != id {
+			continue
+		}
+		return providerStateOf(entry.Facts, s.providersEnabled(id))
+	}
+	return providerUnconfigured
+}
+
+func (s *shellState) providersPhase() providersPhase {
+	return providersPhaseOf(s.providers.loading, s.providers.attempted, s.providers.failed, len(s.providers.entries))
 }
 
 func (s *shellState) providersEnabled(id string) bool {
@@ -101,16 +115,16 @@ func parseProvidersPayload(payload []byte, models []modelChoice) ([]providerEntr
 			continue
 		}
 		subtitle := providerHost(platform.BaseURL) + " · " + strconv.Itoa(counts[platform.ID]) + " 个模型"
-		configured := platform.CredentialConfigured
-		status := "已连接"
-		if !configured {
-			status = "未配置"
+		facts := providerFacts{Configured: platform.CredentialConfigured}
+		if credential, ok := shaped.Credentials[platform.ID]; ok {
+			resolved := credential.Resolved
+			facts.Resolved = &resolved
 		}
 		entries = append(entries, providerEntry{
 			ID: platform.ID, Label: platform.Label, Badge: providerBadge(platform.CredentialKind, platform.Custom),
-			Subtitle: subtitle, Status: status, API: platform.API, Models: counts[platform.ID], Configured: configured,
+			Subtitle: subtitle, API: platform.API, Models: counts[platform.ID], Facts: facts,
 		})
-		enabled[platform.ID] = configured
+		enabled[platform.ID] = platform.CredentialConfigured
 	}
 	sort.SliceStable(entries, func(a, b int) bool { return entries[a].Label < entries[b].Label })
 	return entries, enabled, nil
@@ -127,9 +141,21 @@ func modelProviderID(id string) string {
 }
 
 func (s *shellState) ensureProviders() {
-	if s.providers.loading || len(s.providers.entries) > 0 {
+	if s.providersPhase() != providersIdlePhase {
 		return
 	}
+	s.loadProviders()
+}
+
+func (s *shellState) refreshProviders() {
+	if s.providers.loading {
+		return
+	}
+	s.providers.failed = ""
+	s.loadProviders()
+}
+
+func (s *shellState) loadProviders() {
 	s.providers.loading = true
 	api := s.api
 	var models []modelChoice
@@ -157,10 +183,13 @@ func (s *shellState) ensureProviders() {
 		}
 		onUI(s.window, func() {
 			s.providers.loading = false
+			s.providers.attempted = true
 			if err != nil {
 				s.providers.failed = err.Error()
+				s.frame()
 				return
 			}
+			s.providers.failed = ""
 			s.providers.entries = entries
 			s.providers.enabled = enabled
 			s.providers.protocols = map[string][]string{}
@@ -219,25 +248,21 @@ func (s *shellState) providerToggle(ctx *ui.Context, entry providerEntry, pal ma
 }
 
 func (s *shellState) providerKeyPill(ctx *ui.Context, entry providerEntry, pal magpiePalette) {
-	enabled := s.providersEnabled(entry.ID)
-	status := entry.Status
-	if entry.Configured && !enabled {
-		status = "未启用"
-	}
+	state := s.providerStateOf(entry.ID)
 	pill := ui.Row(ctx).Width(128).Height(22).Radius(6).PaddingX(8).Gap(6).AlignItems(ui.Center)
 	dot := pal.Green
 	text := pal.Muted
-	switch {
-	case !entry.Configured:
+	switch state.Severity() {
+	case providerAttention:
 		pill.Background(pal.AmberSoft)
 		dot, text = pal.Amber, pal.Amber
-	case !enabled:
+	case providerQuiet:
 		pill.Opacity(0.45)
-		dot = pal.Faint
+		dot, text = pal.Faint, pal.Muted
 	}
 	pill.Children(func() {
 		ui.Box(ctx).Width(6).Height(6).Radius(10).Background(dot)
-		kit.Text(ctx, status, 11).TextColor(text).SingleLine().Ellipsis("…").Grow(1)
+		kit.Text(ctx, state.Label(), 11).TextColor(text).SingleLine().Ellipsis("…").Grow(1)
 	})
 }
 
@@ -300,16 +325,16 @@ func (s *shellState) providerRow(ctx *ui.Context, entry providerEntry, pal magpi
 		ui.Box(ctx).FillWidth().Height(1).Background(pal.Line2)
 	}
 }
-func (s *shellState) providerRowsCard(ctx *ui.Context, pal magpiePalette) {
+func (s *shellState) providerRowsCard(ctx *ui.Context, pal magpiePalette, entries []providerEntry) {
 	card := ui.Column(ctx).FillWidth().Background(pal.Card).Radius(12).
 		Border(gwtheme.Stroke, pal.Line).Clip()
 	card.Children(func() {
-		if len(s.providers.entries) == 0 {
-			kit.Text(ctx, "没有匹配的供应商。", 13).TextColor(pal.Muted).Padding(18, 2)
+		if len(entries) == 0 {
+			kit.Text(ctx, providersEmptyPhase.Message(strings.TrimSpace(s.providers.search)), 13).TextColor(pal.Muted).Padding(18, 2)
 			return
 		}
-		for index, entry := range s.providers.entries {
-			s.providerRow(ctx, entry, pal, index == len(s.providers.entries)-1)
+		for index, entry := range entries {
+			s.providerRow(ctx, entry, pal, index == len(entries)-1)
 		}
 	})
 }
@@ -341,26 +366,33 @@ func (s *shellState) panelProviders(ctx *ui.Context) {
 			s.providerSearch(ctx, pal)
 		})
 		ui.Box(ctx).Height(10)
-		if strings.TrimSpace(s.providers.search) != "" {
-			query := strings.ToLower(strings.TrimSpace(s.providers.search))
-			filtered := make([]providerEntry, 0, len(s.providers.entries))
-			for _, entry := range s.providers.entries {
-				if strings.Contains(strings.ToLower(entry.Label), query) || strings.Contains(strings.ToLower(entry.ID), query) {
-					filtered = append(filtered, entry)
-				}
+		phase := s.providersPhase()
+		switch phase {
+		case providersIdlePhase, providersLoadingPhase:
+			kit.Text(ctx, phase.Message(""), 13).TextColor(pal.Muted).Padding(18, 2)
+		case providersFailedPhase:
+			s.providerFailure(ctx, pal)
+		case providersEmptyPhase:
+			s.providerRowsCard(ctx, pal, nil)
+		default:
+			s.providerRowsCard(ctx, pal, providersMatching(s.providers.entries, strings.ToLower(strings.TrimSpace(s.providers.search))))
+			if s.providers.failed != "" {
+				kit.Text(ctx, "读不到供应商："+s.providers.failed, 12).TextColor(pal.Amber)
 			}
-			s.providers.entries, filtered = filtered, s.providers.entries
-			s.providerRowsCard(ctx, pal)
-			s.providers.entries = filtered
-		} else {
-			s.providerRowsCard(ctx, pal)
 		}
 		add := ui.Row(ctx).Padding(8, 2).AlignItems(ui.Center)
 		add.Children(func() {
 			kit.Text(ctx, "＋ 添加供应商", 13).TextColor(pal.Muted).SingleLine()
 		})
-		if s.providers.failed != "" {
-			kit.Text(ctx, "读不到供应商："+s.providers.failed, 12).TextColor(pal.Amber)
-		}
+	})
+}
+
+func (s *shellState) providerFailure(ctx *ui.Context, pal magpiePalette) {
+	ui.Column(ctx).FillWidth().Gap(8).Padding(18, 2).Children(func() {
+		kit.Text(ctx, "读不到供应商："+s.providers.failed, 13).TextColor(pal.Amber)
+		ui.Row(ctx).Gap(8).AlignItems(ui.Center).Children(func() {
+			kit.Button(ctx, "重试供应商", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).
+				Label("重试供应商").OnClick(func() { s.refreshProviders() })
+		})
 	})
 }

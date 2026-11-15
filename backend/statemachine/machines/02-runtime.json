@@ -1,0 +1,498 @@
+{
+  "machines": [
+    {
+      "id": "provider_call.state",
+      "title": "模型调用状态",
+      "store": "table",
+      "owner": "core_kernel_provider_calls.go",
+      "targets": [
+        {
+          "table": "kernel_provider_calls",
+          "column": "state"
+        }
+      ],
+      "initial": [
+        "inflight"
+      ],
+      "states": [
+        {
+          "name": "inflight",
+          "label": "调用中",
+          "tone": "running"
+        },
+        {
+          "name": "settled",
+          "label": "已结算",
+          "tone": "success"
+        },
+        {
+          "name": "reconciled",
+          "label": "已对账",
+          "tone": "success",
+          "terminal": true
+        },
+        {
+          "name": "unknown",
+          "label": "用量未知",
+          "tone": "blocked"
+        }
+      ],
+      "transitions": [
+        {
+          "from": "inflight",
+          "to": "settled",
+          "on": "usage"
+        },
+        {
+          "from": "inflight",
+          "to": "reconciled",
+          "on": "usage"
+        },
+        {
+          "from": "inflight",
+          "to": "unknown",
+          "on": "interrupt"
+        },
+        {
+          "from": "unknown",
+          "to": "settled",
+          "on": "usage"
+        },
+        {
+          "from": "unknown",
+          "to": "reconciled",
+          "on": "reconcile"
+        },
+        {
+          "from": "settled",
+          "to": "reconciled",
+          "on": "reconcile"
+        }
+      ]
+    },
+    {
+      "id": "module_operation.state",
+      "title": "模块操作状态",
+      "store": "table",
+      "owner": "core_kernel_module_operations.go",
+      "targets": [
+        {
+          "table": "kernel_module_operations",
+          "column": "state"
+        }
+      ],
+      "initial": [
+        "prepared"
+      ],
+      "states": [
+        {
+          "name": "prepared",
+          "label": "已准备",
+          "tone": "idle"
+        },
+        {
+          "name": "dispatched",
+          "label": "已发送",
+          "tone": "running"
+        },
+        {
+          "name": "settled",
+          "label": "已结算",
+          "tone": "success",
+          "terminal": true
+        },
+        {
+          "name": "uncertain",
+          "label": "结果不确定",
+          "tone": "blocked"
+        },
+        {
+          "name": "unknown",
+          "label": "未知",
+          "tone": "muted"
+        },
+        {
+          "name": "failed",
+          "label": "失败",
+          "tone": "danger",
+          "terminal": true
+        },
+        {
+          "name": "cancelled",
+          "label": "已取消",
+          "tone": "muted",
+          "terminal": true
+        }
+      ],
+      "transitions": [
+        {
+          "from": "prepared",
+          "to": "dispatched",
+          "on": "dispatch"
+        },
+        {
+          "from": "prepared",
+          "to": "cancelled",
+          "on": "cancel"
+        },
+        {
+          "from": "dispatched",
+          "to": "settled",
+          "on": "settle"
+        },
+        {
+          "from": "dispatched",
+          "to": "uncertain",
+          "on": "interrupt"
+        },
+        {
+          "from": "dispatched",
+          "to": "unknown",
+          "on": "interrupt"
+        },
+        {
+          "from": "dispatched",
+          "to": "failed",
+          "on": "error"
+        },
+        {
+          "from": "uncertain",
+          "to": "settled",
+          "on": "settle"
+        },
+        {
+          "from": "unknown",
+          "to": "settled",
+          "on": "settle"
+        }
+      ]
+    },
+    {
+      "id": "create_request.state",
+      "title": "图创建请求状态",
+      "store": "table",
+      "owner": "core_kernel_graph_creation.go",
+      "targets": [
+        {
+          "table": "kernel_create_requests",
+          "column": "state"
+        }
+      ],
+      "initial": [
+        "preparing"
+      ],
+      "states": [
+        {
+          "name": "preparing",
+          "label": "准备中",
+          "tone": "running"
+        },
+        {
+          "name": "ready",
+          "label": "就绪",
+          "tone": "success",
+          "terminal": true
+        },
+        {
+          "name": "failed",
+          "label": "失败",
+          "tone": "danger"
+        }
+      ],
+      "transitions": [
+        {
+          "from": "preparing",
+          "to": "ready",
+          "on": "prepare"
+        },
+        {
+          "from": "preparing",
+          "to": "failed",
+          "on": "error"
+        },
+        {
+          "from": "failed",
+          "to": "preparing",
+          "on": "retry"
+        }
+      ]
+    },
+    {
+      "id": "operation.state",
+      "title": "执行操作状态（旧）",
+      "store": "table",
+      "owner": "core_task_operations.go",
+      "targets": [
+        {
+          "table": "operations",
+          "column": "state"
+        }
+      ],
+      "initial": [
+        "intent"
+      ],
+      "states": [
+        {
+          "name": "intent",
+          "label": "已登记",
+          "tone": "idle"
+        },
+        {
+          "name": "waiting",
+          "label": "等待中",
+          "tone": "blocked"
+        },
+        {
+          "name": "dispatched",
+          "label": "已发送",
+          "tone": "running"
+        },
+        {
+          "name": "not_sent",
+          "label": "未发送",
+          "tone": "muted"
+        },
+        {
+          "name": "interrupted",
+          "label": "已中断",
+          "tone": "danger"
+        },
+        {
+          "name": "unknown",
+          "label": "结果未知",
+          "tone": "blocked"
+        },
+        {
+          "name": "succeeded",
+          "label": "成功",
+          "tone": "success"
+        },
+        {
+          "name": "failed",
+          "label": "失败",
+          "tone": "danger"
+        },
+        {
+          "name": "skipped",
+          "label": "已跳过",
+          "tone": "muted"
+        },
+        {
+          "name": "settled",
+          "label": "已结算",
+          "tone": "success",
+          "terminal": true
+        },
+        {
+          "name": "abandoned",
+          "label": "已放弃",
+          "tone": "danger",
+          "terminal": true
+        }
+      ],
+      "transitions": [
+        {
+          "from": "intent",
+          "to": "waiting",
+          "on": "admit"
+        },
+        {
+          "from": "intent",
+          "to": "dispatched",
+          "on": "dispatch"
+        },
+        {
+          "from": "intent",
+          "to": "not_sent",
+          "on": "refuse"
+        },
+        {
+          "from": "waiting",
+          "to": "dispatched",
+          "on": "dispatch"
+        },
+        {
+          "from": "waiting",
+          "to": "failed",
+          "on": "error"
+        },
+        {
+          "from": "dispatched",
+          "to": "succeeded",
+          "on": "settle"
+        },
+        {
+          "from": "dispatched",
+          "to": "failed",
+          "on": "settle"
+        },
+        {
+          "from": "dispatched",
+          "to": "unknown",
+          "on": "interrupt"
+        },
+        {
+          "from": "dispatched",
+          "to": "not_sent",
+          "on": "refuse"
+        },
+        {
+          "from": "dispatched",
+          "to": "interrupted",
+          "on": "interrupt"
+        },
+        {
+          "from": "dispatched",
+          "to": "settled",
+          "on": "settle"
+        },
+        {
+          "from": "unknown",
+          "to": "succeeded",
+          "on": "settle"
+        },
+        {
+          "from": "unknown",
+          "to": "failed",
+          "on": "settle"
+        },
+        {
+          "from": "unknown",
+          "to": "settled",
+          "on": "settle"
+        },
+        {
+          "from": "unknown",
+          "to": "abandoned",
+          "on": "abandon"
+        },
+        {
+          "from": "interrupted",
+          "to": "settled",
+          "on": "settle"
+        },
+        {
+          "from": "succeeded",
+          "to": "settled",
+          "on": "settle"
+        },
+        {
+          "from": "failed",
+          "to": "settled",
+          "on": "settle"
+        },
+        {
+          "from": "skipped",
+          "to": "settled",
+          "on": "settle"
+        }
+      ]
+    },
+    {
+      "id": "activation.state",
+      "title": "节点激活状态（旧）",
+      "store": "table",
+      "owner": "core_task_activations.go",
+      "targets": [
+        {
+          "table": "activations",
+          "column": "state"
+        }
+      ],
+      "initial": [
+        "pending"
+      ],
+      "states": [
+        {
+          "name": "pending",
+          "label": "待激活",
+          "tone": "idle"
+        },
+        {
+          "name": "preparing",
+          "label": "准备中",
+          "tone": "running"
+        },
+        {
+          "name": "running",
+          "label": "运行中",
+          "tone": "running"
+        },
+        {
+          "name": "idle",
+          "label": "空闲",
+          "tone": "idle"
+        },
+        {
+          "name": "blocked",
+          "label": "阻塞",
+          "tone": "blocked"
+        },
+        {
+          "name": "succeeded",
+          "label": "成功",
+          "tone": "success",
+          "terminal": true
+        },
+        {
+          "name": "failed",
+          "label": "失败",
+          "tone": "danger",
+          "terminal": true
+        }
+      ],
+      "transitions": [
+        {
+          "from": "pending",
+          "to": "preparing",
+          "on": "prepare"
+        },
+        {
+          "from": "pending",
+          "to": "running",
+          "on": "start"
+        },
+        {
+          "from": "pending",
+          "to": "idle",
+          "on": "reset"
+        },
+        {
+          "from": "preparing",
+          "to": "running",
+          "on": "start"
+        },
+        {
+          "from": "running",
+          "to": "blocked",
+          "on": "block"
+        },
+        {
+          "from": "running",
+          "to": "idle",
+          "on": "reset"
+        },
+        {
+          "from": "running",
+          "to": "succeeded",
+          "on": "finish"
+        },
+        {
+          "from": "running",
+          "to": "failed",
+          "on": "finish"
+        },
+        {
+          "from": "blocked",
+          "to": "running",
+          "on": "resume"
+        },
+        {
+          "from": "blocked",
+          "to": "idle",
+          "on": "resume"
+        }
+      ]
+    }
+  ]
+}

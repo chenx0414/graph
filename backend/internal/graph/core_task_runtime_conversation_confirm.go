@@ -53,7 +53,7 @@ func (conversations *TaskRuntimeConversations) Confirm(conversationId string, in
 		ValidateProposal(proposal)
 		taskId := graphUUID()
 		sequence := kernelInt(kernelRow(runtime.store.Db, "SELECT COUNT(*) AS count FROM tasks")["count"]) + 1
-		runtime.store.CreateConfirmedTask(taskId, *conversation.ProjectId, proposal.Summary, kernelInt(row["requirement_version"]), input.TargetBranch, "running", sequence, conversationId, row["decision_snapshot"])
+		runtime.store.CreateConfirmedTask(taskId, *conversation.ProjectId, proposal.Summary, kernelInt(row["requirement_version"]), input.TargetBranch, string(PhaseRunning), sequence, conversationId, row["decision_snapshot"])
 		runtime.store.RecordProposal(taskId, 1, kernelInt(row["requirement_version"]), kernelString(row["spec"]), row["decision_snapshot"])
 		MaterializeGraph(runtime.kernel, taskId, ParseGraphDefinition(proposal.Definition), "Confirmed conversation draft")
 		runtime.store.BumpRequirementVersion(anchor.ID)

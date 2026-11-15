@@ -56,7 +56,9 @@ func (source *conversationChatSource) Load(c *chatState) error {
 		c.status = "会话内容不是预期的 JSON：" + err.Error()
 		return err
 	}
+	messages = applyLiveStreams(messages, payload)
 	c.messages = messages
+	c.roundMaster = parseRoundMaster(payload)
 	c.projectID, c.projectRoot = parseConversationScope(payload)
 	c.fingerprint = transcriptFingerprint(messages)
 	c.historyLoading = false
@@ -111,7 +113,9 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	fingerprint := transcriptFingerprint(messages)
+	live := applyLiveStreams(messages, payload)
+	fingerprint := transcriptFingerprint(live)
+	master := parseRoundMaster(payload)
 	body, bodyErr := parseConversationBody(payload)
 	tasks, tasksErr := parseGraphTasks(payload)
 	changed := false
@@ -121,11 +125,13 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 		}
 		changed = fingerprint != c.fingerprint
 		c.fingerprint = fingerprint
+		changed = changed || master != c.roundMaster
+		c.roundMaster = master
 		c.projectID, c.projectRoot = parseConversationScope(payload)
 		if c.pagedHistory {
-			c.messages = mergeMessages(c.messages, messages)
+			c.messages = applyLiveStreams(mergeMessages(c.messages, messages), payload)
 		} else {
-			c.messages = messages
+			c.messages = live
 		}
 		if bodyErr == nil {
 			var questions []openQuestion
@@ -142,11 +148,9 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 			changed = changed || !reflect.DeepEqual(tasks, c.tasks)
 			c.tasks = tasks
 		}
-		if len(messages) > 0 {
-			last := messages[len(messages)-1]
-			if last.Role == "assistant" && !messageStreaming(last) {
-				c.status = ""
-			}
+		if c.status == chatWaitStatus && roundAnswered(c.messages) && !c.roundPhase().busy() {
+			changed = true
+			c.status = ""
 		}
 	})
 	return changed, nil

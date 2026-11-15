@@ -222,8 +222,7 @@ func (e *Execution) Abandon(taskId string, reason *string, allowMasterTurn bool)
 	graphDatabaseMu.Lock()
 	defer graphDatabaseMu.Unlock()
 	task := e.store.Task(taskId)
-	switch task.Phase {
-	case "completed", "abandoned", "stopped", "stopping":
+	if taskPhaseHalting(GraphPhase(task.Phase)) {
 		Raise("invalid_input", "A "+task.Phase+" task cannot be abandoned")
 	}
 	kernel := NewKernelStore(e.store)

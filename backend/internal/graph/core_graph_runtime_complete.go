@@ -9,11 +9,11 @@ import (
 
 func (runtime *GraphRuntime) SettleCompletion() string {
 	runtime.ensureTask()
-	if runtime.State().Phase == "completed" {
+	if runtime.State().Phase == PhaseCompleted {
 		return "completed"
 	}
 	phase := runtime.State().Phase
-	if phase == "stopping" || phase == "stopped" {
+	if phase.Cancelling() {
 		Raise("invalid_graph", "Stopped graph cannot complete")
 	}
 	if !runtime.completionRequested() {

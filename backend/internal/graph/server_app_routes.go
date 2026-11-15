@@ -32,6 +32,7 @@ func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/app/rsi/status", app.serveAppRsiStatus)
 	mux.HandleFunc("POST /api/app/rsi/restart-ack", app.serveAppRsiRestartAck)
 	mux.HandleFunc("GET /api/limits", app.serveLimits)
+	mux.HandleFunc("GET /api/state-machines", app.serveStateMachines)
 	mux.HandleFunc("GET /api/insights", app.serveInsights)
 	mux.HandleFunc("GET /api/tool-stats", app.serveToolStats)
 	mux.HandleFunc("POST /api/tool-stats/clear", app.serveToolStatsClear)

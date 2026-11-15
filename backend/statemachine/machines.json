@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "parts": [
+    "machines/01-kernel.json",
+    "machines/02-runtime.json",
+    "machines/03-messages.json",
+    "machines/04-work.json",
+    "machines/05-surface.json"
+  ]
+}

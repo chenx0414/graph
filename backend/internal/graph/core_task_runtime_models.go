@@ -37,7 +37,7 @@ func (runtime *TaskRuntime) ModelsInUse() []string {
 	seen := map[string]bool{}
 	out := []string{}
 	for _, row := range kernelRows(runtime.store.Db, `SELECT DISTINCT i.model AS model FROM nodes n JOIN instances i ON i.id=n.instance_id JOIN tasks t ON t.id=n.task_id
-    WHERE t.phase IN ('discussing','running','queued') AND n.status NOT IN ('succeeded','skipped') AND i.model IS NOT NULL`) {
+    WHERE `+taskPhaseIn("t.phase", PhaseDiscussing, PhaseRunning, PhaseQueued)+` AND n.status NOT IN ('succeeded','skipped') AND i.model IS NOT NULL`) {
 		model := kernelString(row["model"])
 		if model == "" || seen[model] {
 			continue

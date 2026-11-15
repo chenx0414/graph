@@ -87,7 +87,7 @@ func (runtime *TaskRuntime) ensureSupervisorThread(projectID *string, requestID 
 			runtime.store.RegisterProject(workspace, root, "[]")
 		}
 		sequence := kernelInt(kernelRow(runtime.store.Db, "SELECT COALESCE(MAX(created_seq),0)+1 AS seq FROM tasks")["seq"])
-		runtime.store.CreateConversationTask(taskID, workspace, title, "chatting", sequence, id)
+		runtime.store.CreateConversationTask(taskID, workspace, title, string(PhaseChatting), sequence, id)
 		runtime.store.CreateConversation(id, projectID, workspace, taskID, title, sequence, NowMillis())
 		runtime.store.AssignConversationRole(id, role)
 		masterModelId := ""

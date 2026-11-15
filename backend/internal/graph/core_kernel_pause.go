@@ -7,7 +7,7 @@ func (k *KernelStore) SetNativePause(taskID string, paused bool, nodeID string, 
 		return
 	}
 	phase := k.Store.Task(taskID).Phase
-	if paused && (phase == "completed" || phase == "stopping" || phase == "stopped") {
+	if paused && GraphPhase(phase).Closed() {
 		return
 	}
 	if now == 0 {

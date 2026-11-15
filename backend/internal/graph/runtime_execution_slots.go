@@ -328,5 +328,5 @@ func ReleaseOperationExecutionSlots(store *TaskStore, operationId string) {
 }
 
 func phaseClosed(phase string) bool {
-	return phase == "stopping" || phase == "stopped" || phase == "completed"
+	return GraphPhase(phase).Closed()
 }

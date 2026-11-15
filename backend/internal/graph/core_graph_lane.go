@@ -65,11 +65,11 @@ func (lane *GraphLane) Runnable() []RunnableGraph {
 		if !ok || graphDBInt(task, "paused") != 0 || projectArchived(kernel.Store, graphDBString(task, "project_id")) {
 			continue
 		}
-		phase := graphDBString(task, "phase")
-		if task["target_branch"] != nil && task["integration_branch"] == nil && phase != "stopping" {
+		phase := GraphPhase(graphDBString(task, "phase"))
+		if task["target_branch"] != nil && task["integration_branch"] == nil && phase != PhaseStopping {
 			continue
 		}
-		if phase != "running" && phase != "idle" && phase != "blocked" && phase != "completing" && phase != "stopping" {
+		if !phase.LaneEligible() {
 			continue
 		}
 		if kernel.LatestRevision(taskId) == nil {
@@ -79,7 +79,7 @@ func (lane *GraphLane) Runnable() []RunnableGraph {
 			_, queued := graphDBRow(db, "SELECT 1 FROM kernel_queue WHERE task_id=? AND state='queued' LIMIT 1", taskId)
 			_, inbox := graphDBRow(db, "SELECT 1 FROM kernel_module_inbox WHERE task_id=? AND processed=0 LIMIT 1", taskId)
 			_, outbox := graphDBRow(db, "SELECT 1 FROM kernel_transition_outbox o JOIN kernel_module_transitions t ON t.id=o.transition_id WHERE t.task_id=? AND o.routed=0 LIMIT 1", taskId)
-			if queued && !inbox && !outbox && phase != "stopping" {
+			if queued && !inbox && !outbox && phase != PhaseStopping {
 				continue
 			}
 		}
@@ -95,7 +95,7 @@ func (lane *GraphLane) runGraph(graphId string) RunResult {
 	if revision == nil {
 		return RunResult{Drained: true}
 	}
-	lane.options.Kernel.Store.StartTaskPhase(graphId, "running", "idle")
+	lane.options.Kernel.Store.StartTaskPhase(graphId, string(PhaseRunning), string(PhaseIdle))
 	options := GraphRunnerOptions{
 		Kernel: kernel, GraphId: graphId, Signal: lane.shutdown,
 		Submit: func(string) *TurnInjection { return nil },
@@ -139,17 +139,17 @@ func (lane *GraphLane) runGraph(graphId string) RunResult {
 	runtime := NewGraphRuntime(kernel, graphId, artifacts)
 	intentRow, _ := graphDBRow(lane.db(), "SELECT completion_requested AS requested FROM kernel_lifecycle WHERE task_id=?", graphId)
 	intent := graphDBInt(intentRow, "requested") != 0
-	if state := runtime.State(); state != nil && state.Phase == "stopping" {
+	if state := runtime.State(); state != nil && state.Phase == PhaseStopping {
 		runtime.SettleStop()
-	} else if intent && runtime.State() != nil && runtime.State().Phase != "completed" && runtime.State().Phase != "stopped" {
+	} else if intent && runtime.State() != nil && runtime.State().Phase != PhaseCompleted && runtime.State().Phase != PhaseStopped {
 		if lane.options.Finalize != nil {
 			lane.options.Finalize(graphId)
 		}
-		if phase := runtime.State().Phase; phase != "stopping" && phase != "stopped" {
+		if phase := runtime.State().Phase; !phase.Cancelling() {
 			runtime.SettleCompletion()
 		}
 	}
-	if state := runtime.State(); state != nil && (state.Phase == "completed" || state.Phase == "stopped") {
+	if state := runtime.State(); state != nil && (state.Phase == PhaseCompleted || state.Phase == PhaseStopped) {
 		if lane.options.CloseGraph != nil {
 			lane.options.CloseGraph(graphId)
 		}

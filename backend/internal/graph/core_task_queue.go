@@ -12,14 +12,14 @@ func ReleaseTaskSlot(store *TaskStore, taskId string) *string {
 	if active != taskId {
 		return nil
 	}
-	next := kernelRow(store.DB, "SELECT id FROM tasks WHERE phase='queued' ORDER BY created_seq LIMIT 1")
+	next := kernelRow(store.DB, "SELECT id FROM tasks WHERE "+taskPhaseIn("phase", PhaseQueued)+" ORDER BY created_seq LIMIT 1")
 	if next == nil {
 		store.ClearRuntimeActiveTask()
 		return nil
 	}
 	id := next["id"].(string)
 	store.SetRuntimeActiveTask(id)
-	store.SetTaskPhase(id, "running")
+	store.SetTaskPhase(id, string(PhaseRunning))
 	store.Event(id, "task.started", map[string]any{})
 	return &id
 }

@@ -1,0 +1,264 @@
+{
+  "machines": [
+    {
+      "id": "artifact.state",
+      "title": "产物状态",
+      "store": "table",
+      "owner": "core_artifact_rows.go",
+      "targets": [
+        {
+          "table": "artifacts",
+          "column": "state"
+        }
+      ],
+      "initial": [
+        "published"
+      ],
+      "states": [
+        {
+          "name": "published",
+          "label": "已发布",
+          "tone": "success"
+        },
+        {
+          "name": "retired",
+          "label": "已退役",
+          "tone": "muted",
+          "terminal": true
+        }
+      ],
+      "transitions": [
+        {
+          "from": "published",
+          "to": "retired",
+          "on": "retire"
+        }
+      ]
+    },
+    {
+      "id": "git_op.state",
+      "title": "Git 操作状态",
+      "store": "table",
+      "owner": "core_git_operations.go",
+      "targets": [
+        {
+          "table": "git_ops",
+          "column": "state"
+        }
+      ],
+      "initial": [
+        "intent"
+      ],
+      "states": [
+        {
+          "name": "intent",
+          "label": "已登记",
+          "tone": "idle"
+        },
+        {
+          "name": "dispatched",
+          "label": "已执行",
+          "tone": "running"
+        },
+        {
+          "name": "blocked",
+          "label": "阻塞",
+          "tone": "blocked"
+        },
+        {
+          "name": "succeeded",
+          "label": "成功",
+          "tone": "success",
+          "terminal": true
+        },
+        {
+          "name": "failed",
+          "label": "失败",
+          "tone": "danger",
+          "terminal": true
+        }
+      ],
+      "transitions": [
+        {
+          "from": "intent",
+          "to": "dispatched",
+          "on": "run"
+        },
+        {
+          "from": "intent",
+          "to": "succeeded",
+          "on": "succeed"
+        },
+        {
+          "from": "intent",
+          "to": "failed",
+          "on": "error"
+        },
+        {
+          "from": "dispatched",
+          "to": "succeeded",
+          "on": "succeed"
+        },
+        {
+          "from": "dispatched",
+          "to": "failed",
+          "on": "error"
+        },
+        {
+          "from": "dispatched",
+          "to": "blocked",
+          "on": "block"
+        },
+        {
+          "from": "blocked",
+          "to": "dispatched",
+          "on": "unblock"
+        },
+        {
+          "from": "blocked",
+          "to": "failed",
+          "on": "error"
+        }
+      ]
+    },
+    {
+      "id": "project_preparation.state",
+      "title": "项目准备状态",
+      "store": "table",
+      "owner": "git_integration_prepare.go",
+      "targets": [
+        {
+          "table": "project_preparation",
+          "column": "state"
+        }
+      ],
+      "initial": [
+        "detected"
+      ],
+      "states": [
+        {
+          "name": "detected",
+          "label": "已检测",
+          "tone": "idle"
+        },
+        {
+          "name": "initializing",
+          "label": "初始化中",
+          "tone": "running"
+        },
+        {
+          "name": "ready",
+          "label": "就绪",
+          "tone": "success",
+          "terminal": true
+        },
+        {
+          "name": "not_a_repository",
+          "label": "非仓库",
+          "tone": "blocked",
+          "terminal": true
+        },
+        {
+          "name": "failed",
+          "label": "失败",
+          "tone": "danger"
+        }
+      ],
+      "transitions": [
+        {
+          "from": "detected",
+          "to": "initializing",
+          "on": "initialize"
+        },
+        {
+          "from": "detected",
+          "to": "ready",
+          "on": "attach"
+        },
+        {
+          "from": "initializing",
+          "to": "ready",
+          "on": "prepare"
+        },
+        {
+          "from": "initializing",
+          "to": "failed",
+          "on": "error"
+        },
+        {
+          "from": "failed",
+          "to": "initializing",
+          "on": "retry"
+        }
+      ]
+    },
+    {
+      "id": "fleet.agent_status",
+      "title": "编队 Agent 状态",
+      "store": "derived",
+      "owner": "core_agent_registry_ledger.go",
+      "states": [
+        {
+          "name": "running",
+          "label": "运行中",
+          "tone": "running"
+        },
+        {
+          "name": "idle",
+          "label": "空闲",
+          "tone": "idle"
+        },
+        {
+          "name": "blocked",
+          "label": "阻塞",
+          "tone": "blocked"
+        },
+        {
+          "name": "failed",
+          "label": "失败",
+          "tone": "danger"
+        },
+        {
+          "name": "done",
+          "label": "已完成",
+          "tone": "success",
+          "terminal": true
+        },
+        {
+          "name": "stopped",
+          "label": "已停止",
+          "tone": "muted",
+          "terminal": true
+        }
+      ]
+    },
+    {
+      "id": "providers.credential",
+      "title": "供应商凭据状态",
+      "store": "derived",
+      "owner": "app/providers_state.go",
+      "states": [
+        {
+          "name": "unconfigured",
+          "label": "未配置",
+          "tone": "idle"
+        },
+        {
+          "name": "unresolved",
+          "label": "凭据缺失",
+          "tone": "danger"
+        },
+        {
+          "name": "connected",
+          "label": "已连接",
+          "tone": "success"
+        },
+        {
+          "name": "disabled",
+          "label": "未启用",
+          "tone": "muted"
+        }
+      ]
+    }
+  ]
+}

@@ -22,7 +22,7 @@ func (s *shellState) trajectoryData(ctx *ui.Context) *conversationTrajectory {
 	if state.data != nil && state.scopeKey == s.chatScope().key() {
 		return state.data
 	}
-	if state.data != nil && !state.loading {
+	if state.data != nil && !state.loading() {
 		go s.ensureTrajectory()
 	}
 	text := "正在整理轨迹…"
@@ -30,7 +30,7 @@ func (s *shellState) trajectoryData(ctx *ui.Context) *conversationTrajectory {
 		text = state.failed
 	}
 	kit.Text(ctx, text, t.Text.Sm).TextColor(t.Muted)
-	if !state.loading && (state.failed == "" || state.scopeKey != s.chatScope().key()) {
+	if !state.loading() && (state.failed == "" || state.scopeKey != s.chatScope().key()) {
 		go s.ensureTrajectory()
 	}
 	return nil

@@ -67,14 +67,14 @@ func SendKernelMainMessage(kernel *KernelStore, graphID, from string, input Node
 		if _, ok := nodes[from]; !ok {
 			Raise("invalid_input", "A peer sender must be an agent of this graph")
 		}
-		phase := ""
+		phase := GraphPhase("")
 		if state := graph.State(); state != nil {
-			phase = string(state.Phase)
+			phase = state.Phase
 		}
-		if phase == "completed" {
+		if phase == PhaseCompleted {
 			Raise("completing", "Graph "+graphID+" is completed; chat is closed")
 		}
-		if phase == "stopping" || phase == "stopped" {
+		if phase.Cancelling() {
 			Raise("stopping", "Graph "+graphID+" is stopping; chat is closed")
 		}
 		conversation := SupervisorConversationForTask(kernel.Store, graphID)

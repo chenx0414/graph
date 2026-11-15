@@ -42,7 +42,7 @@ func (runtime *GraphRuntime) Create(definition any, request, projectId string) C
 func (runtime *GraphRuntime) Patch(baseRevision int, changes PatchChange) GraphPatchResult {
 	runtime.ensureTask()
 	phase := runtime.State().Phase
-	if phase == "completed" || phase == "stopping" || phase == "stopped" {
+	if phase.Closed() {
 		Raise("invalid_graph", "Ended graph cannot be patched")
 	}
 	latest := runtime.kernel.LatestRevision(runtime.graphId)

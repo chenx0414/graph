@@ -129,12 +129,7 @@ func (c *chatState) answer(question openQuestion, value string) {
 }
 
 func (c *chatState) busy() bool {
-	for _, message := range c.messages {
-		if messageStreaming(message) {
-			return true
-		}
-	}
-	return false
+	return c.roundPhase().busy()
 }
 
 func (c *chatState) send() {
@@ -169,8 +164,7 @@ func (c *chatState) follow() {
 		if len(c.messages) == 0 {
 			continue
 		}
-		last := c.messages[len(c.messages)-1]
-		if last.Role == "assistant" && !messageStreaming(last) {
+		if !c.roundPhase().busy() && roundAnswered(c.messages) {
 			return
 		}
 	}

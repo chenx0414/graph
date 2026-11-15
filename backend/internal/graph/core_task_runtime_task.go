@@ -279,11 +279,11 @@ func (task *TaskRuntimeTask) Accept(input TaskRuntimeAcceptInput) Receipt {
 		ValidateProposal(proposal)
 		MaterializeGraph(runtime.kernel, task.taskId, ParseGraphDefinition(proposal.Definition), "Confirmed task graph")
 		active := kernelString(kernelRow(runtime.store.Db, "SELECT active_task FROM runtime")["active_task"])
-		phase := "queued"
+		phase := PhaseQueued
 		if active == "" || active == task.taskId {
-			phase = "running"
+			phase = PhaseRunning
 		}
-		runtime.store.AcceptProposal(task.taskId, input.ProposalVersion, input.TargetBranch, phase)
+		runtime.store.AcceptProposal(task.taskId, input.ProposalVersion, input.TargetBranch, string(phase))
 		if active == "" || active == task.taskId {
 			runtime.store.SetRuntimeActiveTask(task.taskId)
 		}

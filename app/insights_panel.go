@@ -15,12 +15,12 @@ func (s *shellState) insightsData(ctx *ui.Context) *trajectoryInsights {
 	if state.data != nil {
 		return state.data
 	}
-	text := "正在汇总近 7 天…"
+	text := "正在汇总近 " + strconv.Itoa(s.insightsDays()) + " 天…"
 	if state.failed != "" {
 		text = state.failed
 	}
 	kit.Text(ctx, text, t.Text.Sm).TextColor(t.Muted)
-	if !state.loading && state.failed == "" {
+	if !state.loading() && state.failed == "" {
 		go s.ensureInsights()
 	}
 	return nil
@@ -116,7 +116,7 @@ func (s *shellState) insightsSessionsCard(ctx *ui.Context) {
 	}
 	trajectoryCardHeader(ctx, iconChat, strconv.Itoa(len(data.Sessions))+" 个会话")
 	if len(data.Sessions) == 0 {
-		kit.Text(ctx, "近 7 天还没有会话用量。", t.Text.Sm).TextColor(t.Muted)
+		kit.Text(ctx, "近 "+strconv.Itoa(s.insightsDays())+" 天还没有会话用量。", t.Text.Sm).TextColor(t.Muted)
 		return
 	}
 	sessions := data.Sessions

@@ -104,7 +104,7 @@ func (runtime *TaskRuntime) spawnAgentTransaction(parent AgentSpawnParent, input
 	}
 	runtime.store.CreateConversation(childId, conversationProjectId, workspaceProjectId, taskId, title, sequence, createdAt)
 	runtime.store.AssignConversationRole(childId, ConversationChild)
-	runtime.store.CreateConversationTask(taskId, workspaceProjectId, input.Objective, "chatting", sequence, childId)
+	runtime.store.CreateConversationTask(taskId, workspaceProjectId, input.Objective, string(PhaseChatting), sequence, childId)
 	runtime.createMasterNode(taskId)
 	if model != "" && model != stringValue(runtime.masterModel()) {
 		runtime.bindChildModel(taskId, model)

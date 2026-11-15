@@ -13,14 +13,15 @@ import (
 )
 
 type codexActivity struct {
-	kind    string
-	text    string
-	label   string
-	command string
-	args    string
-	output  string
-	failed  bool
-	key     string
+	kind      string
+	text      string
+	label     string
+	command   string
+	args      string
+	output    string
+	failed    bool
+	cancelled bool
+	key       string
 }
 
 func codexActivityLabel(name string) string {
@@ -76,7 +77,8 @@ func codexActivities(run transcriptRun) []codexActivity {
 		if payload == "" {
 			payload = codexToolPayload(message.Text, name)
 		}
-		running := message.State != "done"
+		running := messageActive(message)
+		cancelled := messagePhaseOf(message) == messagePhaseCancelled
 		switch {
 		case codexCommandTools[name]:
 			if payload == "" {
@@ -85,6 +87,11 @@ func codexActivities(run transcriptRun) []codexActivity {
 			if running {
 				flushCommands()
 				activities = append(activities, codexActivity{kind: "command", text: "正在运行 " + payload, label: "Shell", command: payload, key: message.Data.ToolCallID})
+				continue
+			}
+			if cancelled {
+				flushCommands()
+				activities = append(activities, codexActivity{kind: "command", text: "已取消 " + payload, label: "Shell", command: payload, cancelled: true, key: message.Data.ToolCallID})
 				continue
 			}
 			if len(commands) == 0 {
@@ -106,7 +113,10 @@ func codexActivities(run transcriptRun) []codexActivity {
 			if running {
 				text = "正在查看图像"
 			}
-			activities = append(activities, codexActivity{kind: "image", text: text, label: "Image", args: message.Data.Args, output: message.Data.Output, key: message.Data.ToolCallID})
+			if cancelled {
+				text = "已取消查看图像"
+			}
+			activities = append(activities, codexActivity{kind: "image", text: text, label: "Image", args: message.Data.Args, output: message.Data.Output, cancelled: cancelled, key: message.Data.ToolCallID})
 		case codexEditTools[name]:
 			flushCommands()
 			text := "已编辑文件"
@@ -119,7 +129,13 @@ func codexActivities(run transcriptRun) []codexActivity {
 					text = "正在编辑 " + payload
 				}
 			}
-			activities = append(activities, codexActivity{kind: "edit", text: text, label: "Edit", command: payload, args: message.Data.Args, output: message.Data.Output, failed: message.Data.Error, key: message.Data.ToolCallID})
+			if cancelled {
+				text = "已取消编辑"
+				if payload != "" {
+					text = "已取消编辑 " + payload
+				}
+			}
+			activities = append(activities, codexActivity{kind: "edit", text: text, label: "Edit", command: payload, args: message.Data.Args, output: message.Data.Output, failed: message.Data.Error, cancelled: cancelled, key: message.Data.ToolCallID})
 		default:
 			flushCommands()
 			label := name
@@ -130,7 +146,10 @@ func codexActivities(run transcriptRun) []codexActivity {
 			if running {
 				text = label + "运行中"
 			}
-			activities = append(activities, codexActivity{kind: "tool", text: text, label: codexActivityLabel(name), args: message.Data.Args, output: message.Data.Output, failed: message.Data.Error, key: message.Data.ToolCallID})
+			if cancelled {
+				text = label + "已取消"
+			}
+			activities = append(activities, codexActivity{kind: "tool", text: text, label: codexActivityLabel(name), args: message.Data.Args, output: message.Data.Output, failed: message.Data.Error, cancelled: cancelled, key: message.Data.ToolCallID})
 		}
 	}
 	flushCommands()
@@ -275,6 +294,11 @@ func (c *chatState) activityPanel(ctx *ui.Context, activity codexActivity) {
 			kit.Text(ctx, output, t.Text.Xs).Font(gwtheme.MonoFont).TextColor(t.Muted)
 		}
 		ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center).Justify(ui.End).Children(func() {
+			if activity.cancelled {
+				ui.Icon(ctx, iconClose).Size(gwtheme.IconXs, gwtheme.IconXs).TextColor(t.Muted)
+				kit.Text(ctx, "已取消", t.Text.Xs).TextColor(t.Muted)
+				return
+			}
 			if activity.failed {
 				ui.Icon(ctx, iconClose).Size(gwtheme.IconXs, gwtheme.IconXs).TextColor(t.Danger)
 				kit.Text(ctx, "失败", t.Text.Xs).TextColor(t.Danger)

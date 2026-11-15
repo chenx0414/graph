@@ -30,7 +30,7 @@ func (k *KernelStore) AuthorizedBudget(taskID, nodeID string) *TokenBudget {
 
 func (k *KernelStore) SetAuthorizedBudget(taskID, nodeID string, tokens *int64) {
 	phase := k.Store.Task(taskID).Phase
-	if phase == "completed" || phase == "stopping" || phase == "stopped" {
+	if GraphPhase(phase).Closed() {
 		Raise("invalid_graph", "Ended graph cannot change budget")
 	}
 	definition := k.LatestRevision(taskID)

@@ -16,7 +16,7 @@ func KernelToolGate(kernel *KernelStore, graphID, nodeID string, kind string, cl
 			if projectArchived(kernel.Store, task.ProjectID) {
 				Raise("paused", "Project is archived")
 			}
-			phaseClosed := task.Phase == "stopping" || task.Phase == "stopped" || task.Phase == "completed"
+			phaseClosed := GraphPhase(task.Phase).Closed()
 			if execution == nil || closing() || task.Paused != 0 || paused || phaseClosed {
 				Raise("paused", "Node tool dispatch is closed")
 			}

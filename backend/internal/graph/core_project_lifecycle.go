@@ -48,7 +48,7 @@ func (runtime *TaskRuntime) ArchiveProject(projectID, requestID string) ProjectL
 				runtime.store.ArchiveProject(projectID, NowMillis())
 				runtime.store.PauseProjectWork(projectID)
 				runtime.store.PauseProjectTasks(projectID)
-				for _, row := range kernelRows(runtime.store.Db, `SELECT id FROM tasks WHERE project_id=? AND phase NOT IN ('chatting','completed','stopping','stopped','abandoned')`, projectID) {
+				for _, row := range kernelRows(runtime.store.Db, `SELECT id FROM tasks WHERE project_id=? AND `+taskPhaseIn("phase", taskPhasePausedOnArchiveList()...), projectID) {
 					runtime.kernel.SetNativePause(kernelString(row["id"]), true, "", 0)
 				}
 				runtime.store.Event(nil, "project.archived", map[string]any{"projectId": projectID, "requestId": requestID})

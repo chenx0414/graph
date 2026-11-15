@@ -40,7 +40,7 @@ func (runtime *TaskRuntime) CheckProjects(projects []ProjectConfig) {
 		if previous == nil || kernelString(previous["root"]) == root {
 			continue
 		}
-		active := kernelInt(kernelRow(runtime.store.Db, "SELECT COUNT(*) AS count FROM tasks WHERE project_id=? AND phase IN ('discussing','running','queued')", project.Id)["count"])
+		active := kernelInt(kernelRow(runtime.store.Db, "SELECT COUNT(*) AS count FROM tasks WHERE project_id=? AND "+taskPhaseIn("phase", PhaseDiscussing, PhaseRunning, PhaseQueued), project.Id)["count"])
 		if active > 0 {
 			Raise("project_conflict", "Project "+project.Id+" has tasks in flight; its root cannot change until they finish")
 		}
@@ -79,19 +79,19 @@ func (runtime *TaskRuntime) RecoverMasters() int {
 	}
 	created := 0
 	runtime.store.Transaction(func() any {
-		pending := kernelRows(runtime.store.Db, "SELECT id, project_id, phase FROM tasks WHERE phase IN ('discussing','chatting') ORDER BY created_seq")
+		pending := kernelRows(runtime.store.Db, "SELECT id, project_id, phase FROM tasks WHERE "+taskPhaseIn("phase", PhaseDiscussing, PhaseChatting)+" ORDER BY created_seq")
 		allowed := runtime.allowedProjects()
 		recoverable := []map[string]any{}
 		for _, task := range pending {
-			phase := kernelString(task["phase"])
+			phase := GraphPhase(kernelString(task["phase"]))
 			projectId := kernelString(task["project_id"])
-			if phase == "chatting" {
+			if phase == PhaseChatting {
 				conversation := ConversationForTask(runtime.store, kernelString(task["id"]))
 				if conversation != nil && conversation.Role == ConversationHistory {
 					continue
 				}
 			}
-			if phase != "chatting" && !allowed[projectId] {
+			if phase != PhaseChatting && !allowed[projectId] {
 				continue
 			}
 			recoverable = append(recoverable, task)
@@ -119,7 +119,7 @@ func (runtime *TaskRuntime) RecoverMasters() int {
 		active := kernelString(kernelRow(runtime.store.Db, "SELECT active_task FROM runtime")["active_task"])
 		if active == "" {
 			for _, task := range recoverable {
-				if kernelString(task["phase"]) != "discussing" {
+				if kernelString(task["phase"]) != string(PhaseDiscussing) {
 					continue
 				}
 				runtime.store.SetRuntimeActiveTask(kernelString(task["id"]))

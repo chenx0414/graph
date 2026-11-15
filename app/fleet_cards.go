@@ -10,14 +10,14 @@ import (
 )
 
 func fleetStatusColor(t gwtheme.Tokens, status string) ui.Color {
-	switch status {
-	case "running":
+	switch toneOf(workStatusOf(status)) {
+	case toneActive:
 		return t.Unread
-	case "completed", "done":
+	case toneSuccess:
 		return t.Success
-	case "blocked":
+	case toneAttention:
 		return t.Attention
-	case "failed":
+	case toneDanger:
 		return t.Danger
 	}
 	return t.Idle

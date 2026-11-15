@@ -82,7 +82,7 @@ func (integration *GitIntegration) ReleaseWorkcopies(taskId string) int {
 
 func (integration *GitIntegration) SweepTerminalWorkcopies() int {
 	rows := graphDBAll(integration.store.Db, `SELECT DISTINCT w.task_id FROM worktrees w JOIN tasks t ON t.id=w.task_id
-      WHERE t.phase IN ('completed','abandoned')`)
+      WHERE `+taskPhaseIn("t.phase", terminalWorkcopyPhases()...))
 	for _, row := range rows {
 		integration.ReleaseWorkcopies(graphDBString(row, "task_id"))
 	}

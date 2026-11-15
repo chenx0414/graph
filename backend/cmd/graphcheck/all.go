@@ -35,6 +35,9 @@ func runAll(root string) int {
 	if code := runOwnership(root, nil); code != 0 {
 		return code
 	}
+	if code := runMachines(root, nil); code != 0 {
+		return code
+	}
 	if code := runHarness(root, nil); code != 0 {
 		return code
 	}

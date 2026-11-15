@@ -20,14 +20,15 @@ type transcriptMessageData struct {
 }
 
 type transcriptMessage struct {
-	ID        string                `json:"id"`
-	Seq       int64                 `json:"seq"`
-	Role      string                `json:"role"`
-	Kind      string                `json:"kind"`
-	Text      string                `json:"text"`
-	State     string                `json:"state"`
-	CreatedAt int64                 `json:"createdAt"`
-	Data      transcriptMessageData `json:"data"`
+	ID          string                `json:"id"`
+	Seq         int64                 `json:"seq"`
+	Role        string                `json:"role"`
+	Kind        string                `json:"kind"`
+	Text        string                `json:"text"`
+	State       string                `json:"state"`
+	OperationID string                `json:"operationId"`
+	CreatedAt   int64                 `json:"createdAt"`
+	Data        transcriptMessageData `json:"data"`
 }
 
 type transcriptRun struct {
@@ -60,10 +61,6 @@ func (c *chatState) runs() []transcriptRun {
 	return groupRunsAt(c.messages, c.runBoundaries)
 }
 
-func messageStreaming(message transcriptMessage) bool {
-	return message.Role == "assistant" && message.State == "streaming"
-}
-
 func runIdentity(run transcriptRun) any {
 	if len(run.messages) == 0 {
 		return ""
@@ -84,10 +81,6 @@ func runKey(run transcriptRun) string {
 	return run.messages[0].Data.ToolCallID
 }
 
-func messageQueued(message transcriptMessage) bool {
-	return message.State == "queued"
-}
-
 type chatState struct {
 	refreshMu       sync.Mutex
 	tasks           []taskRow
@@ -97,6 +90,7 @@ type chatState struct {
 	preview         string
 	questions       []openQuestion
 	paused          bool
+	roundMaster     string
 	models          []modelChoice
 	modelsLoading   bool
 	currentModel    string

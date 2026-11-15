@@ -6,10 +6,7 @@ func (runtime *GraphRuntime) State() *GraphStateRow {
 		return nil
 	}
 	latest := runtime.kernel.LatestRevision(runtime.graphId)
-	phase := GraphPhase(kernelString(row["phase"]))
-	if kernelInt(row["paused"]) != 0 && phase != "completed" && phase != "stopping" && phase != "stopped" {
-		phase = "paused"
-	}
+	phase := displayPhase(kernelString(row["phase"]), kernelInt(row["paused"]) != 0)
 	revision := 0
 	if latest != nil {
 		revision = latest.Version
@@ -19,7 +16,7 @@ func (runtime *GraphRuntime) State() *GraphStateRow {
 
 func (runtime *GraphRuntime) setPhase(phase GraphPhase) {
 	runtime.kernel.Store.SetTaskPhase(runtime.graphId, string(phase))
-	if phase == "completed" || phase == "stopped" {
+	if phase == PhaseCompleted || phase == PhaseStopped {
 		runtime.kernel.FinishNativePauses(runtime.graphId, nil)
 		ReleaseTaskSlot(runtime.kernel.Store, runtime.graphId)
 	}
@@ -48,10 +45,10 @@ func (runtime *GraphRuntime) DeliverEndpoint(endpoint string, value any) DirectD
 	if state := runtime.State(); state != nil {
 		phase = state.Phase
 	}
-	if runtime.completionRequested() || phase == "completing" || phase == "completed" {
+	if runtime.completionRequested() || phase.CompletionClosed() {
 		Raise("completing", "Graph "+runtime.graphId+" is completing; external delivery is closed")
 	}
-	if phase == "stopping" || phase == "stopped" {
+	if phase.Cancelling() {
 		Raise("stopping", "Graph "+runtime.graphId+" is stopping; external delivery is closed")
 	}
 	return runtime.kernel.DeliverDirect(runtime.graphId, endpoint, value)
@@ -63,10 +60,10 @@ func (runtime *GraphRuntime) Chat(nodeId, text string, internal bool) QueueRow {
 	if state := runtime.State(); state != nil {
 		phase = state.Phase
 	}
-	if phase == "completed" || (!internal && (runtime.completionRequested() || phase == "completing")) {
+	if phase == PhaseCompleted || (!internal && (runtime.completionRequested() || phase == PhaseCompleting)) {
 		Raise("completing", "Graph "+runtime.graphId+" is completing; execution-triggering chat is closed")
 	}
-	if phase == "stopping" || phase == "stopped" {
+	if phase.Cancelling() {
 		Raise("stopping", "Graph "+runtime.graphId+" is stopping; chat is closed")
 	}
 	latest := runtime.kernel.LatestRevision(runtime.graphId)
@@ -82,24 +79,24 @@ func (runtime *GraphRuntime) Chat(nodeId, text string, internal bool) QueueRow {
 func (runtime *GraphRuntime) Complete() GraphStateRow {
 	runtime.ensureTask()
 	phase := runtime.State().Phase
-	if phase == "completed" {
+	if phase == PhaseCompleted {
 		return *runtime.State()
 	}
-	if phase == "stopping" || phase == "stopped" {
+	if phase.Cancelling() {
 		Raise("invalid_graph", "Stopped graph cannot complete")
 	}
 	runtime.kernel.RequestGraphCompletion(runtime.graphId)
-	runtime.setPhase("completing")
+	runtime.setPhase(PhaseCompleting)
 	return *runtime.State()
 }
 
 func (runtime *GraphRuntime) WithdrawComplete() GraphStateRow {
 	runtime.ensureTask()
 	phase := runtime.State().Phase
-	if phase == "completed" || phase == "stopping" || phase == "stopped" || !runtime.completionRequested() {
+	if phase.Closed() || !runtime.completionRequested() {
 		Raise("invalid_graph", "Graph "+runtime.graphId+" is not completing")
 	}
 	runtime.kernel.ClearGraphCompletionRequest(runtime.graphId)
-	runtime.setPhase("running")
+	runtime.setPhase(PhaseRunning)
 	return *runtime.State()
 }

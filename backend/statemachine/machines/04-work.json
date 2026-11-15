@@ -1,0 +1,461 @@
+{
+  "machines": [
+    {
+      "id": "work_request.state",
+      "title": "工作请求状态",
+      "store": "table",
+      "owner": "core_task_work_requests.go",
+      "targets": [
+        {
+          "table": "work_requests",
+          "column": "state"
+        }
+      ],
+      "initial": [
+        "clarifying"
+      ],
+      "states": [
+        {
+          "name": "clarifying",
+          "label": "澄清中",
+          "tone": "running"
+        },
+        {
+          "name": "ready",
+          "label": "就绪",
+          "tone": "idle"
+        },
+        {
+          "name": "dispatched",
+          "label": "已派发",
+          "tone": "running"
+        },
+        {
+          "name": "completed",
+          "label": "已完成",
+          "tone": "success",
+          "terminal": true
+        },
+        {
+          "name": "cancelled",
+          "label": "已取消",
+          "tone": "muted",
+          "terminal": true
+        }
+      ],
+      "transitions": [
+        {
+          "from": "clarifying",
+          "to": "ready",
+          "on": "confirm"
+        },
+        {
+          "from": "clarifying",
+          "to": "cancelled",
+          "on": "cancel"
+        },
+        {
+          "from": "clarifying",
+          "to": "dispatched",
+          "on": "dispatch"
+        },
+        {
+          "from": "ready",
+          "to": "clarifying",
+          "on": "revise"
+        },
+        {
+          "from": "ready",
+          "to": "dispatched",
+          "on": "dispatch"
+        },
+        {
+          "from": "ready",
+          "to": "cancelled",
+          "on": "cancel"
+        },
+        {
+          "from": "dispatched",
+          "to": "completed",
+          "on": "finish"
+        },
+        {
+          "from": "dispatched",
+          "to": "cancelled",
+          "on": "cancel"
+        }
+      ]
+    },
+    {
+      "id": "work_graph.state",
+      "title": "工作图状态",
+      "store": "table",
+      "owner": "core_task_work_graphs.go",
+      "targets": [
+        {
+          "table": "work_graphs",
+          "column": "state"
+        }
+      ],
+      "initial": [
+        "preparing"
+      ],
+      "states": [
+        {
+          "name": "preparing",
+          "label": "准备中",
+          "tone": "running"
+        },
+        {
+          "name": "ready",
+          "label": "就绪",
+          "tone": "success"
+        },
+        {
+          "name": "blocked",
+          "label": "阻塞",
+          "tone": "blocked"
+        }
+      ],
+      "transitions": [
+        {
+          "from": "preparing",
+          "to": "ready",
+          "on": "prepare"
+        },
+        {
+          "from": "preparing",
+          "to": "blocked",
+          "on": "error"
+        },
+        {
+          "from": "blocked",
+          "to": "preparing",
+          "on": "retry"
+        },
+        {
+          "from": "blocked",
+          "to": "ready",
+          "on": "prepare"
+        }
+      ]
+    },
+    {
+      "id": "continuation.state",
+      "title": "续跑请求状态",
+      "store": "table",
+      "owner": "core_rsi_continuation.go",
+      "targets": [
+        {
+          "table": "rsi_continuations",
+          "column": "state"
+        },
+        {
+          "table": "pause_continuations",
+          "column": "state"
+        }
+      ],
+      "initial": [
+        "waiting"
+      ],
+      "states": [
+        {
+          "name": "waiting",
+          "label": "等待中",
+          "tone": "idle"
+        },
+        {
+          "name": "ready",
+          "label": "就绪",
+          "tone": "blocked"
+        },
+        {
+          "name": "consumed",
+          "label": "已消费",
+          "tone": "success"
+        },
+        {
+          "name": "cancelled",
+          "label": "已取消",
+          "tone": "muted",
+          "terminal": true
+        }
+      ],
+      "transitions": [
+        {
+          "from": "waiting",
+          "to": "ready",
+          "on": "commit"
+        },
+        {
+          "from": "waiting",
+          "to": "cancelled",
+          "on": "cancel"
+        },
+        {
+          "from": "ready",
+          "to": "consumed",
+          "on": "resume"
+        },
+        {
+          "from": "ready",
+          "to": "cancelled",
+          "on": "cancel"
+        },
+        {
+          "from": "consumed",
+          "to": "ready",
+          "on": "replay"
+        }
+      ]
+    },
+    {
+      "id": "wake_intent.state",
+      "title": "唤醒意图状态",
+      "store": "table",
+      "owner": "core_wake_ledger.go",
+      "targets": [
+        {
+          "table": "wake_intents",
+          "column": "state"
+        }
+      ],
+      "initial": [
+        "waiting"
+      ],
+      "states": [
+        {
+          "name": "waiting",
+          "label": "等待中",
+          "tone": "idle"
+        },
+        {
+          "name": "ready",
+          "label": "就绪",
+          "tone": "blocked"
+        },
+        {
+          "name": "consumed",
+          "label": "已消费",
+          "tone": "success"
+        }
+      ],
+      "transitions": [
+        {
+          "from": "waiting",
+          "to": "ready",
+          "on": "deliver"
+        },
+        {
+          "from": "ready",
+          "to": "consumed",
+          "on": "wake"
+        },
+        {
+          "from": "consumed",
+          "to": "ready",
+          "on": "replay"
+        }
+      ]
+    },
+    {
+      "id": "deferred_tool_call.state",
+      "title": "延迟工具调用状态",
+      "store": "table",
+      "owner": "core_deferred_tool_calls.go",
+      "targets": [
+        {
+          "table": "deferred_tool_calls",
+          "column": "state"
+        }
+      ],
+      "initial": [
+        "accepted"
+      ],
+      "states": [
+        {
+          "name": "accepted",
+          "label": "已受理",
+          "tone": "idle"
+        },
+        {
+          "name": "running",
+          "label": "执行中",
+          "tone": "running"
+        },
+        {
+          "name": "settled",
+          "label": "已结算",
+          "tone": "success",
+          "terminal": true
+        },
+        {
+          "name": "failed",
+          "label": "失败",
+          "tone": "danger",
+          "terminal": true
+        },
+        {
+          "name": "cancelled",
+          "label": "已取消",
+          "tone": "muted",
+          "terminal": true
+        },
+        {
+          "name": "timed_out",
+          "label": "已超时",
+          "tone": "danger",
+          "terminal": true
+        },
+        {
+          "name": "interrupted",
+          "label": "已中断",
+          "tone": "danger",
+          "terminal": true
+        }
+      ],
+      "transitions": [
+        {
+          "from": "accepted",
+          "to": "running",
+          "on": "start"
+        },
+        {
+          "from": "accepted",
+          "to": "cancelled",
+          "on": "cancel"
+        },
+        {
+          "from": "running",
+          "to": "settled",
+          "on": "settle"
+        },
+        {
+          "from": "running",
+          "to": "failed",
+          "on": "error"
+        },
+        {
+          "from": "running",
+          "to": "cancelled",
+          "on": "cancel"
+        },
+        {
+          "from": "running",
+          "to": "timed_out",
+          "on": "timeout"
+        },
+        {
+          "from": "running",
+          "to": "interrupted",
+          "on": "interrupt"
+        }
+      ]
+    },
+    {
+      "id": "conversation_goal.status",
+      "title": "会话目标状态",
+      "store": "table",
+      "owner": "core_conversation_goal.go",
+      "targets": [
+        {
+          "table": "conversation_goals",
+          "column": "status"
+        }
+      ],
+      "initial": [
+        "active"
+      ],
+      "states": [
+        {
+          "name": "active",
+          "label": "进行中",
+          "tone": "running"
+        },
+        {
+          "name": "paused",
+          "label": "已暂停",
+          "tone": "blocked"
+        },
+        {
+          "name": "verifying",
+          "label": "验证中",
+          "tone": "running"
+        },
+        {
+          "name": "usage_limited",
+          "label": "用量受限",
+          "tone": "blocked"
+        },
+        {
+          "name": "budget_limited",
+          "label": "预算受限",
+          "tone": "blocked"
+        },
+        {
+          "name": "completed",
+          "label": "已完成",
+          "tone": "success",
+          "terminal": true
+        }
+      ],
+      "transitions": [
+        {
+          "from": "active",
+          "to": "paused",
+          "on": "pause"
+        },
+        {
+          "from": "active",
+          "to": "verifying",
+          "on": "verify"
+        },
+        {
+          "from": "active",
+          "to": "usage_limited",
+          "on": "usage"
+        },
+        {
+          "from": "active",
+          "to": "budget_limited",
+          "on": "budget"
+        },
+        {
+          "from": "active",
+          "to": "completed",
+          "on": "finish"
+        },
+        {
+          "from": "paused",
+          "to": "active",
+          "on": "resume"
+        },
+        {
+          "from": "verifying",
+          "to": "active",
+          "on": "reject"
+        },
+        {
+          "from": "verifying",
+          "to": "completed",
+          "on": "accept"
+        },
+        {
+          "from": "verifying",
+          "to": "budget_limited",
+          "on": "budget"
+        },
+        {
+          "from": "usage_limited",
+          "to": "active",
+          "on": "resume"
+        },
+        {
+          "from": "budget_limited",
+          "to": "active",
+          "on": "top-up"
+        }
+      ]
+    }
+  ]
+}

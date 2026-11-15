@@ -220,7 +220,7 @@ func (k *KernelStore) NoteExecutionAttempt(executionID string) int {
 
 func (k *KernelStore) assertOutputsOpen(taskID string) {
 	phase := k.Store.Task(taskID).Phase
-	if phase == "stopping" || phase == "stopped" || phase == "completed" {
+	if GraphPhase(phase).Closed() {
 		Raise("invalid_graph", "Graph "+taskID+" is "+phase+"; new outputs are closed")
 	}
 }

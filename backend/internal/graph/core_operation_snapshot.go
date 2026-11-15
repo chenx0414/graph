@@ -103,7 +103,7 @@ func (l *OperationLifecycle) Recover() int {
         JOIN messages m ON m.operation_id=o.id AND m.role='user' AND m.state='delivered'
         JOIN tasks t ON t.id=o.task_id
         JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id
-        WHERE o.state='not_sent' AND t.phase='chatting' AND n.status IN ('pending','failed')
+        WHERE o.state='not_sent' AND `+taskPhaseIn("t.phase", PhaseChatting)+` AND n.status IN ('pending','failed')
           AND o.activation_id=n.activation_id)
         SELECT o.* FROM candidates o WHERE NOT EXISTS (SELECT 1 FROM operations later WHERE later.task_id=o.task_id AND later.node_id=o.node_id
             AND later.rowid>(SELECT rowid FROM operations WHERE id=o.id) AND (later.state!='not_sent' OR later.result IS NOT NULL))

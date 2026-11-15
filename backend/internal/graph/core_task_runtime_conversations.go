@@ -76,7 +76,7 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 		if len([]rune(title)) > 120 {
 			title = string([]rune(title)[:120])
 		}
-		runtime.store.CreateConversationTask(taskId, workspaceProjectId, title, "chatting", sequence, conversationId)
+		runtime.store.CreateConversationTask(taskId, workspaceProjectId, title, string(PhaseChatting), sequence, conversationId)
 		runtime.store.CreateConversation(conversationId, projectId, workspaceProjectId, taskId, title, sequence, NowMillis())
 		if runtime.master != nil && runtime.masterModel() != nil {
 			runtime.createMasterNode(taskId)

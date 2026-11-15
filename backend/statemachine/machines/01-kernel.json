@@ -1,0 +1,548 @@
+{
+  "machines": [
+    {
+      "id": "task.phase",
+      "title": "任务阶段",
+      "store": "table",
+      "owner": "core_task_lifecycle.go",
+      "targets": [
+        {
+          "table": "tasks",
+          "column": "phase"
+        }
+      ],
+      "initial": [
+        "discussing"
+      ],
+      "states": [
+        {
+          "name": "discussing",
+          "label": "待确认",
+          "tone": "idle"
+        },
+        {
+          "name": "chatting",
+          "label": "对话中",
+          "tone": "running"
+        },
+        {
+          "name": "queued",
+          "label": "排队中",
+          "tone": "idle"
+        },
+        {
+          "name": "running",
+          "label": "运行中",
+          "tone": "running"
+        },
+        {
+          "name": "idle",
+          "label": "空闲",
+          "tone": "idle"
+        },
+        {
+          "name": "blocked",
+          "label": "阻塞",
+          "tone": "blocked"
+        },
+        {
+          "name": "completing",
+          "label": "收尾中",
+          "tone": "running"
+        },
+        {
+          "name": "completed",
+          "label": "已完成",
+          "tone": "success",
+          "terminal": true
+        },
+        {
+          "name": "stopping",
+          "label": "停止中",
+          "tone": "running"
+        },
+        {
+          "name": "stopped",
+          "label": "已停止",
+          "tone": "muted",
+          "terminal": true
+        },
+        {
+          "name": "abandoned",
+          "label": "已放弃",
+          "tone": "danger",
+          "terminal": true
+        }
+      ],
+      "transitions": [
+        {
+          "from": "discussing",
+          "to": "chatting",
+          "on": "chat"
+        },
+        {
+          "from": "discussing",
+          "to": "queued",
+          "on": "accept"
+        },
+        {
+          "from": "discussing",
+          "to": "running",
+          "on": "accept"
+        },
+        {
+          "from": "chatting",
+          "to": "running",
+          "on": "accept"
+        },
+        {
+          "from": "queued",
+          "to": "running",
+          "on": "dispatch"
+        },
+        {
+          "from": "queued",
+          "to": "idle",
+          "on": "drain"
+        },
+        {
+          "from": "queued",
+          "to": "blocked",
+          "on": "stall"
+        },
+        {
+          "from": "queued",
+          "to": "stopping",
+          "on": "stop"
+        },
+        {
+          "from": "running",
+          "to": "idle",
+          "on": "drain"
+        },
+        {
+          "from": "running",
+          "to": "blocked",
+          "on": "stall"
+        },
+        {
+          "from": "running",
+          "to": "completing",
+          "on": "complete"
+        },
+        {
+          "from": "running",
+          "to": "stopping",
+          "on": "stop"
+        },
+        {
+          "from": "idle",
+          "to": "running",
+          "on": "dispatch"
+        },
+        {
+          "from": "idle",
+          "to": "blocked",
+          "on": "stall"
+        },
+        {
+          "from": "idle",
+          "to": "completing",
+          "on": "complete"
+        },
+        {
+          "from": "idle",
+          "to": "stopping",
+          "on": "stop"
+        },
+        {
+          "from": "blocked",
+          "to": "running",
+          "on": "resume"
+        },
+        {
+          "from": "blocked",
+          "to": "idle",
+          "on": "drain"
+        },
+        {
+          "from": "blocked",
+          "to": "completing",
+          "on": "complete"
+        },
+        {
+          "from": "blocked",
+          "to": "stopping",
+          "on": "stop"
+        },
+        {
+          "from": "completing",
+          "to": "completed",
+          "on": "acceptance"
+        },
+        {
+          "from": "completing",
+          "to": "blocked",
+          "on": "stall"
+        },
+        {
+          "from": "stopping",
+          "to": "stopped",
+          "on": "drain"
+        },
+        {
+          "from": "stopping",
+          "to": "completed",
+          "on": "acceptance"
+        },
+        {
+          "from": "*",
+          "to": "abandoned",
+          "on": "abandon"
+        }
+      ]
+    },
+    {
+      "id": "node.status",
+      "title": "节点状态",
+      "store": "table",
+      "owner": "core_kernel_nodes.go",
+      "targets": [
+        {
+          "table": "kernel_nodes",
+          "column": "status"
+        },
+        {
+          "table": "nodes",
+          "column": "status"
+        }
+      ],
+      "initial": [
+        "pending"
+      ],
+      "states": [
+        {
+          "name": "pending",
+          "label": "待执行",
+          "tone": "idle"
+        },
+        {
+          "name": "preparing",
+          "label": "准备中",
+          "tone": "running"
+        },
+        {
+          "name": "running",
+          "label": "运行中",
+          "tone": "running"
+        },
+        {
+          "name": "idle",
+          "label": "空闲",
+          "tone": "idle"
+        },
+        {
+          "name": "blocked",
+          "label": "阻塞",
+          "tone": "blocked"
+        },
+        {
+          "name": "failed",
+          "label": "失败",
+          "tone": "danger"
+        },
+        {
+          "name": "succeeded",
+          "label": "成功",
+          "tone": "success"
+        },
+        {
+          "name": "skipped",
+          "label": "已跳过",
+          "tone": "muted"
+        },
+        {
+          "name": "retired",
+          "label": "已退役",
+          "tone": "muted",
+          "terminal": true
+        }
+      ],
+      "transitions": [
+        {
+          "from": "pending",
+          "to": "preparing",
+          "on": "prepare"
+        },
+        {
+          "from": "preparing",
+          "to": "running",
+          "on": "execution-started"
+        },
+        {
+          "from": "preparing",
+          "to": "blocked",
+          "on": "prepare-blocked"
+        },
+        {
+          "from": "preparing",
+          "to": "failed",
+          "on": "prepare-failed"
+        },
+        {
+          "from": "pending",
+          "to": "running",
+          "on": "execution-started"
+        },
+        {
+          "from": "pending",
+          "to": "idle",
+          "on": "reset"
+        },
+        {
+          "from": "pending",
+          "to": "skipped",
+          "on": "revision"
+        },
+        {
+          "from": "running",
+          "to": "succeeded",
+          "on": "execution-completed"
+        },
+        {
+          "from": "running",
+          "to": "failed",
+          "on": "execution-failed"
+        },
+        {
+          "from": "running",
+          "to": "blocked",
+          "on": "execution-blocked"
+        },
+        {
+          "from": "running",
+          "to": "idle",
+          "on": "reset"
+        },
+        {
+          "from": "running",
+          "to": "skipped",
+          "on": "revision"
+        },
+        {
+          "from": "idle",
+          "to": "pending",
+          "on": "revision"
+        },
+        {
+          "from": "idle",
+          "to": "running",
+          "on": "execution-started"
+        },
+        {
+          "from": "blocked",
+          "to": "idle",
+          "on": "resume"
+        },
+        {
+          "from": "blocked",
+          "to": "running",
+          "on": "execution-restarted"
+        },
+        {
+          "from": "blocked",
+          "to": "failed",
+          "on": "exhausted"
+        },
+        {
+          "from": "failed",
+          "to": "idle",
+          "on": "resume"
+        },
+        {
+          "from": "failed",
+          "to": "pending",
+          "on": "revision"
+        },
+        {
+          "from": "succeeded",
+          "to": "pending",
+          "on": "revision"
+        },
+        {
+          "from": "succeeded",
+          "to": "running",
+          "on": "execution-started"
+        },
+        {
+          "from": "*",
+          "to": "retired",
+          "on": "retire"
+        }
+      ]
+    },
+    {
+      "id": "execution.state",
+      "title": "执行状态",
+      "store": "table",
+      "owner": "core_kernel_executions.go",
+      "targets": [
+        {
+          "table": "kernel_executions",
+          "column": "state"
+        }
+      ],
+      "initial": [
+        "running"
+      ],
+      "states": [
+        {
+          "name": "running",
+          "label": "运行中",
+          "tone": "running"
+        },
+        {
+          "name": "blocked",
+          "label": "阻塞",
+          "tone": "blocked"
+        },
+        {
+          "name": "failed",
+          "label": "失败",
+          "tone": "danger"
+        },
+        {
+          "name": "completed",
+          "label": "已完成",
+          "tone": "success",
+          "terminal": true
+        }
+      ],
+      "transitions": [
+        {
+          "from": "running",
+          "to": "completed",
+          "on": "submit"
+        },
+        {
+          "from": "running",
+          "to": "failed",
+          "on": "error"
+        },
+        {
+          "from": "running",
+          "to": "blocked",
+          "on": "question"
+        },
+        {
+          "from": "blocked",
+          "to": "running",
+          "on": "resume"
+        },
+        {
+          "from": "failed",
+          "to": "blocked",
+          "on": "park"
+        }
+      ]
+    },
+    {
+      "id": "queue.state",
+      "title": "队列项状态",
+      "store": "table",
+      "owner": "core_kernel_queue.go",
+      "targets": [
+        {
+          "table": "kernel_queue",
+          "column": "state"
+        }
+      ],
+      "initial": [
+        "queued"
+      ],
+      "states": [
+        {
+          "name": "queued",
+          "label": "排队中",
+          "tone": "idle"
+        },
+        {
+          "name": "claimed",
+          "label": "已领取",
+          "tone": "running"
+        },
+        {
+          "name": "failed",
+          "label": "失败",
+          "tone": "danger"
+        },
+        {
+          "name": "done",
+          "label": "已完成",
+          "tone": "success",
+          "terminal": true
+        }
+      ],
+      "transitions": [
+        {
+          "from": "queued",
+          "to": "claimed",
+          "on": "claim"
+        },
+        {
+          "from": "queued",
+          "to": "done",
+          "on": "drain"
+        },
+        {
+          "from": "queued",
+          "to": "failed",
+          "on": "error"
+        },
+        {
+          "from": "claimed",
+          "to": "queued",
+          "on": "block"
+        },
+        {
+          "from": "claimed",
+          "to": "done",
+          "on": "finish"
+        },
+        {
+          "from": "claimed",
+          "to": "failed",
+          "on": "error"
+        },
+        {
+          "from": "failed",
+          "to": "queued",
+          "on": "requeue"
+        }
+      ]
+    },
+    {
+      "id": "delivery.state",
+      "title": "投递状态",
+      "store": "table",
+      "owner": "core_kernel_deliveries.go",
+      "targets": [
+        {
+          "table": "kernel_deliveries",
+          "column": "state"
+        }
+      ],
+      "initial": [
+        "accepted"
+      ],
+      "states": [
+        {
+          "name": "accepted",
+          "label": "已受理",
+          "tone": "success",
+          "terminal": true
+        }
+      ]
+    }
+  ]
+}

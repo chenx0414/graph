@@ -39,7 +39,7 @@ func WakeMaster(store *TaskStore, intent WakeIntent) bool {
 		}
 		anchorTaskID := sqlString(row["anchor_task_id"])
 		anchor := store.Task(anchorTaskID)
-		if mapString(asMap(anchor), "phase", "Phase") != "chatting" {
+		if mapString(asMap(anchor), "phase", "Phase") != string(PhaseChatting) {
 			return false
 		}
 		var data any

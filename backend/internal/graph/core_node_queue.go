@@ -98,7 +98,7 @@ func (q *NodeQueue) Claim(nodeId string) *QueueRow {
 		return nil
 	}
 	claimed := q.kernel.ClaimQueued(q.taskId, next.Seq)
-	q.kernel.Store.StartTaskPhase(q.taskId, "running", "blocked")
+	q.kernel.Store.StartTaskPhase(q.taskId, string(PhaseRunning), string(PhaseBlocked))
 	return claimed
 }
 

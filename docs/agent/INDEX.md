@@ -21,6 +21,7 @@
 | `../design-graph-examples.md` | 需要设计（或改动）一张任务图时：先判档（简单/中等/复杂），再照对应档的范例写 |
 | `graph-v2.md` | 创建、投递、局部修改、控制 graph 或查看边/模块历史 |
 | `execution-model.md` | 需要理解接口投递、串行队列、常驻会话、模块和恢复 |
+| `state-machines.md` | 需要判断某个状态属于哪台状态机、哪些转移合法，或新增/调整一个状态时 |
 | `capabilities.md` | 需要判断 Skill、MCP、extension、工具如何发现、绑定和注入 |
 | `permissions-and-recovery.md` | 需要解释权限、预算、暂停、用量、问题所有权和未知结果 |
 | `artifacts-and-git.md` | 需要理解 worktree、handoff、artifact、evidence、integration 和 merge |

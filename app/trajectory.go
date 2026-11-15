@@ -166,10 +166,8 @@ type conversationTrajectory struct {
 }
 
 type trajectoryState struct {
+	loadState[conversationTrajectory]
 	scopeKey string
-	loading  bool
-	failed   string
-	data     *conversationTrajectory
 	selected int
 }
 
@@ -178,42 +176,36 @@ func (s *shellState) ensureTrajectory() {
 	path, key := trajectoryEndpoint(scope)
 	state := &s.trajectory
 	if path == "" {
+		state.reset()
+		state.scopeKey = ""
+		state.selected = 0
 		state.failed = "先打开一个会话"
 		return
 	}
 	if state.scopeKey != key {
-		state.data = nil
+		state.reset()
+		state.scopeKey = key
 		state.selected = 0
-		state.failed = ""
 	}
 	if state.data == nil {
 		s.boardScrollTop = true
 	}
-	if state.loading || (state.data != nil && state.scopeKey == key) {
+	generation, start := state.begin()
+	if !start {
 		return
 	}
-	state.loading = true
-	state.failed = ""
-	state.scopeKey = key
 	go func() {
 		payload, err := s.api.get(path)
+		var data *conversationTrajectory
+		failure := ""
 		if err != nil {
-			state.failed = "读不到轨迹：" + err.Error()
-			state.loading = false
-			s.frame()
-			return
+			failure = "读不到轨迹：" + err.Error()
+		} else if err := json.Unmarshal(payload, &data); err != nil {
+			failure = "轨迹格式不对"
 		}
-		var data conversationTrajectory
-		if err := json.Unmarshal(payload, &data); err != nil {
-			state.failed = "轨迹格式不对"
-			state.loading = false
-			s.frame()
-			return
+		if state.settle(generation, data, failure) && data != nil {
+			state.selected = len(data.Requests) - 1
 		}
-		state.data = &data
-		state.selected = len(data.Requests) - 1
-		state.failed = ""
-		state.loading = false
 		s.frame()
 	}()
 }

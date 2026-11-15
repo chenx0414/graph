@@ -101,15 +101,15 @@ func (service *graphManagementService) applyAcceptanceLimitations(plan acceptanc
 	if replay, ok := graphAcceptanceClosureReplay(service, plan); ok {
 		return replay
 	}
-	phase := "unknown"
+	phase := GraphPhase("unknown")
 	if state := graph.State(); state != nil {
-		phase = string(state.Phase)
+		phase = state.Phase
 	}
-	if phase != "blocked" {
-		if plan.complete && len(plan.limitations) == 0 && phase == "completed" {
+	if phase != PhaseBlocked {
+		if plan.complete && len(plan.limitations) == 0 && phase == PhaseCompleted {
 			return graphAcceptanceClosureResult(service, plan.graphId, false, 0)
 		}
-		Raise("invalid_graph", "Graph "+plan.graphId+" is "+phase+"; only a blocked graph closes with recorded limitations")
+		Raise("invalid_graph", "Graph "+plan.graphId+" is "+string(phase)+"; only a blocked graph closes with recorded limitations")
 	}
 	for _, limitation := range plan.limitations {
 		if strings.TrimSpace(limitation.AcceptanceId) == "" {

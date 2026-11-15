@@ -1,7 +1,5 @@
 package graph
 
-type GraphPhase string
-
 type GraphStateRow struct {
 	GraphId  string     `json:"graphId"`
 	Phase    GraphPhase `json:"phase"`

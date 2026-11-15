@@ -18,6 +18,7 @@ type daemonController interface {
 	adopt(pid int)
 	refresh() daemonRefresh
 	restart(reload bool) (bool, string)
+	status() daemonStatus
 }
 
 type shell struct {
@@ -129,7 +130,7 @@ func (s *shell) createTray() {
 		ID:             "graph",
 		Icon:           icon,
 		IconIsTemplate: true,
-		ToolTip:        "Graph",
+		ToolTip:        "Graph · 后台：" + s.daemon.status().Phase.Label(),
 		Menu:           menu,
 	}); err != nil {
 		log.Printf("[app] tray: %v", err)

@@ -39,8 +39,8 @@ func (state *kernelGraphLaneState) laneOptions() GraphLaneOptions {
 				return
 			}
 			state.options.Git.Exclusive(execution.TaskId, func() any {
-				phase := state.options.Kernel.Store.Task(execution.TaskId).Phase
-				if state.closing.Load() || phase == "stopping" || phase == "stopped" {
+				phase := GraphPhase(state.options.Kernel.Store.Task(execution.TaskId).Phase)
+				if state.closing.Load() || phase.Cancelling() {
 					Raise("paused", "Git integration is closed")
 				}
 				revision := state.options.Kernel.Revision(execution.TaskId, execution.RevisionVersion)

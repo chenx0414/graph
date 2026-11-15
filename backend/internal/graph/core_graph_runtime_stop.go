@@ -3,7 +3,7 @@ package graph
 func (runtime *GraphRuntime) Stop() GraphStateRow {
 	runtime.ensureTask()
 	phase := runtime.State().Phase
-	if phase == "completed" || phase == "stopped" {
+	if phase == PhaseCompleted || phase == PhaseStopped {
 		return *runtime.State()
 	}
 	runtime.kernel.FinishNativePauses(runtime.graphId, nil)
@@ -17,10 +17,10 @@ func (runtime *GraphRuntime) Stop() GraphStateRow {
 
 func (runtime *GraphRuntime) SettleStop() string {
 	runtime.ensureTask()
-	if runtime.State().Phase == "stopped" {
+	if runtime.State().Phase == PhaseStopped {
 		return "stopped"
 	}
-	if runtime.State().Phase != "stopping" {
+	if runtime.State().Phase != PhaseStopping {
 		Raise("invalid_graph", "Graph "+runtime.graphId+" is not stopping")
 	}
 	runtime.kernel.CancelQueuedWork(runtime.graphId, "cancelled by stop")
@@ -30,7 +30,7 @@ func (runtime *GraphRuntime) SettleStop() string {
 		return "stopping"
 	}
 	runtime.kernel.ModuleTransaction(func() any {
-		runtime.setPhase("stopped")
+		runtime.setPhase(PhaseStopped)
 		WakeMaster(runtime.kernel.Store, WakeIntent{TaskID: runtime.graphId, Kind: "task_stopped", DedupeKey: runtime.graphId + ":stopped", Data: map[string]any{"graphId": runtime.graphId}, HasData: true})
 		runtime.kernel.Store.Event(runtime.graphId, "graph.stopped", map[string]any{"revision": runtime.State().Revision})
 

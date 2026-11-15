@@ -37,10 +37,8 @@ type trajectoryInsights struct {
 }
 
 type insightsState struct {
-	loading bool
-	failed  string
-	days    int
-	data    *trajectoryInsights
+	loadState[trajectoryInsights]
+	days int
 }
 
 func (s *shellState) insightsDays() int {
@@ -55,40 +53,29 @@ func (s *shellState) setInsightsDays(days int) {
 		return
 	}
 	s.insights.days = days
-	s.insights.data = nil
-	s.insights.loading = false
+	s.insights.reset()
 	s.ensureInsights()
 }
 
 func (s *shellState) ensureInsights() {
 	state := &s.insights
-	if state.loading || state.data != nil {
+	generation, start := state.begin()
+	if !start {
 		return
 	}
-	days := state.days
-	if days == 0 {
-		days = 7
-	}
-	state.loading = true
-	state.failed = ""
+	days := s.insightsDays()
 	go func() {
 		payload, err := s.api.get("/api/trajectory/insights?days=" + strconv.Itoa(days))
+		var data *trajectoryInsights
+		failure := ""
 		if err != nil {
-			state.failed = "读不到洞察：" + err.Error()
-			state.loading = false
-			s.frame()
-			return
+			failure = "读不到洞察：" + err.Error()
+		} else if err := json.Unmarshal(payload, &data); err != nil {
+			failure = "洞察格式不对"
 		}
-		var data trajectoryInsights
-		if err := json.Unmarshal(payload, &data); err != nil {
-			state.failed = "洞察格式不对"
-			state.loading = false
+		if state.settle(generation, data, failure) {
 			s.frame()
-			return
 		}
-		state.data = &data
-		state.loading = false
-		s.frame()
 	}()
 }
 

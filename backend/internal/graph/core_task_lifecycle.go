@@ -9,7 +9,7 @@ func (s *TaskStore) StartTaskPhase(taskID, phase, from string) {
 }
 
 func (s *TaskStore) ResumeTask(taskID string) {
-	kernelExec(s.DB, "UPDATE tasks SET paused=0,phase='running' WHERE id=?", taskID)
+	kernelExec(s.DB, "UPDATE tasks SET paused=0,phase='"+string(PhaseRunning)+"' WHERE id=? AND "+taskPhaseNotIn("phase", taskPhaseFinishedList()...), taskID)
 }
 
 func (s *TaskStore) PauseTask(taskID string) {
@@ -17,7 +17,7 @@ func (s *TaskStore) PauseTask(taskID string) {
 }
 
 func (s *TaskStore) BlockTask(taskID string) {
-	kernelExec(s.DB, "UPDATE tasks SET paused=1,phase='blocked' WHERE id=?", taskID)
+	kernelExec(s.DB, "UPDATE tasks SET paused=1,phase='"+string(PhaseBlocked)+"' WHERE id=? AND "+taskPhaseNotIn("phase", taskPhaseHaltingList()...), taskID)
 }
 
 func (s *TaskStore) SetTaskPaused(taskID string, paused bool) {
@@ -40,18 +40,18 @@ func (s *TaskStore) SetTaskPaused(taskID string, paused bool) {
 }
 
 func (s *TaskStore) StopTask(taskID string) {
-	kernelExec(s.DB, "UPDATE tasks SET phase='stopping',paused=0 WHERE id=?", taskID)
+	kernelExec(s.DB, "UPDATE tasks SET phase='"+string(PhaseStopping)+"',paused=0 WHERE id=? AND "+taskPhaseNotIn("phase", taskPhaseHaltingList()...), taskID)
 }
 
 func (s *TaskStore) AbandonTask(taskID string) {
-	kernelExec(s.DB, "UPDATE tasks SET phase='abandoned' WHERE id=?", taskID)
+	kernelExec(s.DB, "UPDATE tasks SET phase='"+string(PhaseAbandoned)+"' WHERE id=? AND "+taskPhaseNotIn("phase", PhaseCompleted, PhaseStopped), taskID)
 }
 
 func (s *TaskStore) ParkStalledTask(taskID string) bool {
 	if _, ok := g5One(s.DB, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='kernel_queue'"); !ok {
 		return false
 	}
-	if kernelRow(s.DB, `SELECT id FROM tasks WHERE id=? AND phase IN ('running','idle')`, taskID) == nil {
+	if kernelRow(s.DB, `SELECT id FROM tasks WHERE id=? AND `+taskPhaseIn("phase", taskPhaseParkableList()...), taskID) == nil {
 		return false
 	}
 	if kernelRow(s.DB, `SELECT 1 FROM kernel_queue WHERE task_id=? AND state='claimed' LIMIT 1`, taskID) != nil {
@@ -103,7 +103,7 @@ func (s *TaskStore) ParkStalledTasks() []string {
 		return nil
 	}
 	parked := []string{}
-	for _, row := range kernelRows(s.DB, `SELECT id FROM tasks WHERE phase IN ('running','idle') ORDER BY rowid`) {
+	for _, row := range kernelRows(s.DB, `SELECT id FROM tasks WHERE `+taskPhaseIn("phase", taskPhaseParkableList()...)+` ORDER BY rowid`) {
 		taskID := kernelString(row["id"])
 		if s.ParkStalledTask(taskID) {
 			parked = append(parked, taskID)
@@ -121,15 +121,15 @@ func (s *TaskStore) SettleDrainedPhase(taskID string) string {
 }
 
 func (s *TaskStore) BlockTaskPhase(taskID string) {
-	kernelExec(s.DB, "UPDATE tasks SET phase='blocked' WHERE id=? AND phase NOT IN ('stopping','stopped','completed')", taskID)
+	kernelExec(s.DB, "UPDATE tasks SET phase='"+string(PhaseBlocked)+"' WHERE id=? AND "+taskPhaseNotIn("phase", taskPhaseHaltingList()...), taskID)
 }
 
 func (s *TaskStore) CompleteTaskPhase(taskID string) {
-	kernelExec(s.DB, "UPDATE tasks SET phase='completing' WHERE id=? AND phase NOT IN ('stopping','stopped','completed')", taskID)
+	kernelExec(s.DB, "UPDATE tasks SET phase='"+string(PhaseCompleting)+"' WHERE id=? AND "+taskPhaseNotIn("phase", taskPhaseHaltingList()...), taskID)
 }
 
 func (s *TaskStore) CompleteBlockedTask(taskID string) {
-	kernelExec(s.DB, "UPDATE tasks SET phase='completing' WHERE id=? AND phase='blocked' AND EXISTS(SELECT 1 FROM kernel_lifecycle WHERE task_id=? AND completion_requested=1)", taskID, taskID)
+	kernelExec(s.DB, "UPDATE tasks SET phase='"+string(PhaseCompleting)+"' WHERE id=? AND "+taskPhaseIn("phase", PhaseBlocked)+" AND EXISTS(SELECT 1 FROM kernel_lifecycle WHERE task_id=? AND completion_requested=1)", taskID, taskID)
 }
 
 func (s *TaskStore) BumpRequirementVersion(taskID string) {
@@ -137,6 +137,7 @@ func (s *TaskStore) BumpRequirementVersion(taskID string) {
 }
 
 func (s *TaskStore) AcceptProposal(taskID string, proposal int, targetBranch, phase string) {
+	requireTaskPhase(phase)
 	kernelExec(s.DB, "UPDATE tasks SET accepted_proposal=?,target_branch=?,phase=?,graph_version=1 WHERE id=?",
 		proposal, targetBranch, phase, taskID)
 }
@@ -166,12 +167,12 @@ func (s *TaskStore) SetTaskIntegrationAndTarget(taskID, integrationSha, targetSh
 }
 
 func (s *TaskStore) CreateGraphTask(id, projectID, request string, createdSeq int64) {
-	kernelExec(s.DB, "INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,created_seq,phase) VALUES(?,?,?,?,?,?,?)", id, projectID, request, 1, 0, createdSeq, "running")
+	kernelExec(s.DB, "INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,created_seq,phase) VALUES(?,?,?,?,?,?,?)", id, projectID, request, 1, 0, createdSeq, string(PhaseRunning))
 }
 
 func (s *TaskStore) CreateSubgraphTask(id, projectID string, conversationID any, request string, createdSeq int64, targetBranch any) {
 	kernelExec(s.DB, "INSERT INTO tasks(id,project_id,conversation_id,request,requirement_version,latest_proposal,created_seq,phase,target_branch) VALUES(?,?,?,?,1,0,?,?,?)",
-		id, projectID, conversationID, request, createdSeq, "running", targetBranch)
+		id, projectID, conversationID, request, createdSeq, string(PhaseRunning), targetBranch)
 }
 
 func (s *TaskStore) CreateMasterTask(id, projectID, request string, createdSeq int64) {
@@ -179,11 +180,13 @@ func (s *TaskStore) CreateMasterTask(id, projectID, request string, createdSeq i
 }
 
 func (s *TaskStore) CreateConversationTask(id, projectID, request, phase string, createdSeq int64, conversationID string) {
+	requireTaskPhase(phase)
 	kernelExec(s.DB, "INSERT INTO tasks(id,project_id,request,requirement_version,phase,created_seq,conversation_id) VALUES(?,?,?,1,?,?,?)",
 		id, projectID, request, phase, createdSeq, conversationID)
 }
 
 func (s *TaskStore) CreateConfirmedTask(id, projectID, request string, requirementVersion int64, targetBranch any, phase string, createdSeq int64, conversationID any, decisionDigest any) {
+	requireTaskPhase(phase)
 	kernelExec(s.DB, "INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,accepted_proposal,target_branch,phase,created_seq,graph_version,conversation_id,decision_digest) VALUES(?,?,?,?,1,1,?,?,?,1,?,?)",
 		id, projectID, request, requirementVersion, targetBranch, phase, createdSeq, conversationID, decisionDigest)
 }
@@ -191,15 +194,15 @@ func (s *TaskStore) CreateConfirmedTask(id, projectID, request string, requireme
 func (s *TaskStore) PauseProjectTasks(projectID string) {
 	kernelExec(s.Db, `INSERT OR IGNORE INTO project_archive_pauses(task_id)
  SELECT id FROM tasks WHERE project_id=? AND (paused=0 OR EXISTS(SELECT 1 FROM graph_preparation_pauses p WHERE p.task_id=tasks.id))
- AND phase NOT IN ('chatting','completed','stopping','stopped','abandoned')`, projectID)
-	kernelExec(s.Db, "UPDATE tasks SET paused=1 WHERE project_id=? AND phase NOT IN ('chatting','completed','stopped','abandoned')", projectID)
+ AND `+taskPhaseIn("phase", taskPhasePausedOnArchiveList()...), projectID)
+	kernelExec(s.Db, "UPDATE tasks SET paused=1 WHERE project_id=? AND "+taskPhaseIn("phase", taskPhasePausedOnArchiveList()...), projectID)
 }
 
 func (s *TaskStore) ArchivePausedWorkGraphs(workID string) []string {
 	ids := []string{}
 	for _, row := range kernelRows(s.Db, `SELECT t.id FROM project_archive_pauses p JOIN tasks t ON t.id=p.task_id
  JOIN work_graphs g ON g.graph_id=t.id WHERE g.work_id=? AND g.state='ready'
- AND t.phase NOT IN ('completed','stopping','stopped','abandoned','blocked')`, workID) {
+ AND `+taskPhaseIn("t.phase", taskPhaseArchivableList()...), workID) {
 		ids = append(ids, kernelString(row["id"]))
 	}
 	return ids

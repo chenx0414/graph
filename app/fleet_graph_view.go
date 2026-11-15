@@ -145,7 +145,7 @@ func (s *shellState) fleetTopologyCard(ctx *ui.Context, data *fleetTopologyData,
 				title = "◇ " + title
 			}
 			kit.Text(ctx, title, t.Text.Sm).FontWeight(650).TextColor(t.Foreground).Grow(1).SingleLine().Ellipsis("…")
-			if status == "running" {
+			if workStatusOf(status) == workRunning {
 				fleetGraphPill(ctx, "当前", t.SuccessText, t.SuccessBg)
 			}
 		})

@@ -109,21 +109,10 @@ func fleetAgentRole(agent fleetAgent) string {
 }
 
 func fleetStatusLabel(status string) string {
-	switch status {
-	case "running":
-		return "运行中"
-	case "idle":
-		return "空闲"
-	case "completed", "done":
-		return "完成"
-	case "blocked":
-		return "阻塞"
-	case "failed":
-		return "失败"
-	case "stopped":
-		return "已停止"
+	if label := workStatusOf(status).Label(); label != "" {
+		return label
 	}
-	if status == "" {
+	if strings.TrimSpace(status) == "" {
 		return "未知"
 	}
 	return status
@@ -357,10 +346,6 @@ func fleetChildrenOf(data *fleetSnapshot, agent fleetAgent) []fleetAgent {
 	return children
 }
 
-var fleetTerminalStatus = map[string]bool{
-	"completed": true, "stopped": true, "abandoned": true, "succeeded": true,
-}
-
 type fleetGraphUnit struct {
 	TaskID    string
 	ThreadID  string
@@ -443,7 +428,7 @@ func fleetGraphUnitData(data *fleetSnapshot) ([]fleetGraphUnit, map[string]int) 
 			if unit.ThreadID != threadID {
 				continue
 			}
-			if fleetTerminalStatus[unit.Status] {
+			if workStatusOf(unit.Status).Terminal() {
 				if terminal == nil || unit.UpdatedAt > terminal.UpdatedAt {
 					terminal = unit
 				}

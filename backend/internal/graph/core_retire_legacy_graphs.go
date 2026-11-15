@@ -20,7 +20,7 @@ func RetireLegacyGraphs(store *TaskStore) {
 				panic("retired graph id is null")
 			}
 			id := row["id"]
-			kernelExec(store.DB, "UPDATE tasks SET phase='stopped',paused=1 WHERE id=? AND phase NOT IN ('completed','discussing','stopped')", id)
+			kernelExec(store.DB, "UPDATE tasks SET phase='"+string(PhaseStopped)+"',paused=1 WHERE id=? AND "+taskPhaseNotIn("phase", PhaseCompleted, PhaseDiscussing, PhaseStopped), id)
 			kernelExec(store.DB, "UPDATE tasks SET paused=1 WHERE id=?", id)
 			kernelExec(store.DB, "UPDATE runtime SET active_task=NULL WHERE active_task=?", id)
 			kernelExec(store.DB, "UPDATE operations SET worker_active=0 WHERE task_id=?", id)

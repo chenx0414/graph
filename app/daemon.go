@@ -17,12 +17,38 @@ type daemon struct {
 	paths      Paths
 	command    *exec.Cmd
 	adoptedPid int
-	owned      bool
-	launched   bool
-	stopped    bool
+	phase      daemonPhase
 }
 
-func newDaemon(paths Paths) *daemon { return &daemon{paths: paths} }
+func newDaemon(paths Paths) *daemon { return &daemon{paths: paths, phase: daemonStopped} }
+
+func (d *daemon) advanceLocked(event daemonEvent) bool {
+	next, ok := daemonTransition(d.phase, event)
+	if !ok {
+		return false
+	}
+	d.phase = next
+	return true
+}
+
+func (d *daemon) advance(event daemonEvent) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.advanceLocked(event)
+}
+
+func (d *daemon) status() daemonStatus {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	pid := 0
+	if d.command != nil && d.command.Process != nil {
+		pid = d.command.Process.Pid
+	}
+	if pid == 0 && d.adoptedPid != 0 && processAlive(d.adoptedPid) {
+		pid = d.adoptedPid
+	}
+	return daemonStatus{Phase: d.phase, Pid: pid, Supervised: d.phase == daemonLaunchd}
+}
 
 func (d *daemon) environment() []string {
 	env := os.Environ()
@@ -40,12 +66,13 @@ func (d *daemon) environment() []string {
 func (d *daemon) start() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.command != nil || d.launched {
+	if d.phase != daemonStopped {
 		return nil
 	}
 	d.adoptedPid = 0
-	d.launched = d.startThroughLaunchAgent() == nil
-	if d.launched {
+	d.advanceLocked(daemonEventStart)
+	if err := d.startThroughLaunchAgent(); err == nil {
+		d.advanceLocked(daemonEventStartedSupervised)
 		return nil
 	}
 	return d.startDirectly()
@@ -122,21 +149,22 @@ func (d *daemon) startDirectly() error {
 	command.Env = d.environment()
 	if err := command.Start(); err != nil {
 		file.Close()
+		d.advanceLocked(daemonEventStartFailed)
 		return err
 	}
 	d.command = command
-	d.owned = true
+	d.advanceLocked(daemonEventStartedOwned)
 	go func() {
 		_ = command.Wait()
 		file.Close()
 		d.mu.Lock()
 		mine := d.command == command
-		quit := d.stopped
 		if mine {
 			d.command = nil
 		}
+		exited := mine && d.advanceLocked(daemonEventExited)
 		d.mu.Unlock()
-		if mine && !quit {
+		if exited {
 			notify("Graph 的后台已退出", "打开 Graph 会重新拉起它；会话数据仍在磁盘上。")
 		}
 	}()
@@ -149,7 +177,12 @@ func (d *daemon) adopt(pid int) {
 	}
 	d.mu.Lock()
 	if d.command == nil {
-		d.adoptedPid = pid
+		if next, ok := daemonTransition(d.phase, daemonEventAdopt); ok {
+			if next != daemonLaunchd {
+				d.adoptedPid = pid
+			}
+			d.phase = next
+		}
 	}
 	d.mu.Unlock()
 }
@@ -158,22 +191,24 @@ func (d *daemon) stop() {
 	d.mu.Lock()
 	command := d.command
 	d.command = nil
-	launched := d.launched
-	d.launched = false
 	adopted := d.adoptedPid
 	d.adoptedPid = 0
+	supervised := d.phase == daemonLaunchd
+	d.advanceLocked(daemonEventStop)
 	d.mu.Unlock()
-	if launched {
+	if supervised {
 		return
 	}
 	if command != nil && command.Process != nil {
 		_ = command.Process.Kill()
 		_ = command.Wait()
+		d.advance(daemonEventStopped)
 		return
 	}
 	if adopted != 0 {
 		stopAdoptedProcess(adopted)
 	}
+	d.advance(daemonEventStopped)
 }
 
 func (d *daemon) running() bool {
@@ -215,9 +250,9 @@ func (d *daemon) supervised() bool {
 
 func (d *daemon) restart(reload bool) (bool, string) {
 	d.mu.Lock()
-	launched := d.launched
+	supervised := d.phase == daemonLaunchd
 	d.mu.Unlock()
-	if launched || d.supervised() {
+	if supervised || d.supervised() {
 		d.stopStaleDaemon()
 		if err := runLaunchAgentPlan(launchAgentPlan(d.paths, reload)); err != nil {
 			return false, err.Error()
