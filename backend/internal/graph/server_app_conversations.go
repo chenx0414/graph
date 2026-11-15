@@ -113,6 +113,7 @@ func (app *GraphApp) appConversationView(conversationID string, r *http.Request)
 	if value, ok := appQueryNumber(r, "limit"); ok {
 		query.Limit = &value
 	}
+	query.OpenQuestions = r.URL.Query().Get("questions") == "open"
 	return provider.View(conversationID, query)
 }
 
@@ -191,6 +192,7 @@ func (app *GraphApp) serveConversationHistory(w http.ResponseWriter, r *http.Req
 	if value, ok := appQueryNumber(r, "limit"); ok {
 		query.Limit = &value
 	}
+	query.OpenQuestions = r.URL.Query().Get("questions") == "open"
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().History(conversationID, query))
 }
 

@@ -47,7 +47,7 @@ func (source *conversationChatSource) Capabilities() chatCapabilities {
 func (source *conversationChatSource) Follows() bool { return true }
 
 func (source *conversationChatSource) Load(c *chatState) error {
-	payload, err := source.api.get("/api/conversations/" + source.id)
+	payload, err := source.api.get("/api/conversations/" + source.id + "?questions=open")
 	if err != nil {
 		c.status = "读不到这个会话：" + err.Error()
 		return err
@@ -115,7 +115,14 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 			source.version = version
 		}
 	}
-	payload, err := source.api.get("/api/conversations/" + source.id)
+	var newest int64
+	onUI(c.window, func() { newest = newestMessageSeq(c.messages) })
+	incremental := source.version != "" && newest > 0
+	path := "/api/conversations/" + source.id + "?questions=open"
+	if incremental {
+		path += "&after=" + itoa64(newest)
+	}
+	payload, err := source.api.get(path)
 	if err != nil {
 		return false, err
 	}
@@ -124,8 +131,6 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	live := applyLiveStreams(messages, payload)
-	fingerprint := transcriptFingerprint(live)
 	master := parseRoundMaster(payload)
 	body, bodyErr := parseConversationBody(payload)
 	tasks, tasksErr := parseGraphTasks(payload)
@@ -134,16 +139,23 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 		if c.source != source {
 			return
 		}
+		next := applyLiveStreams(messages, payload)
+		if incremental {
+			if len(messages) > 0 {
+				next = applyLiveStreams(mergeMessages(c.messages, messages), payload)
+			} else {
+				next = applyLiveStreams(c.messages, payload)
+			}
+		} else if c.pagedHistory {
+			next = applyLiveStreams(mergeMessages(c.messages, messages), payload)
+		}
+		fingerprint := transcriptFingerprint(next)
 		changed = fingerprint != c.fingerprint
 		c.fingerprint = fingerprint
+		c.messages = next
 		changed = changed || master != c.roundMaster
 		c.roundMaster = master
 		c.projectID, c.projectRoot = parseConversationScope(payload)
-		if c.pagedHistory {
-			c.messages = applyLiveStreams(mergeMessages(c.messages, messages), payload)
-		} else {
-			c.messages = live
-		}
 		if bodyErr == nil {
 			var questions []openQuestion
 			for _, question := range body.Questions {

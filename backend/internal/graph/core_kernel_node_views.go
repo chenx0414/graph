@@ -5,10 +5,11 @@ import (
 )
 
 type NodeEntryQuery struct {
-	After   *float64
-	Before  *float64
-	Limit   *float64
-	EntryID *string
+	After         *float64
+	Before        *float64
+	Limit         *float64
+	EntryID       *string
+	OpenQuestions bool
 }
 
 type NodeConfigurationSnapshot struct {
@@ -374,7 +375,7 @@ func KernelNodeRun(kernel *KernelStore, graphID, nodeID string, query NodeEntryQ
 		Queued           []map[string]any   `json:"queued"`
 		Evidence         []any              `json:"evidence"`
 		Timing           any                `json:"timing"`
-		Throughput any `json:"throughput"`
+		Throughput       any                `json:"throughput"`
 		Entries          any                `json:"entries"`
 		EntryCount       any                `json:"entryCount"`
 		Limit            any                `json:"limit"`
@@ -393,7 +394,7 @@ func KernelNodeRun(kernel *KernelStore, graphID, nodeID string, query NodeEntryQ
 		Timing: map[string]any{"totalMs": totalMs, "runMs": totalMeasured("runMs"), "waitingMs": totalMeasured("waitingMs"),
 			"pauseMs": kernel.NativePauseMs(graphID, nodeID), "userWaitMs": nil, "inProgress": inProgress},
 		Throughput: kernelNodeThroughput(kernel, graphID, nodeID),
-		Entries: page["entries"], EntryCount: page["entryCount"], Limit: page["limit"], HasOlder: page["hasOlder"], HasNewer: page["hasNewer"],
+		Entries:    page["entries"], EntryCount: page["entryCount"], Limit: page["limit"], HasOlder: page["hasOlder"], HasNewer: page["hasNewer"],
 		Phase: kernelNodePhase(kernel, graphID),
 	}
 }

@@ -66,7 +66,11 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 	}
 	anchorQuestions := []map[string]any{}
 	questionNow := NowMillis()
-	questionRows := kernelRows(runtime.store.Db, "SELECT id,task_id,node_id,operation_id,kind,status,data,answer,owner,asked_at FROM questions WHERE task_id=? AND (route_stage IS NULL OR route_stage!='user') ORDER BY rowid", conversation.AnchorTaskId)
+	questionQuery := "SELECT id,task_id,node_id,operation_id,kind,status,data,answer,owner,asked_at FROM questions WHERE task_id=? AND (route_stage IS NULL OR route_stage!='user')"
+	if query.OpenQuestions {
+		questionQuery += " AND status='open'"
+	}
+	questionRows := kernelRows(runtime.store.Db, questionQuery+" ORDER BY rowid", conversation.AnchorTaskId)
 	if conversation.Role == ConversationGlobal {
 		questionRows = append(questionRows, kernelRows(runtime.store.Db, "SELECT id,task_id,node_id,operation_id,kind,status,data,answer,owner,asked_at FROM questions WHERE route_stage='user' AND status='open' ORDER BY rowid")...)
 	}
@@ -301,23 +305,23 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 		contextPercent = percent
 	}
 	telemetry := map[string]any{
-		"model":           masterModel,
-		"thinkingLevel":   conversation.ThinkingLevel,
-		"cacheHitRate":    cacheHitRate,
+		"model":             masterModel,
+		"thinkingLevel":     conversation.ThinkingLevel,
+		"cacheHitRate":      cacheHitRate,
 		"cacheHitRateTotal": cacheHitRateTotal,
-		"cachedInput":     knownMasterUsage.CachedInput,
-		"cacheInput":      knownMasterUsage.CacheInput,
-		"cacheReadTokens": knownMasterUsage.CacheReadTokens,
-		"cacheUsedAt":     knownMasterUsage.CacheUsedAt,
-		"contextTokens":   knownMasterUsage.ContextTokens,
-		"contextLimit":    contextLimit,
-		"contextPercent":  contextPercent,
-		"outputTokens":    knownMasterUsage.OutputTokens,
-		"latencyMs":       knownMasterUsage.LatencyMs,
-		"tokensPerSecond": knownMasterUsage.TokensPerSecond,
-		"firstTokenMs":    knownMasterUsage.FirstTokenMs,
-		"uploadMs":        knownMasterUsage.UploadMs,
-		"serverWaitMs":    knownMasterUsage.ServerWaitMs,
+		"cachedInput":       knownMasterUsage.CachedInput,
+		"cacheInput":        knownMasterUsage.CacheInput,
+		"cacheReadTokens":   knownMasterUsage.CacheReadTokens,
+		"cacheUsedAt":       knownMasterUsage.CacheUsedAt,
+		"contextTokens":     knownMasterUsage.ContextTokens,
+		"contextLimit":      contextLimit,
+		"contextPercent":    contextPercent,
+		"outputTokens":      knownMasterUsage.OutputTokens,
+		"latencyMs":         knownMasterUsage.LatencyMs,
+		"tokensPerSecond":   knownMasterUsage.TokensPerSecond,
+		"firstTokenMs":      knownMasterUsage.FirstTokenMs,
+		"uploadMs":          knownMasterUsage.UploadMs,
+		"serverWaitMs":      knownMasterUsage.ServerWaitMs,
 	}
 	var masterView any
 	if master != nil {

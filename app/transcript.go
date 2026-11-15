@@ -144,3 +144,13 @@ func newChatState(address, token string) *chatState {
 	}
 	return state
 }
+
+func newestMessageSeq(messages []transcriptMessage) int64 {
+	newest := int64(0)
+	for _, message := range messages {
+		if message.Seq > newest {
+			newest = message.Seq
+		}
+	}
+	return newest
+}

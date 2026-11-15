@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -27,7 +28,7 @@ func TestChatRefreshAsksForTheVersionBeforeTheWholeTranscript(t *testing.T) {
 	}))
 	defer server.Close()
 	source := newConversationChatSource(newAPIClient(server.URL, "tok"), "c")
-	chat := &chatState{}
+	chat := &chatState{source: source}
 	if err := source.Load(chat); err != nil {
 		t.Fatal(err)
 	}
@@ -46,5 +47,55 @@ func TestChatRefreshAsksForTheVersionBeforeTheWholeTranscript(t *testing.T) {
 	}
 	if full != 2 {
 		t.Fatalf("the changed version reads the transcript again, got %d", full)
+	}
+}
+
+func TestChatRefreshFetchesOnlyMessagesAfterTheNewestOne(t *testing.T) {
+	current := "v1"
+	queries := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/conversations/c/version":
+			_, _ = w.Write([]byte(`{"version":"` + current + `"}`))
+		case "/api/conversations/c":
+			queries = append(queries, r.URL.RawQuery)
+			if strings.Contains(r.URL.RawQuery, "after=5") {
+				if current == "v2" {
+					_, _ = w.Write([]byte(`{"version":"v2","messages":[{"id":"m2","seq":6,"role":"user","kind":"chat","text":"two","state":"done"}]}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"version":"` + current + `","messages":[]}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"version":"v1","messages":[{"id":"m1","seq":5,"role":"user","kind":"chat","text":"one","state":"done"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	source := newConversationChatSource(newAPIClient(server.URL, "tok"), "c")
+	chat := &chatState{source: source}
+	if err := source.Load(chat); err != nil {
+		t.Fatal(err)
+	}
+	if len(chat.messages) != 1 {
+		t.Fatalf("the first load reads the transcript, got %d", len(chat.messages))
+	}
+	current = "v2"
+	if changed, err := source.Refresh(chat); err != nil || !changed {
+		t.Fatalf("the new turn is a change, changed %v err %v", changed, err)
+	}
+	if len(chat.messages) != 2 {
+		t.Fatalf("the incremental refresh merges the new message, got %d", len(chat.messages))
+	}
+	if !strings.Contains(queries[len(queries)-1], "after=5") {
+		t.Fatalf("the refresh asks for messages after the newest one, queries %v", queries)
+	}
+	current = "v3"
+	if _, err := source.Refresh(chat); err != nil {
+		t.Fatal(err)
+	}
+	if len(chat.messages) != 2 {
+		t.Fatalf("a version-only change keeps the transcript, got %d", len(chat.messages))
 	}
 }
