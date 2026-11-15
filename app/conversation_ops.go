@@ -128,3 +128,17 @@ func (c *chatState) selectModel(model modelChoice, thinking string) {
 	c.status = "已切到 " + shortModel(model.id) + " · 思考 " + thinking
 	c.frame()
 }
+
+func (c *chatState) newAgentContext() {
+	if c.active == "" {
+		return
+	}
+	body := map[string]string{"requestId": requestID("new-context")}
+	if _, err := c.api.post("/api/conversations/"+c.active+"/new-context", body); err != nil {
+		c.status = "新开 Agent 上下文失败：" + err.Error()
+		c.frame()
+		return
+	}
+	c.status = "已开启新的 Agent 上下文"
+	c.frame()
+}

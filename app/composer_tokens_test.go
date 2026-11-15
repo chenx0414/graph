@@ -5,7 +5,7 @@ import (
 )
 
 func TestComposerTokensFindFilesSkillsMentionsAndCommands(t *testing.T) {
-	draft := "看 [graph.go](app/graph.go) 和 $tdd-workflow 还有 @app/g\n/clear"
+	draft := "看 [graph.go](app/graph.go) 和 $tdd-workflow 还有 @app/g\n/new"
 	tokens := composerTokens(draft, map[string]bool{"tdd-workflow": true})
 	want := []struct {
 		kind  string
@@ -16,7 +16,7 @@ func TestComposerTokensFindFilesSkillsMentionsAndCommands(t *testing.T) {
 		{"file", "[graph.go](app/graph.go)", 2, 26},
 		{"skill", "$tdd-workflow", 29, 42},
 		{"mention", "@app/g", 46, 52},
-		{"command", "/clear", 53, 59},
+		{"command", "/new", 53, 57},
 	}
 	if len(tokens) != len(want) {
 		t.Fatalf("tokens %+v, want %d", tokens, len(want))
@@ -53,7 +53,7 @@ func TestComposerTokensReadKernelSkillTokens(t *testing.T) {
 }
 
 func TestComposerTokensColorByKind(t *testing.T) {
-	draft := "看 [graph.go](app/graph.go) 和 $tdd-workflow 还有 @app/g\n/clear"
+	draft := "看 [graph.go](app/graph.go) 和 $tdd-workflow 还有 @app/g\n/new"
 	ranges := composerTextRanges(composerTokens(draft, map[string]bool{"tdd-workflow": true}))
 	if len(ranges) != 4 {
 		t.Fatalf("ranges %+v", ranges)

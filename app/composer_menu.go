@@ -35,7 +35,7 @@ type composerSkillEntry struct {
 }
 
 var composerCommands = []composerMenuItem{
-	{id: "clear", label: "/clear", description: "清空当前草稿", badge: "命令", icon: iconClose},
+	{id: "new", label: "/new", description: "新开一个 Agent 上下文（清空模型上下文）", badge: "命令", icon: iconRefresh},
 	{id: "attach", label: "/attach", description: "附加本地文件", badge: "命令", icon: iconClip},
 	{id: "model", label: "/model", description: "在白板的模型页切换模型", badge: "命令", icon: iconSpark},
 }
@@ -247,12 +247,14 @@ func (c *chatState) composerSelect(item composerMenuItem) {
 	if trigger == nil {
 		return
 	}
-	if item.id == "clear" {
+	if item.id == "new" {
 		c.draft = ""
 		c.menuTrigger = nil
 		c.menuDismissed = ""
 		c.focusComposer = true
+		c.status = "正在开启新的 Agent 上下文…"
 		c.frame()
+		go c.newAgentContext()
 		return
 	}
 	if item.id == "attach" {

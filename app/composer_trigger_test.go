@@ -17,7 +17,7 @@ func TestComposerTriggerReadsMentionsSkillsAndCommands(t *testing.T) {
 		{"@", 1, "path", "", 0, 1},
 		{"看看 @app/g", 9, "path", "app/g", 3, 9},
 		{"$tdd", 4, "skill", "tdd", 0, 4},
-		{"/clear", 6, "command", "clear", 0, 6},
+		{"/new", 4, "command", "new", 0, 4},
 		{"先说 /mod", 7, "command", "mod", 3, 7},
 		{"第一行\n@do", 7, "path", "do", 4, 7},
 		{"@", 0, "", "", 0, 0},

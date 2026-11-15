@@ -384,3 +384,9 @@ func (app *GraphApp) serveConversationStream(w http.ResponseWriter, r *http.Requ
 	after := appEventCursor(r)
 	app.appWriteEventStream(w, r, app.runtime.Conversations().Watch(conversationID, after))
 }
+
+func (app *GraphApp) serveConversationNewContext(w http.ResponseWriter, r *http.Request) {
+	conversationID := r.PathValue("conversationId")
+	body := appJSONBody(w, r)
+	writeJSON(w, http.StatusOK, app.runtime.Conversations().NewContext(conversationID, appBodyString(body, "requestId")))
+}

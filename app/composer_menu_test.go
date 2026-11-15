@@ -111,13 +111,16 @@ func TestTypingASlashListsCommands(t *testing.T) {
 	}
 	tester.Type("/")
 	tester.Frame()
-	if !tester.HasText("/clear") || !tester.HasText("/attach") {
+	if !tester.HasText("/new") || !tester.HasText("/attach") {
 		t.Fatalf("the command menu lists the commands, texts %q", tester.Texts())
+	}
+	if tester.HasText("/clear") {
+		t.Fatalf("the retired clear command is gone, texts %q", tester.Texts())
 	}
 	tester.Key(0, ui.KeyEnter)
 	frames(tester)
 	if state.draft != "" {
-		t.Fatalf("the clear command empties the draft, draft %q", state.draft)
+		t.Fatalf("the new command empties the typed command, draft %q", state.draft)
 	}
 }
 
@@ -257,5 +260,47 @@ func TestAnImageAttachmentRendersItsThumbnail(t *testing.T) {
 	tester.Frame()
 	if !tester.HasText("photo.png") || !tester.HasText("附件图片 photo.png") {
 		t.Fatalf("the image chip shows its thumbnail and name, texts %q", tester.Texts())
+	}
+}
+
+func TestSlashNewStartsAFreshAgentContext(t *testing.T) {
+	requests := make(chan string, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/conversations/c1/new-context" {
+			payload := make([]byte, 2048)
+			read, _ := r.Body.Read(payload)
+			requests <- string(payload[:read])
+			_, _ = w.Write([]byte(`{"conversationId":"c1","reset":true}`))
+			return
+		}
+		if r.URL.Path == "/api/conversations/c1" {
+			_, _ = w.Write([]byte(`{"id":"c1","messages":[{"role":"assistant","text":"旧上下文"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	state := newChatState(server.URL, "tok")
+	state.open("c1")
+	tester := frames(ui.NewTester(state.view, 760, 620))
+	if err := tester.Click("消息"); err != nil {
+		t.Fatalf("focus the composer: %v", err)
+	}
+	tester.Type("/new")
+	tester.Frame()
+	if !tester.HasText("/new") {
+		t.Fatalf("the menu offers /new, texts %q", tester.Texts())
+	}
+	tester.Key(0, ui.KeyEnter)
+	deadline := time.Now().Add(2 * time.Second)
+	for len(requests) == 0 && time.Now().Before(deadline) {
+		tester.Frame()
+	}
+	if len(requests) == 0 {
+		t.Fatalf("the command resets the agent context, status %q", state.status)
+	}
+	if state.status != "已开启新的 Agent 上下文" {
+		t.Fatalf("the command reports the fresh context, status %q", state.status)
 	}
 }

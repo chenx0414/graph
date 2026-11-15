@@ -63,7 +63,7 @@ func composerTokens(draft string, skills map[string]bool) []composerToken {
 	}
 	for _, match := range composerCommandToken.FindAllStringIndex(draft, -1) {
 		command := draft[match[0]+1 : match[1]]
-		if command == "clear" || command == "attach" || command == "model" {
+		if command == "new" || command == "attach" || command == "model" {
 			add("command", composerRuneIndex(draft, match[0]), composerRuneIndex(draft, match[1]))
 		}
 	}
