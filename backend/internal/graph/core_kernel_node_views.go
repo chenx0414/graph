@@ -10,6 +10,7 @@ type NodeEntryQuery struct {
 	Limit         *float64
 	EntryID       *string
 	OpenQuestions bool
+	Lean          bool
 }
 
 type NodeConfigurationSnapshot struct {

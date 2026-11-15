@@ -229,11 +229,13 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 	}
 	messageCount := kernelInt(kernelRow(runtime.store.Db, "SELECT COUNT(*) AS count FROM messages WHERE conversation_id=?", conversationId)["count"])
 	continuations := []map[string]any{}
-	for _, row := range kernelRows(runtime.store.Db, "SELECT operation_id AS operationId,resumed_operation_id AS resumedOperationId FROM rsi_continuations WHERE task_id=?", conversation.AnchorTaskId) {
-		continuations = append(continuations, map[string]any{
-			"operationId":        kernelString(row["operationId"]),
-			"resumedOperationId": row["resumedOperationId"],
-		})
+	if !query.Lean {
+		for _, row := range kernelRows(runtime.store.Db, "SELECT operation_id AS operationId,resumed_operation_id AS resumedOperationId FROM rsi_continuations WHERE task_id=?", conversation.AnchorTaskId) {
+			continuations = append(continuations, map[string]any{
+				"operationId":        kernelString(row["operationId"]),
+				"resumedOperationId": row["resumedOperationId"],
+			})
+		}
 	}
 	masterUnknown := false
 	masterQuestions := []map[string]any{}

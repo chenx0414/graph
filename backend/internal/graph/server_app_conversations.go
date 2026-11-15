@@ -114,6 +114,7 @@ func (app *GraphApp) appConversationView(conversationID string, r *http.Request)
 		query.Limit = &value
 	}
 	query.OpenQuestions = r.URL.Query().Get("questions") == "open"
+	query.Lean = r.URL.Query().Get("lean") == "1"
 	return provider.View(conversationID, query)
 }
 
@@ -193,6 +194,7 @@ func (app *GraphApp) serveConversationHistory(w http.ResponseWriter, r *http.Req
 		query.Limit = &value
 	}
 	query.OpenQuestions = r.URL.Query().Get("questions") == "open"
+	query.Lean = r.URL.Query().Get("lean") == "1"
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().History(conversationID, query))
 }
 
