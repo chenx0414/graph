@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -42,17 +43,41 @@ type shellState struct {
 	board            boardState
 	boardScroll      ui.ScrollState
 	boardScrollTop   bool
+	dataReady        atomic.Bool
+	dataPending      atomic.Bool
 	window           *mygo.Window
 	list             ui.ListState
 	stateDir         string
 }
 
 func newShellState(address, token string) *shellState {
-	return &shellState{
+	state := &shellState{
 		api:    newAPIClient(address, token),
 		status: "正在读取会话…",
 		board:  boardState{pages: defaultBoardPages()},
 	}
+	state.dataReady.Store(true)
+	return state
+}
+
+func (s *shellState) blockBoardDataUntilConversation() {
+	s.dataReady.Store(false)
+}
+
+func (s *shellState) conversationDataBlocked() bool {
+	if s.dataReady.Load() {
+		return false
+	}
+	s.dataPending.Store(true)
+	return true
+}
+
+func (s *shellState) markConversationReady() {
+	s.dataReady.Store(true)
+	if s.dataPending.Swap(false) {
+		onUI(s.window, func() { s.ensureBoardPageData() })
+	}
+	s.frame()
 }
 
 func (s *shellState) active() *chatState {
@@ -146,6 +171,9 @@ func (s *shellState) projectNames() []string {
 }
 
 func (s *shellState) ensureSettings() {
+	if s.conversationDataBlocked() {
+		return
+	}
 	if s.settings == nil {
 		s.settings = newSettingsState(s.api.address, s.api.token)
 		s.settings.window = s.window
@@ -155,6 +183,9 @@ func (s *shellState) ensureSettings() {
 }
 
 func (s *shellState) ensureUsage() {
+	if s.conversationDataBlocked() {
+		return
+	}
 	if s.usage == nil {
 		s.usage = newUsageState(s.api.address, s.api.token)
 		s.usage.window = s.window
@@ -163,6 +194,9 @@ func (s *shellState) ensureUsage() {
 }
 
 func (s *shellState) ensureAssemblies() {
+	if s.conversationDataBlocked() {
+		return
+	}
 	if s.assemblies == nil {
 		s.assemblies = newAssemblyState(s.api.address, s.api.token)
 		s.assemblies.window = s.window
@@ -171,6 +205,9 @@ func (s *shellState) ensureAssemblies() {
 }
 
 func (s *shellState) ensureResources() {
+	if s.conversationDataBlocked() {
+		return
+	}
 	if s.resources == nil {
 		s.resources = newResourceState(s.api.address, s.api.token)
 		s.resources.window = s.window

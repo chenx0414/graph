@@ -165,6 +165,9 @@ func parseFleet(payload []byte) (*fleetSnapshot, error) {
 }
 
 func (s *shellState) ensureFleet() {
+	if s.conversationDataBlocked() {
+		return
+	}
 	state := &s.fleet
 	if state.conversationID == s.fleetScope() && (state.data != nil || state.loading) {
 		return
@@ -241,6 +244,9 @@ func (s *shellState) fleetData(ctx *ui.Context) *fleetSnapshot {
 }
 
 func (s *shellState) ensureGlobalFleet() {
+	if s.conversationDataBlocked() {
+		return
+	}
 	state := &s.fleet
 	if state.globalLoading || state.global != nil {
 		return

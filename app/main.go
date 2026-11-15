@@ -99,6 +99,7 @@ func (s *shell) openNative() {
 	state := newShellState(s.console, s.paths.SessionToken())
 	state.stateDir = s.paths.StateDir
 	state.loadBoard(s.paths.StateDir)
+	state.blockBoardDataUntilConversation()
 	window := mygo.NewWindow(mygo.WindowOptions{
 		Title:                "Graph",
 		Width:                1440,
@@ -115,6 +116,7 @@ func (s *shell) openNative() {
 	s.chat = state
 	go func() {
 		state.load()
+		state.markConversationReady()
 		state.ensureUsage()
 		state.frame()
 	}()

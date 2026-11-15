@@ -200,6 +200,16 @@ func MigrateTaskSchema(db *sql.DB) {
 	if version < 61 {
 		migrateV61(db)
 	}
+	if version < 62 {
+		migrateV62(db)
+	}
+}
+
+func migrateV62(db *sql.DB) {
+	if !sqliteColumns(db, "trajectories")["signature"] {
+		execSQL(db, "ALTER TABLE trajectories ADD COLUMN signature TEXT NOT NULL DEFAULT '';")
+	}
+	execSQL(db, "PRAGMA user_version=62;")
 }
 
 func sqliteColumns(db *sql.DB, table string) map[string]bool {

@@ -58,6 +58,9 @@ func (s *shellState) setInsightsDays(days int) {
 }
 
 func (s *shellState) ensureInsights() {
+	if s.conversationDataBlocked() {
+		return
+	}
 	state := &s.insights
 	generation, start := state.begin()
 	if !start {

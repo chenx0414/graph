@@ -247,6 +247,9 @@ func (s *shellState) openFleetGraphPage(unit fleetGraphUnit) error {
 }
 
 func (s *shellState) ensureFleetGraph() {
+	if s.conversationDataBlocked() {
+		return
+	}
 	page := s.boardPage()
 	taskID := fleetGraphTaskIDOfPage(page.ID)
 	if taskID == "" {

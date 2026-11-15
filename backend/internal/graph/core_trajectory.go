@@ -1,8 +1,6 @@
 package graph
 
-import (
-	"encoding/json"
-)
+import ()
 
 type TrajectoryUsage struct {
 	Input         int64 `json:"input"`
@@ -358,17 +356,5 @@ func BuildConversationTrajectory(store *TaskStore, conversationId string) *Conve
 }
 
 func SaveConversationTrajectory(store *TaskStore, conversationId string) {
-	trajectory := BuildConversationTrajectory(store, conversationId)
-	if trajectory.TaskId == "" {
-		return
-	}
-	payload, err := json.Marshal(trajectory)
-	if err != nil {
-		return
-	}
-	if _, err := store.DB.Exec(`INSERT INTO trajectories(conversation_id,task_id,updated_at,payload) VALUES(?,?,?,?)
-		ON CONFLICT(conversation_id) DO UPDATE SET task_id=excluded.task_id, updated_at=excluded.updated_at, payload=excluded.payload`,
-		conversationId, trajectory.TaskId, NowMillis(), string(payload)); err != nil {
-		panic(err)
-	}
+	StoreConversationTrajectory(store, conversationId, BuildConversationTrajectory(store, conversationId))
 }

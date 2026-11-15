@@ -172,6 +172,9 @@ type trajectoryState struct {
 }
 
 func (s *shellState) ensureTrajectory() {
+	if s.conversationDataBlocked() {
+		return
+	}
 	scope := s.chatScope()
 	path, key := trajectoryEndpoint(scope)
 	state := &s.trajectory

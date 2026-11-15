@@ -650,6 +650,9 @@ func replaceBoardPanelInLayout(node *boardNode, from, to string) {
 }
 
 func (s *shellState) ensureBoardPageData() {
+	if s.conversationDataBlocked() {
+		return
+	}
 	switch s.activeBoardKind() {
 	case "overview":
 		s.ensureUsage()

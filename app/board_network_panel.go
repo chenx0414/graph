@@ -276,6 +276,9 @@ func (s *shellState) graphNetScene(ctx *ui.Context, data *fleetTopologyData) net
 }
 
 func (s *shellState) ensureNetGraph(scope chatScope) {
+	if s.conversationDataBlocked() {
+		return
+	}
 	state := &s.boardNet
 	key := scope.key()
 	if state.topoKey != key {

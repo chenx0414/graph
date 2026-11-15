@@ -156,7 +156,14 @@ func (app *GraphApp) serveTrajectoryInsights(w http.ResponseWriter, r *http.Requ
 
 func (app *GraphApp) serveConversationTrajectory(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
-	writeJSON(w, http.StatusOK, app.runtime.Conversations().Trajectory(conversationID))
+	if payload, ok := LoadConversationTrajectory(app.runtime.store, conversationID); ok {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = w.Write(payload)
+		return
+	}
+	trajectory := app.runtime.Conversations().Trajectory(conversationID)
+	StoreConversationTrajectory(app.runtime.store, conversationID, trajectory)
+	writeJSON(w, http.StatusOK, trajectory)
 }
 
 func (app *GraphApp) serveNodeTrajectory(w http.ResponseWriter, r *http.Request) {

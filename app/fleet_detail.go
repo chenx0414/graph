@@ -84,6 +84,9 @@ func parseFleetDetail(path string, nodeRun bool, payload []byte) ([]fleetActivit
 }
 
 func (s *shellState) ensureFleetDetail(agent fleetAgent) {
+	if s.conversationDataBlocked() {
+		return
+	}
 	state := &s.fleet.detail
 	if state.agentID == agent.ID && (state.loading || state.entries != nil || state.failed != "") {
 		return
