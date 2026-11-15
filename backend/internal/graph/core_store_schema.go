@@ -82,6 +82,13 @@ CREATE INDEX IF NOT EXISTS agents_task ON agents(task_id);
 CREATE INDEX IF NOT EXISTS agents_project ON agents(project_id);
 `
 
+const schemaV63 = `
+CREATE INDEX IF NOT EXISTS operations_intent ON operations(state) WHERE state='intent';
+CREATE INDEX IF NOT EXISTS operations_worker ON operations(worker_active,waiting_slot) WHERE worker_active=1;
+CREATE INDEX IF NOT EXISTS messages_queue ON messages(state) WHERE state IN ('pending','queued');
+PRAGMA user_version=63;
+`
+
 const schemaV61 = `
 CREATE TABLE conversations_next(
   id TEXT PRIMARY KEY,
