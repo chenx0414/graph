@@ -148,6 +148,7 @@ func (s *assemblyState) refreshSelection() {
 
 func (s *assemblyState) selectAssembly(id string) {
 	s.selected = id
+	s.status = ""
 	s.editingDescription = false
 	s.draftDescription = ""
 	s.deleteArmed = ""

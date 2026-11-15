@@ -119,3 +119,19 @@ func TestTheCatalogLinkEndpointIsNotNeededForAnAssemblyWeAlreadyHave(t *testing.
 }
 
 var _ = ui.Rect{}
+
+func TestSelectingAnAssemblyClearsTheMissingDefinitionNotice(t *testing.T) {
+	state := newAssemblyState("http://127.0.0.1:1", "tok")
+	state.rows = []assemblyRow{{id: "coder", name: "Bob_coder"}, {id: "reviewer", name: "Alice_reviewer"}}
+	state.focusDefinition("ghost@3")
+	if state.status == "" {
+		t.Fatal("the missing definition notice shows first")
+	}
+	state.selectAssembly("coder")
+	if state.status != "" {
+		t.Fatalf("picking an assembly clears the notice, status %q", state.status)
+	}
+	if state.selected != "coder" {
+		t.Fatalf("the picked assembly is selected, got %q", state.selected)
+	}
+}
