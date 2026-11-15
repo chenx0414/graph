@@ -57,3 +57,5 @@ find "<stateDir>/instances" -path '*tool-results*' -name '*.txt' -exec stat -f '
 ```
 
 实测（2026-09-27，本机保留窗口内——`state-retention` 会裁旧实例，所以这是一段窗口而非长期均值）：**5 个 / 0.3 MiB**，最大一个 233 KiB（正好是 master 读自己整段转录那次，218,978 字符），最小 5.3 KiB。最小那个只比阈值高一点，说明 `TOOL_RESULT_LIMIT = 4,000` 正好落在拐点附近：**不调**。
+
+节点记录在每轮结束时补发最后一条 assistant 消息，轮询间隔内提交的回复不会丢。
