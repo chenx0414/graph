@@ -6,6 +6,7 @@ import (
 )
 
 const historyPageSize = 200
+const initialMessagePageSize = 60
 
 func oldestSeqOf(messages []transcriptMessage) int64 {
 	oldest := int64(0)

@@ -13,6 +13,7 @@ func TestChatRefreshAsksForTheVersionBeforeTheWholeTranscript(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.WriteFile(filepath.Join(dir, "token"), []byte("tok"), 0o600)
 	full, version := 0, 0
+	loadQuery := ""
 	current := "v1"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -21,6 +22,9 @@ func TestChatRefreshAsksForTheVersionBeforeTheWholeTranscript(t *testing.T) {
 			_, _ = w.Write([]byte(`{"version":"` + current + `"}`))
 		case "/api/conversations/c":
 			full++
+			if full == 1 {
+				loadQuery = r.URL.RawQuery
+			}
 			_, _ = w.Write([]byte(`{"version":"` + current + `","messages":[]}`))
 		default:
 			http.NotFound(w, r)
@@ -34,6 +38,9 @@ func TestChatRefreshAsksForTheVersionBeforeTheWholeTranscript(t *testing.T) {
 	}
 	if full != 1 {
 		t.Fatalf("the first load reads the transcript, got %d", full)
+	}
+	if !strings.Contains(loadQuery, "limit=60") || !strings.Contains(loadQuery, "questions=open") || !strings.Contains(loadQuery, "lean=1") {
+		t.Fatalf("the first load asks for one compact page, got %q", loadQuery)
 	}
 	if changed, err := source.Refresh(chat); err != nil || changed {
 		t.Fatalf("an unchanged version is not a change, changed %v err %v", changed, err)

@@ -47,7 +47,7 @@ func (source *conversationChatSource) Capabilities() chatCapabilities {
 func (source *conversationChatSource) Follows() bool { return true }
 
 func (source *conversationChatSource) Load(c *chatState) error {
-	payload, err := source.api.get("/api/conversations/" + source.id + "?questions=open&lean=1")
+	payload, err := source.api.get("/api/conversations/" + source.id + "?questions=open&lean=1&limit=" + itoa64(initialMessagePageSize))
 	if err != nil {
 		c.status = "读不到这个会话：" + err.Error()
 		return err
@@ -72,7 +72,7 @@ func (source *conversationChatSource) Load(c *chatState) error {
 	}
 	raw, _ := parseConversationRaw(payload)
 	c.oldestSeq = oldestSeqOf(raw)
-	c.noMoreHistory = c.oldestSeq <= 0 || len(raw) < historyPageSize
+	c.noMoreHistory = c.oldestSeq <= 0 || len(raw) < initialMessagePageSize
 	c.questions = nil
 	if body, err := parseConversationBody(payload); err == nil {
 		c.paused = body.Paused
@@ -118,7 +118,7 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 	var newest int64
 	onUI(c.window, func() { newest = newestMessageSeq(c.messages) })
 	incremental := source.version != "" && newest > 0
-	path := "/api/conversations/" + source.id + "?questions=open&lean=1"
+	path := "/api/conversations/" + source.id + "?questions=open&lean=1&limit=" + itoa64(initialMessagePageSize)
 	if incremental {
 		path += "&after=" + itoa64(newest)
 	}
