@@ -84,7 +84,16 @@ func appAttachments(raw []any) ([]AttachmentInput, error) {
 
 func (app *GraphApp) serveConversation(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
-	writeJSON(w, http.StatusOK, app.appConversationView(conversationID, r))
+	view := app.appConversationView(conversationID, r)
+	if body, ok := view.(map[string]any); ok {
+		body["version"] = conversationVersion(app.runtime.store, conversationID)
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (app *GraphApp) serveConversationVersion(w http.ResponseWriter, r *http.Request) {
+	conversationID := r.PathValue("conversationId")
+	writeJSON(w, http.StatusOK, map[string]any{"version": conversationVersion(app.runtime.store, conversationID)})
 }
 
 func (app *GraphApp) appConversationView(conversationID string, r *http.Request) any {

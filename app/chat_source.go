@@ -28,8 +28,9 @@ type agentChatSource interface {
 }
 
 type conversationChatSource struct {
-	api apiClient
-	id  string
+	api     apiClient
+	id      string
+	version string
 }
 
 func newConversationChatSource(api apiClient, id string) *conversationChatSource {
@@ -56,6 +57,7 @@ func (source *conversationChatSource) Load(c *chatState) error {
 		c.status = "会话内容不是预期的 JSON：" + err.Error()
 		return err
 	}
+	source.version = parseConversationVersion(payload)
 	messages = applyLiveStreams(messages, payload)
 	c.messages = messages
 	c.roundMaster = parseRoundMaster(payload)
@@ -105,10 +107,19 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 		return false, nil
 	}
 	defer c.refreshMu.Unlock()
+	if source.version != "" {
+		if version, err := source.currentVersion(); err == nil {
+			if version == source.version {
+				return false, nil
+			}
+			source.version = version
+		}
+	}
 	payload, err := source.api.get("/api/conversations/" + source.id)
 	if err != nil {
 		return false, err
 	}
+	source.version = parseConversationVersion(payload)
 	messages, err := parseConversationMessages(payload)
 	if err != nil {
 		return false, err
@@ -154,6 +165,30 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 		}
 	})
 	return changed, nil
+}
+
+func (source *conversationChatSource) currentVersion() (string, error) {
+	payload, err := source.api.get("/api/conversations/" + source.id + "/version")
+	if err != nil {
+		return "", err
+	}
+	var body struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(payload, &body); err != nil {
+		return "", err
+	}
+	return body.Version, nil
+}
+
+func parseConversationVersion(payload []byte) string {
+	var body struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(payload, &body); err != nil {
+		return ""
+	}
+	return body.Version
 }
 
 func (source *conversationChatSource) LoadOlder(c *chatState, before int64) ([]transcriptMessage, int64, bool, error) {

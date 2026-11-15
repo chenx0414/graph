@@ -270,7 +270,9 @@ func (s *shellState) refresh() bool {
 	})
 	if active != nil {
 		changed = active.poll()
-		changed = active.refreshArtifacts() || changed
+		if changed || active.artifacts == nil {
+			changed = active.refreshArtifacts() || changed
+		}
 	}
 	if reload && s.loadRows() {
 		changed = true
