@@ -17,6 +17,10 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 	if log == nil {
 		log = func(string) {}
 	}
+	SetSpawnGroupLedger(options.StateDir)
+	for _, pgid := range ReapStaleProcesses(options.StateDir, defaultProcessJanitorOptions) {
+		log(fmt.Sprintf("Reaped process %d left behind by an earlier run", pgid))
+	}
 	config := EmptyGraphConfig()
 	if options.ConfigPath != nil {
 		config = LoadGraphConfig(*options.ConfigPath)

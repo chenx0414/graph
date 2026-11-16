@@ -58,6 +58,7 @@ func (executor *sandboxExecutor) spawnAndWait(command RestrictedCommand, launche
 	if err := process.Start(); err != nil {
 		panic(err)
 	}
+	RecordSpawnGroup(process.Process.Pid)
 	_ = channelFile.Close()
 	if ipcFile != nil {
 		_ = ipcFile.Close()
@@ -161,6 +162,7 @@ func (executor *sandboxExecutor) spawnAndWait(command RestrictedCommand, launche
 		command.Signal.RemoveEventListener(listener)
 	}
 	state.killTree()
+	ForgetSpawnGroup(pid)
 	if state.aborted {
 		panic(errors.New("Command aborted by user"))
 	}
