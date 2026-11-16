@@ -173,17 +173,24 @@ func (s *shellState) conversationList(ctx *ui.Context) {
 				opts.OnClick = func() { go s.selectConversation(id) }
 			}
 			row := kit.SidebarItem(ctx, opts)
-			row.MaskLinearGradient(ui.LinearGradient{Angle: 90, Stops: []ui.GradientStop{
-				{Color: ui.RGB(0, 0, 0), At: 0},
-				{Color: ui.RGB(0, 0, 0), At: 0.84},
-				{Color: ui.Transparent, At: 1},
-			}}).Clip()
 			row.Label(label)
 			row.Children(func() {
-				ui.Icon(ctx, iconFolder).Size(gwtheme.Icon, gwtheme.Icon).TextColor(t.Muted)
-				kit.Text(ctx, label, t.Text.Lg).FontWeight(500).TextColor(t.Foreground).Grow(1).NoWrap()
-				if conversation.ArchivedAtPresent() {
-					kit.Text(ctx, "已归档", t.Text.Xs).TextColor(t.Muted)
+				content := ui.Row(ctx).Grow(1).Gap(th.Space(1.5)).AlignItems(ui.Center)
+				content.MaskLinearGradient(ui.LinearGradient{Angle: 90, Stops: []ui.GradientStop{
+					{Color: ui.RGB(0, 0, 0), At: 0},
+					{Color: ui.RGB(0, 0, 0), At: 0.84},
+					{Color: ui.Transparent, At: 1},
+				}}).Clip()
+				content.Children(func() {
+					ui.Icon(ctx, iconFolder).Size(gwtheme.Icon, gwtheme.Icon).TextColor(t.Muted)
+					kit.Text(ctx, label, t.Text.Lg).FontWeight(500).TextColor(t.Foreground).Grow(1).NoWrap()
+					if conversation.ArchivedAtPresent() {
+						kit.Text(ctx, "已归档", t.Text.Xs).TextColor(t.Muted)
+					}
+				})
+				if conversation.ProjectID != "" && !conversation.ArchivedAtPresent() && row.Hovered() {
+					button := kit.IconButton(ctx, iconArchive, "归档项目 "+label, kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeXs})
+					button.OnClick(func() { go s.archiveProject(conversation.ProjectID) })
 				}
 			})
 			row.Margin(0, 0, th.Space(0.5), 0)
