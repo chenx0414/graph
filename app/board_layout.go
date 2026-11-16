@@ -675,6 +675,9 @@ func (s *shellState) ensureBoardPageData() {
 	case "fleet-graph":
 		s.ensureFleetGraph()
 	}
+	if s.trajectoryVisible() {
+		s.refreshTrajectory()
+	}
 }
 
 func (s *shellState) deferBoardDrop(drop func()) {

@@ -281,6 +281,9 @@ func (s *shellState) refresh() bool {
 			changed = active.refreshArtifacts() || changed
 		}
 	}
+	if changed {
+		onUI(s.window, func() { s.refreshTrajectory() })
+	}
 	if reload && s.loadRows() {
 		changed = true
 	}

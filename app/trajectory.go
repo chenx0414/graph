@@ -194,12 +194,48 @@ func (s *shellState) ensureTrajectory() {
 	if state.data == nil {
 		s.boardScrollTop = true
 	}
-	generation, start := state.begin()
+	s.startTrajectory(path, false)
+}
+
+func (s *shellState) trajectoryVisible() bool {
+	if s.activeBoardKind() == "trajectory" {
+		return true
+	}
+	for _, kind := range []string{"trajectory", "context-overview"} {
+		if s.panelOf(kind) != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *shellState) refreshTrajectory() {
+	if !s.trajectoryVisible() {
+		return
+	}
+	path, key := trajectoryEndpoint(s.chatScope())
+	state := &s.trajectory
+	if path == "" || state.data == nil || state.scopeKey != key || state.loading() {
+		return
+	}
+	s.startTrajectory(path, true)
+}
+
+func (s *shellState) startTrajectory(path string, keepSelection bool) {
+	state := &s.trajectory
+	var generation int
+	var start bool
+	if keepSelection {
+		generation, start = state.beginRefresh()
+	} else {
+		generation, start = state.begin()
+	}
 	if !start {
 		return
 	}
+	api := s.api
 	go func() {
-		payload, err := s.api.get(path)
+		payload, err := api.get(path)
 		var data *conversationTrajectory
 		failure := ""
 		if err != nil {
@@ -208,7 +244,16 @@ func (s *shellState) ensureTrajectory() {
 			failure = "轨迹格式不对"
 		}
 		if state.settle(generation, data, failure) && data != nil {
-			state.selected = len(data.Requests) - 1
+			if keepSelection {
+				if state.selected < 0 {
+					state.selected = 0
+				}
+				if state.selected >= len(data.Requests) {
+					state.selected = len(data.Requests) - 1
+				}
+			} else {
+				state.selected = len(data.Requests) - 1
+			}
 		}
 		s.frame()
 	}()

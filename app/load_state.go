@@ -20,6 +20,16 @@ func (state *loadState[T]) loading() bool { return state.phase == loadBusy }
 
 func (state *loadState[T]) ready() bool { return state.phase == loadReadyP }
 
+func (state *loadState[T]) beginRefresh() (int, bool) {
+	if state.phase == loadBusy {
+		return state.generation, false
+	}
+	state.generation++
+	state.phase = loadBusy
+	state.failed = ""
+	return state.generation, true
+}
+
 func (state *loadState[T]) begin() (int, bool) {
 	if state.phase == loadBusy || state.phase == loadReadyP {
 		return state.generation, false

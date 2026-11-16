@@ -217,7 +217,7 @@ func (c *chatState) view(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	ui.Column(ctx).Fill().Children(func() {
 		c.transcript(ctx)
-		if c.status != "" && !c.loading {
+		if c.status != "" && c.status != chatWaitStatus && !c.loading {
 			ui.Text(ctx, c.status).FontSize(12).TextColor(th.TextMuted).Padding(16, 4, 16, 0)
 		}
 		bottom := ui.Column(ctx).FillWidth()
