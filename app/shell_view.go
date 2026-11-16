@@ -173,10 +173,10 @@ func (s *shellState) conversationList(ctx *ui.Context) {
 				id := conversation.ID
 				opts.OnClick = func() { go s.selectConversation(id) }
 			}
-			line := ui.Row(ctx).FillWidth().AlignItems(ui.Center)
-			line.Children(func() {
+			stack := ui.Box(ctx).FillWidth()
+			stack.Children(func() {
 				row := kit.SidebarItem(ctx, opts)
-				row.Grow(1).Shrink(1)
+				row.FillWidth()
 				row.Label(label)
 				row.Children(func() {
 					content := ui.Row(ctx).Grow(1).Shrink(1).MinWidth(0).Gap(th.Space(1.5)).AlignItems(ui.Center)
@@ -193,12 +193,13 @@ func (s *shellState) conversationList(ctx *ui.Context) {
 						}
 					})
 				})
-				if conversation.ProjectID != "" && !conversation.ArchivedAtPresent() && line.Hovered() {
+				if conversation.ProjectID != "" && !conversation.ArchivedAtPresent() && stack.Hovered() {
 					button := kit.IconButton(ctx, iconArchive, "归档项目 "+label, kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeXs})
+					button.Absolute().Top(th.Space(2)).Right(th.Space(1))
 					button.OnClick(func() { go s.requestArchive(conversation.ProjectID, label) })
 				}
 			})
-			line.Margin(0, 0, th.Space(0.5), 0)
+			stack.Margin(0, 0, th.Space(0.5), 0)
 		}).Grow(1)
 	})
 }
