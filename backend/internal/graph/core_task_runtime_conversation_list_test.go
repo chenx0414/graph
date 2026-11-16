@@ -24,7 +24,7 @@ func TestConversationListHidesChildAgents(t *testing.T) {
 	}
 }
 
-func TestConversationListCarriesTheProjectArchiveState(t *testing.T) {
+func TestConversationListHidesArchivedProjects(t *testing.T) {
 	store := openTaskStore(t, filepath.Join(t.TempDir(), "conversation-list.sqlite"))
 	defer store.Close()
 	kernelExec(store.DB, "INSERT INTO projects(id,root,grants) VALUES('p1','/tmp/p1','[]')")
@@ -37,15 +37,7 @@ func TestConversationListCarriesTheProjectArchiveState(t *testing.T) {
 		kernelExec(store.DB, statement)
 	}
 	list := (&TaskRuntime{store: store}).Conversations().List(false)
-	if len(list) != 2 {
-		t.Fatalf("conversation list = %+v", list)
-	}
-	for _, row := range list {
-		if kernelString(row["id"]) == "c1" && row["projectArchivedAt"] == nil {
-			t.Fatalf("the archived project state is reported: %+v", row)
-		}
-		if kernelString(row["id"]) == "c2" && row["projectArchivedAt"] != nil {
-			t.Fatalf("an active project has no archive timestamp: %+v", row)
-		}
+	if len(list) != 1 || kernelString(list[0]["id"]) != "c2" {
+		t.Fatalf("archived projects stay out of the conversation list: %+v", list)
 	}
 }

@@ -19,6 +19,7 @@ func (conversations *TaskRuntimeConversations) List(archived bool) []map[string]
     (SELECT COUNT(*) FROM questions q JOIN tasks t ON t.id=q.task_id WHERE t.conversation_id=c.id AND q.status='open' AND q.owner='user' AND q.asked_at IS NOT NULL AND q.asked_at<=?) AS suspendedQuestions,
     (SELECT COUNT(*) FROM tasks t WHERE t.conversation_id=c.id AND t.phase!='chatting') AS taskCount
     FROM conversations c WHERE c.archived_at `+filter+` AND c.role!='child'
+    AND (c.project_id IS NULL OR NOT EXISTS (SELECT 1 FROM projects p WHERE p.id=c.project_id AND p.archived_at IS NOT NULL))
     ORDER BY c.created_seq`, NowMillis()-QuestionSuspendedMs)
 	out := []map[string]any{}
 	for _, row := range rows {
