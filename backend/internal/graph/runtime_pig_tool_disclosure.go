@@ -164,18 +164,18 @@ func newToolDisclosureIndex(tools []pigkernel.ToolSpec, maxSchema int) *toolDisc
 	return index
 }
 
-func (index *toolDisclosureIndex) search(query, expression string, topK int) []map[string]any {
+func (index *toolDisclosureIndex) search(query, expression string, topK int) ([]map[string]any, error) {
 	hits := []map[string]any{}
-	if index == nil || len(index.entries) == 0 {
-		return hits
-	}
 	var pattern *regexp.Regexp
 	if strings.TrimSpace(expression) != "" {
 		compiled, error := regexp.Compile("(?i)" + expression)
 		if error != nil {
-			return hits
+			return nil, fmt.Errorf("regex %q does not compile: %v", expression, error)
 		}
 		pattern = compiled
+	}
+	if index == nil || len(index.entries) == 0 {
+		return hits, nil
 	}
 	terms := toolSearchTokens(query)
 	type scored struct {
@@ -220,7 +220,7 @@ func (index *toolDisclosureIndex) search(query, expression string, topK int) []m
 			"score":        math.Round(item.score*1000) / 1000,
 		})
 	}
-	return hits
+	return hits, nil
 }
 
 func toolDisclosureOnDemand(name string, options toolDisclosureOptions) bool {
@@ -274,7 +274,7 @@ func toolSearchSpec(deferred map[string]pigkernel.ToolSpec, index *toolDisclosur
 	sort.Strings(names)
 	return pigkernel.ToolSpec{
 		Name:        "tool_search",
-		Description: fmt.Sprintf("Discover the %d bound tools that are not listed in your tools: search by keyword (Chinese supported) or `regex`; each hit carries its full parameter schema. Run one with `tool_invoke`.", len(names)),
+		Description: fmt.Sprintf("Discover the %d bound tools that are not listed in your tools: keyword search over tool names, descriptions and parameter schemas (that text is English), or a case-insensitive `regex`; each hit carries its full schema. Run one with `tool_invoke`.", len(names)),
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -296,13 +296,28 @@ func toolSearchSpec(deferred map[string]pigkernel.ToolSpec, index *toolDisclosur
 			if topK > options.TopKMax {
 				topK = options.TopKMax
 			}
-			payload, error := json.Marshal(map[string]any{"hits": index.markSearched(query, expression, topK, options.Usage), "total": len(deferred)})
+			hits, failure := index.markSearched(query, expression, topK, options.Usage)
+			if failure != nil {
+				return "", failure
+			}
+			answer := map[string]any{"hits": hits, "total": len(deferred)}
+			if hint := toolSearchHint(len(hits)); hint != "" {
+				answer["hint"] = hint
+			}
+			payload, error := json.Marshal(answer)
 			if error != nil {
 				return "", error
 			}
 			return string(payload), nil
 		},
 	}
+}
+
+func toolSearchHint(hits int) string {
+	if hits > 0 {
+		return ""
+	}
+	return "no tool matched: retry with an English keyword (the tool text is English) or a regex over the same text"
 }
 
 func toolInvokeSpec(deferred map[string]pigkernel.ToolSpec, options toolDisclosureOptions) pigkernel.ToolSpec {

@@ -48,7 +48,10 @@ func toolSearchFind(t *testing.T, tools []pigkernel.ToolSpec, name string) pigke
 
 func TestToolSearchFindsIntegrationToolByChineseIntent(t *testing.T) {
 	index := newToolDisclosureIndex(toolSearchFixture(), 4000)
-	hits := index.search("读取 git 提交历史", "", 5)
+	hits, failure := index.search("读取 git 提交历史", "", 5)
+	if failure != nil {
+		t.Fatalf("search failed: %v", failure)
+	}
 	if len(hits) == 0 {
 		t.Fatal("expected a hit for a Chinese intent")
 	}
@@ -62,7 +65,10 @@ func TestToolSearchFindsIntegrationToolByChineseIntent(t *testing.T) {
 
 func TestToolSearchFiltersByRegex(t *testing.T) {
 	index := newToolDisclosureIndex(toolSearchFixture(), 4000)
-	hits := index.search("", "browser", 5)
+	hits, failure := index.search("", "browser", 5)
+	if failure != nil {
+		t.Fatalf("search failed: %v", failure)
+	}
 	if len(hits) != 1 || hits[0]["name"] != "agent_browser" {
 		t.Fatalf("expected only agent_browser, got %v", hits)
 	}

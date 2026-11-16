@@ -169,10 +169,13 @@ func toolFloatSinkable(names []string, usage *toolUsage, options toolDisclosureO
 
 var toolFloatPinnedDefaults = []string{"bash", "read", "write", "edit", "git"}
 
-func (index *toolDisclosureIndex) markSearched(query, expression string, topK int, usage *toolUsage) []map[string]any {
-	hits := index.search(query, expression, topK)
+func (index *toolDisclosureIndex) markSearched(query, expression string, topK int, usage *toolUsage) ([]map[string]any, error) {
+	hits, failure := index.search(query, expression, topK)
+	if failure != nil {
+		return nil, failure
+	}
 	if usage == nil {
-		return hits
+		return hits, nil
 	}
 	for _, hit := range hits {
 		if name, ok := hit["name"].(string); ok {
@@ -180,7 +183,7 @@ func (index *toolDisclosureIndex) markSearched(query, expression string, topK in
 		}
 	}
 	_ = usage.flush()
-	return hits
+	return hits, nil
 }
 
 func toolUsageWrapped(spec pigkernel.ToolSpec, usage *toolUsage) pigkernel.ToolSpec {
