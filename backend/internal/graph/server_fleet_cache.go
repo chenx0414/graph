@@ -2,6 +2,7 @@ package graph
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -27,8 +28,21 @@ func fleetSignature(store *TaskStore, conversationId string) string {
 	return fmt.Sprintf("%s:%d:%d:%d:%d:%d", conversationId, events, messages, invocations, tasks, artifacts)
 }
 
-func fleetPayloadCached(store *TaskStore, conversationId string) []byte {
-	signature := fleetSignature(store, conversationId)
+func fleetSnapshotsForget(store *TaskStore) {
+	if store == nil {
+		return
+	}
+	prefix := fmt.Sprintf("%p|", store)
+	fleetSnapshots.Lock()
+	defer fleetSnapshots.Unlock()
+	for key := range fleetSnapshots.values {
+		if strings.HasPrefix(key, prefix) {
+			delete(fleetSnapshots.values, key)
+		}
+	}
+}
+
+func fleetPayloadCached(store *TaskStore, conversationId string) []byte {	signature := fleetSignature(store, conversationId)
 	key := fmt.Sprintf("%p|%s", store, conversationId)
 	fleetSnapshots.Lock()
 	if cached, ok := fleetSnapshots.values[key]; ok && cached.signature == signature {

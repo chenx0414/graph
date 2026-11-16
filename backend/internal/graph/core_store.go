@@ -59,6 +59,7 @@ func (s *TaskStore) Close() {
 	if s == nil || s.DB == nil {
 		return
 	}
+	fleetSnapshotsForget(s)
 	if err := s.DB.Close(); err != nil {
 		panic(err)
 	}
