@@ -255,6 +255,10 @@ func (s *resourceState) resourceCard(ctx *ui.Context, t gwtheme.Tokens, row reso
 
 func (s *resourceState) view(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
+	if skeletonLoadingStatus(s.status) {
+		skeletonResourcesPage(ctx)
+		return
+	}
 	if row := s.selectedRow(); row != nil {
 		s.detailView(ctx, t, *row)
 		return

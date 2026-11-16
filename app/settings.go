@@ -192,6 +192,12 @@ func (s *settingsState) frame() {
 
 func (s *settingsState) view(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
+	if skeletonLoadingStatus(s.status) {
+		ui.Column(ctx).FillWidth().MaxWidth(760).AlignSelf(ui.Center).Padding(th.Space(4), th.Space(6)).Children(func() {
+			skeletonSettingsPage(ctx)
+		})
+		return
+	}
 	ui.Column(ctx).FillWidth().Children(func() {
 		ui.Column(ctx).FillWidth().MaxWidth(760).AlignSelf(ui.Center).Gap(th.Space(8)).Children(func() {
 			if s.status != "" {

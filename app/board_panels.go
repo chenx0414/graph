@@ -116,6 +116,10 @@ func (s *shellState) panelOverview(ctx *ui.Context) {
 	if s.usage == nil {
 		s.ensureUsage()
 	}
+	if s.usage != nil && skeletonLoadingStatus(s.usage.status) {
+		skeletonOverviewPage(ctx)
+		return
+	}
 	ui.Row(ctx).Wrap().Gap(th.Space(2)).Children(func() {
 		s.statCard(ctx, "会话", strconv.Itoa(len(s.conversations)))
 		s.statCard(ctx, "项目", strconv.Itoa(len(s.projectNames())))
@@ -136,7 +140,11 @@ func (s *shellState) panelOverview(ctx *ui.Context) {
 		s.statCard(ctx, "tokens", tokens)
 	})
 	if active := s.active(); active != nil {
-		kit.Text(ctx, "当前会话 · "+s.titleOf(s.activeID)+" · "+active.status, t.Text.Xs).TextColor(t.Muted)
+		if active.loading {
+			kit.SkeletonLine(ctx, 38, th.Space(1.75))
+		} else {
+			kit.Text(ctx, "当前会话 · "+s.titleOf(s.activeID)+" · "+active.status, t.Text.Xs).TextColor(t.Muted)
+		}
 	}
 }
 
@@ -148,7 +156,11 @@ func (s *shellState) panelConversation(ctx *ui.Context) {
 		return
 	}
 	kit.Text(ctx, s.titleOf(s.activeID), t.Text.Base).FontWeight(600).TextColor(t.Foreground)
-	kit.Text(ctx, "状态 · "+active.status, t.Text.Sm).TextColor(t.Muted)
+	if active.loading {
+		kit.SkeletonLine(ctx, 34, ctx.Theme().Space(1.75))
+	} else {
+		kit.Text(ctx, "状态 · "+active.status, t.Text.Sm).TextColor(t.Muted)
+	}
 	if active.currentModel != "" {
 		kit.Text(ctx, "模型 · "+shortModel(active.currentModel)+" · "+active.currentThinking, t.Text.Sm).TextColor(t.Muted)
 	}
@@ -269,7 +281,11 @@ func (s *shellState) panelModels(ctx *ui.Context) {
 	}
 	if len(active.models) == 0 {
 		active.loadModels()
-		s.boardNote(ctx, "正在读取模型…")
+		if active.modelsLoading {
+			skeletonModelsPanel(ctx)
+			return
+		}
+		s.boardNote(ctx, "没有可用模型。")
 		return
 	}
 	if active.currentModel != "" {
@@ -323,7 +339,7 @@ func (s *shellState) panelQuestions(ctx *ui.Context) {
 func (s *shellState) panelCapabilities(ctx *ui.Context) {
 	if s.resources == nil {
 		s.ensureResources()
-		s.boardNote(ctx, "正在读取资源库…")
+		skeletonResourcesPage(ctx)
 		return
 	}
 	s.resources.view(ctx)
@@ -332,7 +348,7 @@ func (s *shellState) panelCapabilities(ctx *ui.Context) {
 func (s *shellState) panelAssemblies(ctx *ui.Context) {
 	if s.assemblies == nil {
 		s.ensureAssemblies()
-		s.boardNote(ctx, "正在读取能力装配…")
+		skeletonAssembliesPage(ctx)
 		return
 	}
 	s.assemblies.view(ctx)
@@ -341,7 +357,7 @@ func (s *shellState) panelAssemblies(ctx *ui.Context) {
 func (s *shellState) panelSettings(ctx *ui.Context) {
 	if s.settings == nil {
 		s.ensureSettings()
-		s.boardNote(ctx, "正在读取设置…")
+		skeletonSettingsPage(ctx)
 		return
 	}
 	s.settings.view(ctx)

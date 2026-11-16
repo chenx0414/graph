@@ -25,11 +25,11 @@ func (s *shellState) trajectoryData(ctx *ui.Context) *conversationTrajectory {
 	if state.data != nil && !state.loading() {
 		go s.ensureTrajectory()
 	}
-	text := "正在整理轨迹…"
 	if state.failed != "" {
-		text = state.failed
+		kit.Text(ctx, state.failed, t.Text.Sm).TextColor(t.Muted)
+	} else {
+		skeletonCard(ctx, 3, false, true)
 	}
-	kit.Text(ctx, text, t.Text.Sm).TextColor(t.Muted)
 	if !state.loading() && (state.failed == "" || state.scopeKey != s.chatScope().key()) {
 		go s.ensureTrajectory()
 	}

@@ -284,7 +284,7 @@ func (s *shellState) panelProviders(ctx *ui.Context) {
 		phase := s.providersPhase()
 		switch phase {
 		case providersIdlePhase, providersLoadingPhase:
-			kit.Text(ctx, phase.Message(""), 13).TextColor(pal.Muted).Padding(18, 2)
+			skeletonProvidersPage(ctx)
 		case providersFailedPhase:
 			s.providerFailure(ctx, pal)
 		case providersEmptyPhase:

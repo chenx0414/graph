@@ -213,19 +213,18 @@ func (s *shellState) panelAgentDetail(ctx *ui.Context) {
 	}
 	id := fleetAgentIDOfPage(page.ID)
 	if _, ok := fleetAgentByID(s.fleet.data, id); !ok && s.fleet.data == nil {
-		text := "正在读取编队…"
-		if s.fleet.failed != "" {
-			text = s.fleet.failed
-		}
-		kit.Text(ctx, text, t.Text.Sm).TextColor(t.Muted)
-		if !s.fleet.loading && s.fleet.failed == "" {
-			s.ensureFleet()
+		if !s.fleetUnavailable(ctx) {
+			skeletonFleetDetail(ctx)
 		}
 		return
 	}
 	agent, note := s.fleetDetailAgent(id)
 	if agent == nil {
 		if note != "" {
+			if skeletonLoadingStatus(note) {
+				skeletonFleetDetail(ctx)
+				return
+			}
 			kit.Text(ctx, note, t.Text.Sm).TextColor(t.Muted)
 		}
 		return
@@ -329,7 +328,7 @@ func (s *shellState) agentDetailActivity(ctx *ui.Context, agent fleetAgent) {
 		kit.Text(ctx, "最近活动 / 工作记录", t.Text.Sm).FontWeight(600).TextColor(t.Foreground)
 		state := &s.fleet.detail
 		if state.agentID != agent.ID {
-			kit.Text(ctx, "正在读取最近活动…", t.Text.Xs).TextColor(t.Muted)
+			skeletonCard(ctx, 3, false, true)
 			return
 		}
 		if state.failed != "" {
@@ -337,7 +336,7 @@ func (s *shellState) agentDetailActivity(ctx *ui.Context, agent fleetAgent) {
 			return
 		}
 		if state.loading {
-			kit.Text(ctx, "正在读取最近活动…", t.Text.Xs).TextColor(t.Muted)
+			skeletonCard(ctx, 3, false, true)
 			return
 		}
 		if len(state.entries) == 0 {

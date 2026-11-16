@@ -147,6 +147,7 @@ func TestTheAgentSectionShowsFiveThenExpands(t *testing.T) {
 	defer server.Close()
 
 	state := newResourceState(server.URL, "tok")
+	state.status = ""
 	for index := 0; index < 8; index++ {
 		state.rows = append(state.rows, resourceRow{
 			id: "found-" + itoa(index), kind: "skill", name: "found-" + itoa(index), origin: "project",

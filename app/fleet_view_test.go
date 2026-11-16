@@ -90,15 +90,15 @@ func TestTheFleetPageRendersTheProjection(t *testing.T) {
 func TestTheFleetPageSaysItIsLoadingAndThenLands(t *testing.T) {
 	release := make(chan struct{})
 	var once sync.Once
-	t.Cleanup(func() { once.Do(func() { close(release) }) })
 	state := fleetServerShell(t, func(w http.ResponseWriter, r *http.Request) {
 		<-release
 		fleetSampleServer(w, r)
 	})
+	t.Cleanup(func() { once.Do(func() { close(release) }) })
 	state.openModule("fleet")
-	tester := frames(ui.NewTester(state.view, 1440, 900))
-	if !tester.HasText("正在读取编队…") {
-		t.Fatalf("the fleet page must say it is loading, texts %q", tester.Texts())
+	tester := frames(ui.NewTesterWith(state.view, 1440, 900, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true}}))
+	if _, ok := tester.Find("加载占位"); !ok {
+		t.Fatalf("the fleet page must show skeleton placeholders while loading, texts %q", tester.Texts())
 	}
 	once.Do(func() { close(release) })
 	deadline := time.Now().Add(2 * time.Second)
@@ -109,8 +109,11 @@ func TestTheFleetPageSaysItIsLoadingAndThenLands(t *testing.T) {
 		tester.Frame()
 	}
 	tester = frames(tester)
-	if !tester.HasText("主控") || tester.HasText("正在读取编队…") {
-		t.Fatalf("the fleet page must swap the loading note for the tree, texts %q", tester.Texts())
+	if !tester.HasText("主控") {
+		t.Fatalf("the fleet page must swap the skeleton for the tree, texts %q", tester.Texts())
+	}
+	if _, ok := tester.Find("加载占位"); ok {
+		t.Fatalf("the fleet page keeps no skeleton once the data lands, texts %q", tester.Texts())
 	}
 }
 

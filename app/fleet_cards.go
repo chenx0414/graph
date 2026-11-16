@@ -47,6 +47,12 @@ func fleetEllipsis(ctx *ui.Context, text string, size float32, color ui.Color) u
 
 func (s *shellState) panelFleetKPI(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
+	if s.fleet.data == nil {
+		if !s.fleetUnavailable(ctx) {
+			skeletonFleetKPIs(ctx)
+		}
+		return
+	}
 	data := s.fleetData(ctx)
 	if data == nil {
 		return
@@ -78,6 +84,12 @@ func (s *shellState) panelFleetKPI(ctx *ui.Context) {
 
 func (s *shellState) panelFleetCollaboration(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
+	if s.fleet.data == nil {
+		if !s.fleetUnavailable(ctx) {
+			skeletonFleetRows(ctx, 5)
+		}
+		return
+	}
 	data := s.fleetData(ctx)
 	if data == nil {
 		return
@@ -143,6 +155,12 @@ func (s *shellState) panelFleetCollaboration(ctx *ui.Context) {
 
 func (s *shellState) panelFleetTasks(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
+	if s.fleet.data == nil {
+		if !s.fleetUnavailable(ctx) {
+			skeletonFleetRows(ctx, 4)
+		}
+		return
+	}
 	data := s.fleetData(ctx)
 	if data == nil {
 		return
@@ -186,6 +204,12 @@ func (s *shellState) panelFleetTasks(ctx *ui.Context) {
 
 func (s *shellState) panelFleetEvents(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
+	if s.fleet.data == nil {
+		if !s.fleetUnavailable(ctx) {
+			skeletonFleetRows(ctx, 5)
+		}
+		return
+	}
 	data := s.fleetData(ctx)
 	if data == nil {
 		return
@@ -233,6 +257,12 @@ func (s *shellState) panelFleetEvents(ctx *ui.Context) {
 
 func (s *shellState) panelFleetArtifacts(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
+	if s.fleet.data == nil {
+		if !s.fleetUnavailable(ctx) {
+			skeletonFleetRows(ctx, 3)
+		}
+		return
+	}
 	data := s.fleetData(ctx)
 	if data == nil {
 		return

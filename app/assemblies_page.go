@@ -32,6 +32,10 @@ func assemblyDefinition(row assemblyRow) string {
 
 func (s *assemblyState) listView(ctx *ui.Context, t gwtheme.Tokens) {
 	th := ctx.Theme()
+	if skeletonLoadingStatus(s.status) {
+		skeletonAssembliesPage(ctx)
+		return
+	}
 	ui.Column(ctx).FillWidth().Padding(th.Space(5), th.Space(6), th.Space(4), th.Space(6)).
 		Gap(th.Space(3)).Children(func() {
 		if s.status != "" {

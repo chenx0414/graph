@@ -15,11 +15,11 @@ func (s *shellState) insightsData(ctx *ui.Context) *trajectoryInsights {
 	if state.data != nil {
 		return state.data
 	}
-	text := "正在汇总近 " + strconv.Itoa(s.insightsDays()) + " 天…"
 	if state.failed != "" {
-		text = state.failed
+		kit.Text(ctx, state.failed, t.Text.Sm).TextColor(t.Muted)
+	} else {
+		skeletonCard(ctx, 2, false, true)
 	}
-	kit.Text(ctx, text, t.Text.Sm).TextColor(t.Muted)
 	if !state.loading() && state.failed == "" {
 		go s.ensureInsights()
 	}
@@ -144,6 +144,11 @@ func (s *shellState) insightsSessionsCard(ctx *ui.Context) {
 func (s *shellState) panelInsights(ctx *ui.Context) {
 	s.scopeLineGlobal(ctx)
 	t, th := gwtheme.Of(ctx), ctx.Theme()
+	if s.insights.data == nil && s.insights.failed == "" {
+		s.ensureInsights()
+		skeletonInsightsPage(ctx)
+		return
+	}
 	data := s.insightsData(ctx)
 	if data == nil {
 		return

@@ -121,9 +121,9 @@ func TestTheProvidersPageDoesNotCallALoadingListEmpty(t *testing.T) {
 
 	shell := newShellState(server.URL, "")
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
-	if !tester.HasText("正在读取供应商") {
-		t.Fatalf("a pending read says so, texts %q", tester.Texts())
+	tester := frames(ui.NewTesterWith(shell.view, 1440, 900, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true}}))
+	if _, ok := tester.Find("加载占位"); !ok {
+		t.Fatalf("a pending read shows skeleton placeholders, texts %q", tester.Texts())
 	}
 	if tester.HasText("没有匹配的供应商") || tester.HasText("还没有供应商") {
 		t.Fatalf("a pending read is not an empty list, texts %q", tester.Texts())

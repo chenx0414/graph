@@ -5,8 +5,6 @@ import (
 	"net/url"
 
 	"github.com/egoist/mygo/ui"
-	"graph/app/gwui/kit"
-	gwtheme "graph/app/gwui/theme"
 )
 
 const (
@@ -228,18 +226,13 @@ func (s *shellState) refreshFleet() {
 }
 
 func (s *shellState) fleetData(ctx *ui.Context) *fleetSnapshot {
-	t := gwtheme.Of(ctx)
 	if data := s.fleet.data; data != nil {
 		return data
 	}
-	text := "正在读取编队…"
-	if s.fleet.failed != "" {
-		text = s.fleet.failed
+	if s.fleetUnavailable(ctx) {
+		return nil
 	}
-	kit.Text(ctx, text, t.Text.Sm).TextColor(t.Muted)
-	if !s.fleet.loading && s.fleet.failed == "" {
-		s.ensureFleet()
-	}
+	skeletonFleetRows(ctx, 4)
 	return nil
 }
 

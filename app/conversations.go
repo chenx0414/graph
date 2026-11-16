@@ -192,10 +192,13 @@ func (c *chatState) openSource(source agentChatSource) {
 	c.messages = nil
 	c.fingerprint = ""
 	c.status = "正在读取会话…"
+	c.loading = true
 	c.questions = nil
 	c.artifacts = nil
 	c.tasks = nil
-	if err := source.Load(c); err != nil && c.status == "正在读取会话…" {
+	err := source.Load(c)
+	c.loading = false
+	if err != nil && c.status == "正在读取会话…" {
 		c.status = "读不到这个会话：" + err.Error()
 	}
 }
@@ -214,7 +217,7 @@ func (c *chatState) view(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	ui.Column(ctx).Fill().Children(func() {
 		c.transcript(ctx)
-		if c.status != "" {
+		if c.status != "" && !c.loading {
 			ui.Text(ctx, c.status).FontSize(12).TextColor(th.TextMuted).Padding(16, 4, 16, 0)
 		}
 		bottom := ui.Column(ctx).FillWidth()
@@ -238,6 +241,10 @@ func (c *chatState) view(ctx *ui.Context) {
 func (c *chatState) transcript(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	if len(c.messages) == 0 {
+		if c.loading {
+			skeletonChatTranscript(ctx)
+			return
+		}
 		ui.Column(ctx).Grow(1).Center().Children(func() {
 			kit.Text(ctx, "还没有对话", t.Text.Base).TextColor(t.Muted)
 			kit.Text(ctx, "在下面输入第一条消息", t.Text.Sm).TextColor(t.Muted)
@@ -245,7 +252,7 @@ func (c *chatState) transcript(ctx *ui.Context) {
 		return
 	}
 	if c.historyLoading {
-		kit.Text(ctx, "正在加载更早的对话…", t.Text.Xs).TextColor(t.Muted).Padding(0, 0, th.Space(1), 0)
+		kit.SkeletonLine(ctx, 30, th.Space(1.5)).Padding(0, 0, th.Space(1), 0)
 	} else {
 		marker, gap := "", float32(0)
 		if c.noMoreHistory && c.listFirst == 0 && c.listLast >= 0 {

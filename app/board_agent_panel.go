@@ -86,14 +86,12 @@ func (s *shellState) panelChatAgent(ctx *ui.Context) {
 	agent, data := s.chatAgent()
 	if agent == nil {
 		if s.fleet.data == nil && s.fleet.global == nil {
-			text := "正在读取编队…"
 			if s.fleet.failed != "" {
-				text = s.fleet.failed
+				kit.Text(ctx, s.fleet.failed, t.Text.Sm).TextColor(t.Muted)
+				return
 			}
-			kit.Text(ctx, text, t.Text.Sm).TextColor(t.Muted)
-			if !s.fleet.loading && s.fleet.failed == "" {
-				s.ensureFleet()
-			}
+			s.ensureFleet()
+			skeletonCard(ctx, 4, false, true)
 			return
 		}
 		s.boardNote(ctx, "这个对话还没有登记为 Agent。")

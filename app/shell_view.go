@@ -116,7 +116,11 @@ func (s *shellState) conversationPane(ctx *ui.Context) {
 	pane.Children(func() {
 		s.mainAgentCard(ctx)
 		if s.status != "" && len(s.conversations) == 0 {
-			kit.Text(ctx, s.status, t.Text.Sm).TextColor(t.Muted).Padding(th.Space(2), th.Space(1))
+			if skeletonLoadingStatus(s.status) {
+				skeletonSidebarRows(ctx, 6)
+			} else {
+				kit.Text(ctx, s.status, t.Text.Sm).TextColor(t.Muted).Padding(th.Space(2), th.Space(1))
+			}
 		}
 		s.conversationList(ctx)
 	})
@@ -193,6 +197,10 @@ func (s *shellState) chatPane(ctx *ui.Context) {
 	pane.Children(func() {
 		active := s.active()
 		if active == nil {
+			if !s.dataReady.Load() {
+				skeletonChatTranscript(ctx)
+				return
+			}
 			kit.Text(ctx, "从左侧选择一个项目", t.Text.Base).TextColor(t.Muted).Padding(ctx.Theme().Space(5))
 			return
 		}

@@ -17,14 +17,14 @@ func (s *shellState) panelTrajectory(ctx *ui.Context) {
 		if !state.loading() {
 			go s.ensureTrajectory()
 		}
-		kit.Text(ctx, "正在整理轨迹…", t.Text.Sm).TextColor(t.Muted)
+		skeletonTrajectoryPage(ctx)
 		return
 	}
 	if state.data == nil {
 		if state.failed != "" {
 			kit.Text(ctx, state.failed, t.Text.Sm).TextColor(t.Muted)
 		} else {
-			kit.Text(ctx, "正在整理轨迹…", t.Text.Sm).TextColor(t.Muted)
+			skeletonTrajectoryPage(ctx)
 		}
 		if !state.loading() && (state.failed == "" || state.scopeKey != s.chatScope().key()) {
 			go s.ensureTrajectory()

@@ -15,11 +15,11 @@ func (s *shellState) panelFleetGraph(ctx *ui.Context) {
 	state := s.graph
 	if state.taskID == "" || state.taskID != fleetGraphTaskIDOfPage(s.boardPage().ID) {
 		s.ensureFleetGraph()
-		s.fleetGraphMessage(ctx, "正在读取 Graph 拓扑…", t.Muted)
+		skeletonGraphCanvas(ctx)
 		return
 	}
 	if state.loading && state.data == nil {
-		s.fleetGraphMessage(ctx, "正在读取 Graph 拓扑…", t.Muted)
+		skeletonGraphCanvas(ctx)
 		return
 	}
 	if state.failed != "" {
