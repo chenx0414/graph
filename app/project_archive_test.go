@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,7 +15,10 @@ import (
 func TestHoveringAProjectConversationArchivesIt(t *testing.T) {
 	archived := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		archived <- r.URL.Path
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		requestId, _ := body["requestId"].(string)
+		archived <- r.URL.Path + "|" + requestId
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
@@ -42,9 +47,13 @@ func TestHoveringAProjectConversationArchivesIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	select {
-	case path := <-archived:
-		if path != "/api/projects/13-Graph/archive" {
-			t.Fatalf("the hover action archives the project, got %s", path)
+	case received := <-archived:
+		parts := strings.SplitN(received, "|", 2)
+		if parts[0] != "/api/projects/13-Graph/archive" {
+			t.Fatalf("the hover action archives the project, got %s", received)
+		}
+		if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
+			t.Fatalf("the archive action carries a request id, got %s", received)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("the archive request never went out")

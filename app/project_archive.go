@@ -11,7 +11,8 @@ func (s *shellState) archiveProject(projectID string) {
 		return
 	}
 	go func() {
-		if _, err := s.api.post("/api/projects/"+url.PathEscape(projectID)+"/archive", nil); err != nil {
+		body := map[string]any{"requestId": requestID("archive")}
+		if _, err := s.api.post("/api/projects/"+url.PathEscape(projectID)+"/archive", body); err != nil {
 			onUI(s.window, func() {
 				s.status = "归档失败：" + err.Error()
 				s.frame()

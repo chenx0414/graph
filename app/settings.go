@@ -168,7 +168,7 @@ func (s *settingsState) toggleAutoUpdate() {
 }
 
 func (s *settingsState) post(path string) {
-	if _, err := s.api.post(path, nil); err != nil {
+	if _, err := s.api.post(path, map[string]any{"requestId": requestID("project")}); err != nil {
 		s.status = "操作失败：" + err.Error()
 		return
 	}

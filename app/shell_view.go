@@ -115,8 +115,8 @@ func (s *shellState) conversationPane(ctx *ui.Context) {
 		Padding(th.Space(2), th.Space(2), th.Space(2), th.Space(2)).Gap(th.Space(0.5))
 	pane.Children(func() {
 		s.mainAgentCard(ctx)
-		if s.status != "" && len(s.conversations) == 0 {
-			if skeletonLoadingStatus(s.status) {
+		if s.status != "" && (len(s.conversations) == 0 || !skeletonLoadingStatus(s.status)) {
+			if len(s.conversations) == 0 && skeletonLoadingStatus(s.status) {
 				skeletonSidebarRows(ctx, 6)
 			} else {
 				kit.Text(ctx, s.status, t.Text.Sm).TextColor(t.Muted).Padding(th.Space(2), th.Space(1))
@@ -172,28 +172,32 @@ func (s *shellState) conversationList(ctx *ui.Context) {
 				id := conversation.ID
 				opts.OnClick = func() { go s.selectConversation(id) }
 			}
-			row := kit.SidebarItem(ctx, opts)
-			row.Label(label)
-			row.Children(func() {
-				content := ui.Row(ctx).Grow(1).Gap(th.Space(1.5)).AlignItems(ui.Center)
-				content.MaskLinearGradient(ui.LinearGradient{Angle: 90, Stops: []ui.GradientStop{
-					{Color: ui.RGB(0, 0, 0), At: 0},
-					{Color: ui.RGB(0, 0, 0), At: 0.84},
-					{Color: ui.Transparent, At: 1},
-				}}).Clip()
-				content.Children(func() {
-					ui.Icon(ctx, iconFolder).Size(gwtheme.Icon, gwtheme.Icon).TextColor(t.Muted)
-					kit.Text(ctx, label, t.Text.Lg).FontWeight(500).TextColor(t.Foreground).Grow(1).NoWrap()
-					if conversation.ArchivedAtPresent() {
-						kit.Text(ctx, "已归档", t.Text.Xs).TextColor(t.Muted)
-					}
+			line := ui.Row(ctx).FillWidth().AlignItems(ui.Center)
+			line.Children(func() {
+				row := kit.SidebarItem(ctx, opts)
+				row.Grow(1)
+				row.Label(label)
+				row.Children(func() {
+					content := ui.Row(ctx).Grow(1).Gap(th.Space(1.5)).AlignItems(ui.Center)
+					content.MaskLinearGradient(ui.LinearGradient{Angle: 90, Stops: []ui.GradientStop{
+						{Color: ui.RGB(0, 0, 0), At: 0},
+						{Color: ui.RGB(0, 0, 0), At: 0.84},
+						{Color: ui.Transparent, At: 1},
+					}}).Clip()
+					content.Children(func() {
+						ui.Icon(ctx, iconFolder).Size(gwtheme.Icon, gwtheme.Icon).TextColor(t.Muted)
+						kit.Text(ctx, label, t.Text.Lg).FontWeight(500).TextColor(t.Foreground).Grow(1).NoWrap()
+						if conversation.ArchivedAtPresent() {
+							kit.Text(ctx, "已归档", t.Text.Xs).TextColor(t.Muted)
+						}
+					})
 				})
-				if conversation.ProjectID != "" && !conversation.ArchivedAtPresent() && row.Hovered() {
+				if conversation.ProjectID != "" && !conversation.ArchivedAtPresent() && line.Hovered() {
 					button := kit.IconButton(ctx, iconArchive, "归档项目 "+label, kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeXs})
 					button.OnClick(func() { go s.archiveProject(conversation.ProjectID) })
 				}
 			})
-			row.Margin(0, 0, th.Space(0.5), 0)
+			line.Margin(0, 0, th.Space(0.5), 0)
 		}).Grow(1)
 	})
 }
