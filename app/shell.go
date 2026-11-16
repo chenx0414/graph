@@ -48,6 +48,7 @@ type shellState struct {
 	window           *mygo.Window
 	list             ui.ListState
 	stateDir         string
+	archiveConfirm   *archiveConfirmState
 }
 
 func newShellState(address, token string) *shellState {

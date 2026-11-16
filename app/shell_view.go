@@ -29,6 +29,7 @@ func (s *shellState) view(ctx *ui.Context) {
 			})
 		})
 	})
+	s.archiveConfirmView(ctx)
 }
 
 func titleBandHeight(ctx *ui.Context) float32 {
@@ -175,10 +176,10 @@ func (s *shellState) conversationList(ctx *ui.Context) {
 			line := ui.Row(ctx).FillWidth().AlignItems(ui.Center)
 			line.Children(func() {
 				row := kit.SidebarItem(ctx, opts)
-				row.Grow(1)
+				row.Grow(1).Shrink(1)
 				row.Label(label)
 				row.Children(func() {
-					content := ui.Row(ctx).Grow(1).Gap(th.Space(1.5)).AlignItems(ui.Center)
+					content := ui.Row(ctx).Grow(1).Shrink(1).MinWidth(0).Gap(th.Space(1.5)).AlignItems(ui.Center)
 					content.MaskLinearGradient(ui.LinearGradient{Angle: 90, Stops: []ui.GradientStop{
 						{Color: ui.RGB(0, 0, 0), At: 0},
 						{Color: ui.RGB(0, 0, 0), At: 0.84},
@@ -186,7 +187,7 @@ func (s *shellState) conversationList(ctx *ui.Context) {
 					}}).Clip()
 					content.Children(func() {
 						ui.Icon(ctx, iconFolder).Size(gwtheme.Icon, gwtheme.Icon).TextColor(t.Muted)
-						kit.Text(ctx, label, t.Text.Lg).FontWeight(500).TextColor(t.Foreground).Grow(1).NoWrap()
+						kit.Text(ctx, label, t.Text.Lg).FontWeight(500).TextColor(t.Foreground).Grow(1).Shrink(1).MinWidth(0).SingleLine().Ellipsis("…")
 						if conversation.ArchivedAtPresent() {
 							kit.Text(ctx, "已归档", t.Text.Xs).TextColor(t.Muted)
 						}
@@ -194,7 +195,7 @@ func (s *shellState) conversationList(ctx *ui.Context) {
 				})
 				if conversation.ProjectID != "" && !conversation.ArchivedAtPresent() && line.Hovered() {
 					button := kit.IconButton(ctx, iconArchive, "归档项目 "+label, kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeXs})
-					button.OnClick(func() { go s.archiveProject(conversation.ProjectID) })
+					button.OnClick(func() { go s.requestArchive(conversation.ProjectID, label) })
 				}
 			})
 			line.Margin(0, 0, th.Space(0.5), 0)
