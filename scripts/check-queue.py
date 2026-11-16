@@ -394,6 +394,7 @@ def main():
             ("go", "-C", "app", "test", "./..."),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "comments"),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "ownership"),
+            ("go", "-C", "backend", "run", "./cmd/graphcheck", "api"),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "machines"),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "tokens", "--changed"),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "harness"),

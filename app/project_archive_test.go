@@ -185,3 +185,26 @@ func TestArchivingAProjectWithRunningWorkAsksFirst(t *testing.T) {
 		t.Fatal("confirming never archived the project")
 	}
 }
+
+func TestAnArchivedProjectHasNoArchiveAction(t *testing.T) {
+	archivedAt := int64(1)
+	state := newShellState("http://127.0.0.1:1", "tok")
+	state.conversations = []conversationSummary{{ID: "c1", Role: "project", ProjectID: "p1", Title: "p1", ProjectArchivedAt: &archivedAt}}
+	tester := ui.NewTester(func(c *ui.Context) {
+		theme.Apply(c, theme.Dark())
+		ui.Column(c).Width(300).Children(func() { state.conversationList(c) })
+	}, 320, 400)
+	tester.Frame()
+	row, ok := tester.Find("p1")
+	if !ok {
+		t.Fatalf("the archived project row is drawn, texts %q", tester.Texts())
+	}
+	tester.Move(row.X+10, row.Y+row.H/2)
+	tester.Frame()
+	if _, ok := tester.Find("归档项目 p1"); ok {
+		t.Fatalf("an archived project offers no archive action, texts %q", tester.Texts())
+	}
+	if !tester.HasText("已归档") {
+		t.Fatalf("an archived project says so, texts %q", tester.Texts())
+	}
+}

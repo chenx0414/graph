@@ -14,14 +14,15 @@ import (
 )
 
 type conversationSummary struct {
-	ID            string `json:"id"`
-	Role          string `json:"role"`
-	ArchivedAt    *int64 `json:"archivedAt"`
-	Title         string `json:"title"`
-	ProjectID     string `json:"projectId"`
-	Status        string `json:"status"`
-	OpenQuestions int    `json:"openQuestions"`
-	UpdatedAt     int64  `json:"updatedAt"`
+	ID                string `json:"id"`
+	Role              string `json:"role"`
+	ArchivedAt        *int64 `json:"archivedAt"`
+	ProjectArchivedAt *int64 `json:"projectArchivedAt"`
+	Title             string `json:"title"`
+	ProjectID         string `json:"projectId"`
+	Status            string `json:"status"`
+	OpenQuestions     int    `json:"openQuestions"`
+	UpdatedAt         int64  `json:"updatedAt"`
 }
 
 type questionOptions struct {
@@ -51,6 +52,8 @@ type conversationBody struct {
 }
 
 func (c conversationSummary) ArchivedAtPresent() bool { return c.ArchivedAt != nil }
+
+func (c conversationSummary) ProjectArchived() bool { return c.ProjectArchivedAt != nil }
 
 func parseConversations(payload []byte) ([]conversationSummary, error) {
 	list := []conversationSummary{}

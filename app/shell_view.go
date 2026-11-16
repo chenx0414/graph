@@ -188,12 +188,12 @@ func (s *shellState) conversationList(ctx *ui.Context) {
 					content.Children(func() {
 						ui.Icon(ctx, iconFolder).Size(gwtheme.Icon, gwtheme.Icon).TextColor(t.Muted)
 						kit.Text(ctx, label, t.Text.Lg).FontWeight(500).TextColor(t.Foreground).Grow(1).Shrink(1).MinWidth(0).SingleLine().Ellipsis("…")
-						if conversation.ArchivedAtPresent() {
+						if conversation.ArchivedAtPresent() || conversation.ProjectArchived() {
 							kit.Text(ctx, "已归档", t.Text.Xs).TextColor(t.Muted)
 						}
 					})
 				})
-				if conversation.ProjectID != "" && !conversation.ArchivedAtPresent() && stack.Hovered() {
+				if conversation.ProjectID != "" && !conversation.ArchivedAtPresent() && !conversation.ProjectArchived() && stack.Hovered() {
 					button := kit.IconButton(ctx, iconArchive, "归档项目 "+label, kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeXs})
 					button.Absolute().Top(th.Space(2)).Right(th.Space(1))
 					button.OnClick(func() { go s.requestArchive(conversation.ProjectID, label) })

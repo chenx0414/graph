@@ -23,3 +23,29 @@ func TestConversationListHidesChildAgents(t *testing.T) {
 		t.Fatalf("conversation list = %+v", list)
 	}
 }
+
+func TestConversationListCarriesTheProjectArchiveState(t *testing.T) {
+	store := openTaskStore(t, filepath.Join(t.TempDir(), "conversation-list.sqlite"))
+	defer store.Close()
+	kernelExec(store.DB, "INSERT INTO projects(id,root,grants) VALUES('p1','/tmp/p1','[]')")
+	kernelExec(store.DB, "INSERT INTO projects(id,root,grants) VALUES('p2','/tmp/p2','[]')")
+	kernelExec(store.DB, "UPDATE projects SET archived_at=1 WHERE id='p1'")
+	for _, statement := range []string{
+		`INSERT INTO conversations(id,project_id,workspace_project_id,anchor_task_id,title,created_seq,created_at,role) VALUES('c1','p1','p1','t1','One',1,0,'project')`,
+		`INSERT INTO conversations(id,project_id,workspace_project_id,anchor_task_id,title,created_seq,created_at,role) VALUES('c2','p2','p2','t2','Two',2,0,'project')`,
+	} {
+		kernelExec(store.DB, statement)
+	}
+	list := (&TaskRuntime{store: store}).Conversations().List(false)
+	if len(list) != 2 {
+		t.Fatalf("conversation list = %+v", list)
+	}
+	for _, row := range list {
+		if kernelString(row["id"]) == "c1" && row["projectArchivedAt"] == nil {
+			t.Fatalf("the archived project state is reported: %+v", row)
+		}
+		if kernelString(row["id"]) == "c2" && row["projectArchivedAt"] != nil {
+			t.Fatalf("an active project has no archive timestamp: %+v", row)
+		}
+	}
+}

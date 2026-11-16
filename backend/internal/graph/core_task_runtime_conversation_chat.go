@@ -13,6 +13,7 @@ func (conversations *TaskRuntimeConversations) List(archived bool) []map[string]
 	}
 	rows := kernelRows(runtime.store.Db, `SELECT c.id,c.role,c.title,c.project_id AS projectId,c.anchor_task_id AS anchorTaskId,c.created_at AS createdAt,
     c.archived_at AS archivedAt,
+    (SELECT p.archived_at FROM projects p WHERE p.id=c.project_id) AS projectArchivedAt,
     (SELECT MAX(e.timestamp) FROM events e JOIN tasks t ON t.id=e.task_id WHERE t.conversation_id=c.id) AS updatedAt,
     (SELECT COUNT(*) FROM questions q JOIN tasks t ON t.id=q.task_id WHERE t.conversation_id=c.id AND q.status='open' AND q.owner='user') AS openQuestions,
     (SELECT COUNT(*) FROM questions q JOIN tasks t ON t.id=q.task_id WHERE t.conversation_id=c.id AND q.status='open' AND q.owner='user' AND q.asked_at IS NOT NULL AND q.asked_at<=?) AS suspendedQuestions,
@@ -38,6 +39,7 @@ func (conversations *TaskRuntimeConversations) List(archived bool) []map[string]
 			"anchorTaskId":       kernelString(row["anchorTaskId"]),
 			"createdAt":          kernelInt(row["createdAt"]),
 			"archivedAt":         row["archivedAt"],
+			"projectArchivedAt":  row["projectArchivedAt"],
 			"updatedAt":          row["updatedAt"],
 			"openQuestions":      kernelInt(row["openQuestions"]),
 			"suspendedQuestions": kernelInt(row["suspendedQuestions"]),

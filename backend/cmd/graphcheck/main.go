@@ -30,6 +30,8 @@ func main() {
 		os.Exit(runTokens(root, os.Args[2:]))
 	case "ownership":
 		os.Exit(runOwnership(root, os.Args[2:]))
+	case "api":
+		os.Exit(runAPI(root))
 	case "machines":
 		os.Exit(runMachines(root, os.Args[2:]))
 	case "evidence":
@@ -53,7 +55,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: graphcheck comments [--changed] | tokens [--changed] [paths...] | ownership [--staged] [paths...] | machines [--verbose] | evidence | skills [flags] | pig [flags] | summary [path] | harness [--record] | eval [flags] | all")
+	fmt.Fprintln(os.Stderr, "usage: graphcheck comments [--changed] | tokens [--changed] [paths...] | ownership [--staged] [paths...] | api | machines [--verbose] | evidence | skills [flags] | pig [flags] | summary [path] | harness [--record] | eval [flags] | all")
 }
 
 func repoRoot() (string, error) {

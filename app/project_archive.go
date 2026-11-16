@@ -97,6 +97,10 @@ func (s *shellState) requestArchive(projectID, label string) {
 			return
 		}
 		if lifecycle.Archived {
+			onUI(s.window, func() {
+				s.status = "项目已经归档。"
+				s.frame()
+			})
 			return
 		}
 		if lifecycle.ActiveExecutions > 0 {
