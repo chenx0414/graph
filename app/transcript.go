@@ -8,15 +8,25 @@ import (
 	"github.com/egoist/mygo/ui/markdown"
 )
 
+type transcriptMessageSource struct {
+	Kind     string `json:"kind"`
+	Form     string `json:"form"`
+	Summary  string `json:"summary"`
+	Tool     string `json:"toolName"`
+	ToolCall string `json:"toolCallId"`
+	State    string `json:"state"`
+}
+
 type transcriptMessageData struct {
-	Tool       string `json:"tool"`
-	ToolCallID string `json:"toolCallId"`
-	Ordinal    int    `json:"ordinal"`
-	Output     string `json:"output"`
-	Message    string `json:"message"`
-	Command    string `json:"command"`
-	Args       string `json:"args"`
-	Error      bool   `json:"error"`
+	Tool       string                  `json:"tool"`
+	Source     transcriptMessageSource `json:"source"`
+	ToolCallID string                  `json:"toolCallId"`
+	Ordinal    int                     `json:"ordinal"`
+	Output     string                  `json:"output"`
+	Message    string                  `json:"message"`
+	Command    string                  `json:"command"`
+	Args       string                  `json:"args"`
+	Error      bool                    `json:"error"`
 }
 
 type transcriptMessage struct {

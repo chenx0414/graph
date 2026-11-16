@@ -373,6 +373,10 @@ func chatRightFade() ui.LinearGradient {
 }
 
 func (c *chatState) messageRow(ctx *ui.Context, message transcriptMessage) {
+	if message.Data.Source.Form == "notice" || message.Data.Source.Kind == "tool_settled" {
+		c.noticeRow(ctx, message)
+		return
+	}
 	mine := message.Role == "user"
 	if !mine {
 		th := ctx.Theme()
@@ -393,6 +397,30 @@ func (c *chatState) messageRow(ctx *ui.Context, message transcriptMessage) {
 			c.bubble(ctx, message)
 			c.messageMeta(ctx, message, true)
 		})
+	})
+}
+
+func (c *chatState) noticeRow(ctx *ui.Context, message transcriptMessage) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	summary := strings.TrimSpace(message.Data.Source.Summary)
+	if summary == "" {
+		summary = "后台任务已结束"
+		if tool := strings.TrimSpace(message.Data.Source.Tool); tool != "" {
+			summary = tool + " 已结束"
+		}
+	}
+	card := ui.Column(ctx).FillWidth().MaxWidthPercent(84).Gap(th.Space(0.75)).
+		Padding(th.Space(1.5), th.Space(2)).Radius(t.Radius.Lg).Background(t.Card).
+		Border(gwtheme.Hairline, t.Border).Label("后台任务通知")
+	card.Children(func() {
+		ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center).Children(func() {
+			ui.Icon(ctx, iconSpark).Size(gwtheme.IconSm, gwtheme.IconSm).TextColor(t.Muted)
+			kit.Text(ctx, summary, t.Text.Xs).TextColor(t.Muted).Grow(1).SingleLine().Ellipsis("…")
+			if message.CreatedAt > 0 {
+				kit.Text(ctx, messageClock(message.CreatedAt), t.Text.Xs).TextColor(t.Muted)
+			}
+		})
+		kit.Text(ctx, message.Text, t.Text.Sm).TextColor(t.Muted)
 	})
 }
 
