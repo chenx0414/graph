@@ -103,3 +103,24 @@ func TestTheStartupPanesShowSkeletonsBeforeTheFirstRead(t *testing.T) {
 	requireSkeleton(t, skeletonTester(t, shell.chatPane), "the startup chat pane")
 	requireSkeleton(t, skeletonTester(t, shell.conversationPane), "the startup conversation pane")
 }
+
+func TestSwitchingAConversationShowsSkeletonsUntilItsDataLands(t *testing.T) {
+	old := &conversationTrajectory{TaskId: "old"}
+	shell := &shellState{
+		fleet:      fleetState{conversationID: "old", data: &fleetSnapshot{RootID: "old"}},
+		trajectory: trajectoryState{loadState: loadState[conversationTrajectory]{phase: loadReadyP, data: old}, scopeKey: "old"},
+		boardNet:   netPanelState{topoKey: "old", topology: &fleetTopologyData{TaskID: "old"}},
+	}
+	state := shell.beginConversationSwitch("c2")
+	if state == nil || !state.loading {
+		t.Fatalf("the switch starts a loading chat, got %+v", state)
+	}
+	if shell.fleet.data != nil || shell.trajectory.data != nil || shell.boardNet.topology != nil {
+		t.Fatal("the old conversation's board data is cleared before the new read")
+	}
+	requireSkeleton(t, skeletonTester(t, shell.chatPane), "the switching chat")
+	requireSkeleton(t, skeletonTester(t, shell.panelFleetKPI), "the switching fleet")
+	requireSkeleton(t, skeletonTester(t, shell.panelTrajectory), "the switching trajectory")
+	requireSkeleton(t, skeletonTester(t, shell.panelChatAgent), "the switching agent panel")
+	requireSkeleton(t, skeletonTester(t, func(c *ui.Context) { shell.panelChatNetwork(c, "") }), "the switching network")
+}

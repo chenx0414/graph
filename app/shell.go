@@ -236,26 +236,33 @@ func (s *shellState) titleOf(id string) string {
 }
 
 func (s *shellState) selectConversation(id string) {
-	if strings.TrimSpace(id) == "" {
+	state := s.beginConversationSwitch(id)
+	if state == nil {
 		return
 	}
-	s.chatMu.Lock()
-	if s.activeID == id {
-		s.chatMu.Unlock()
+	if s.window != nil {
+		s.ensureFleet()
+		s.ensureTrajectory()
+		s.ensureBoardPageData()
+		api := s.api
+		go func() {
+			loaded := newChatState(api.address, api.token)
+			loaded.window = s.window
+			loaded.providerOn = s.providersEnabled
+			loaded.open(id)
+			s.chatMu.Lock()
+			if s.activeID != id {
+				s.chatMu.Unlock()
+				return
+			}
+			s.chat = loaded
+			s.chatMu.Unlock()
+			s.ensureBoardPageData()
+			s.frame()
+		}()
 		return
 	}
-	s.activeID = id
-	s.chat = nil
-	s.chatMu.Unlock()
-	state := newChatState(s.api.address, s.api.token)
-	state.window = s.window
-	state.providerOn = s.providersEnabled
 	state.open(id)
-	s.chatMu.Lock()
-	if s.activeID == id {
-		s.chat = state
-	}
-	s.chatMu.Unlock()
 	s.frame()
 }
 
@@ -268,7 +275,7 @@ func (s *shellState) refresh() bool {
 		reload = s.broken || len(s.conversations) == 0
 		s.refreshVisibleWorkspace()
 	})
-	if active != nil {
+	if active != nil && !active.loading {
 		changed = active.poll()
 		if changed || active.artifacts == nil {
 			changed = active.refreshArtifacts() || changed

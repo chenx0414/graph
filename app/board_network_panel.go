@@ -62,6 +62,10 @@ func (s *shellState) panelScope() string {
 
 func (s *shellState) panelChatNetwork(ctx *ui.Context, scope string) {
 	t := gwtheme.Of(ctx)
+	if chat := s.active(); chat != nil && chat.loading {
+		skeletonFleetNetwork(ctx)
+		return
+	}
 	if scope == "fleet" && s.fleet.data == nil && s.fleet.failed == "" {
 		s.ensureFleet()
 		skeletonFleetNetwork(ctx)

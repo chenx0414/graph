@@ -164,7 +164,11 @@ func (s *shellState) panelConversation(ctx *ui.Context) {
 	if active.currentModel != "" {
 		kit.Text(ctx, "模型 · "+shortModel(active.currentModel)+" · "+active.currentThinking, t.Text.Sm).TextColor(t.Muted)
 	}
-	kit.Text(ctx, "消息 "+strconv.Itoa(len(active.messages))+" 条", t.Text.Sm).TextColor(t.Muted)
+	if active.loading {
+		kit.SkeletonLine(ctx, 22, ctx.Theme().Space(1.75))
+	} else {
+		kit.Text(ctx, "消息 "+strconv.Itoa(len(active.messages))+" 条", t.Text.Sm).TextColor(t.Muted)
+	}
 }
 
 func (s *shellState) panelHistory(ctx *ui.Context) {
@@ -207,6 +211,10 @@ func (s *shellState) panelTasks(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	s.scopeLine(ctx, "全体 Agent · 安装级")
 	active := s.active()
+	if active != nil && active.loading {
+		skeletonCard(ctx, 4, false, true)
+		return
+	}
 	if active == nil || len(active.tasks) == 0 {
 		if s.chatScope().Kind == "node" {
 			s.boardNote(ctx, "这个 Agent 还没有任务记录。")
@@ -232,6 +240,10 @@ func (s *shellState) panelArtifacts(ctx *ui.Context) {
 	active := s.active()
 	if active == nil {
 		s.boardNote(ctx, "还没有选中的会话。")
+		return
+	}
+	if active.loading {
+		skeletonCard(ctx, 3, false, true)
 		return
 	}
 	if len(active.artifacts) == 0 && active.preview == "" {
@@ -280,6 +292,10 @@ func (s *shellState) panelModels(ctx *ui.Context) {
 		return
 	}
 	if len(active.models) == 0 {
+		if active.loading {
+			skeletonModelsPanel(ctx)
+			return
+		}
 		active.loadModels()
 		if active.modelsLoading {
 			skeletonModelsPanel(ctx)
@@ -315,6 +331,10 @@ func thinkingLevels(model modelChoice) []string {
 func (s *shellState) panelQuestions(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	active := s.active()
+	if active != nil && active.loading {
+		skeletonCard(ctx, 3, false, true)
+		return
+	}
 	if active == nil || len(active.questions) == 0 {
 		s.boardNote(ctx, "没有待你决定的问题。")
 		return

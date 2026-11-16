@@ -136,7 +136,7 @@ type chatState struct {
 }
 
 func newChatState(address, token string) *chatState {
-	state := &chatState{api: newAPIClient(address, token), status: "正在读取会话…", loading: true, expanded: map[string]bool{}, runBoundaries: map[string]bool{}, listFirst: -1, listLast: -1, pendingCaret: -1}
+	state := &chatState{api: newAPIClient(address, token), status: "正在读取会话…", expanded: map[string]bool{}, runBoundaries: map[string]bool{}, listFirst: -1, listLast: -1, pendingCaret: -1}
 	state.list.FollowEnd = true
 	state.list.FollowAnimation = &ui.Smooth
 	state.md.CodeBlock = func(ctx *ui.Context, block *markdown.CodeBlockView) {

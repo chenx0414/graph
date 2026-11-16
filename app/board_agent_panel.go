@@ -78,6 +78,10 @@ func (s *shellState) agentPanelTask(ctx *ui.Context, scope chatScope) {
 
 func (s *shellState) panelChatAgent(ctx *ui.Context) {
 	t := gwtheme.Of(ctx)
+	if chat := s.active(); chat != nil && chat.loading {
+		skeletonCard(ctx, 4, false, true)
+		return
+	}
 	scope := s.chatScope()
 	if scope.key() == "" {
 		s.boardNote(ctx, "先打开一个对话，这里会显示它对应的 Agent。")
