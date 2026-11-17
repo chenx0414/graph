@@ -30,26 +30,25 @@ func (supervisor *TaskRuntimeSupervisor) ConfirmDraft(input TaskRuntimeConfirmIn
 		Raise("invalid_input", "An instruction is required: record the words that authorised this confirmation")
 	}
 	instruction := strings.TrimSpace(input.AttestationInstruction())
-	authorized := false
-	for _, message := range kernelRows(runtime.store.Db, `SELECT m.text FROM messages m
- JOIN conversations c ON c.id=m.conversation_id
- JOIN operations o ON o.id=m.operation_id AND o.task_id=c.anchor_task_id
- WHERE c.anchor_task_id=? AND m.role='user' AND m.kind='chat' AND m.state='delivered'
- AND (m.data IS NULL OR json_extract(m.data,'$.source') IS NULL)
- AND o.state='dispatched' AND o.worker_active=1`, supervisor.taskId) {
-		if strings.Contains(kernelString(message["text"]), instruction) {
-			authorized = true
-			break
-		}
-	}
-	if !authorized {
-		Raise("permission", "The confirmation must quote a user message in the current supervisor turn")
+	if !confirmationQuoted(runtime.store, supervisor.taskId, instruction) {
+		Raise("permission", "The confirmation must quote a message recorded in this conversation")
 	}
 	conversation := runtime.store.Task(supervisor.taskId).ConversationID
 	if conversation == nil {
 		Raise("invalid_input", "This task has no conversation to confirm")
 	}
 	return runtime.Conversations().Confirm(*conversation, input)
+}
+
+func confirmationQuoted(store *TaskStore, anchorTaskId, instruction string) bool {
+	instruction = strings.TrimSpace(instruction)
+	if instruction == "" || strings.TrimSpace(anchorTaskId) == "" {
+		return false
+	}
+	row := kernelRow(store.Db, `SELECT COUNT(*) AS count FROM messages m
+ JOIN conversations c ON c.id=m.conversation_id
+ WHERE c.anchor_task_id=? AND instr(m.text, ?)>0`, anchorTaskId, instruction)
+	return row != nil && kernelInt(row["count"]) > 0
 }
 
 func (input TaskRuntimeConfirmInput) AttestationInstruction() string {
