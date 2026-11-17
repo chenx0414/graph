@@ -174,7 +174,7 @@ func InsertQuestion(store *TaskStore, input QuestionInput) QuestionInsertResult 
 		WakeMaster(store, WakeIntent{TaskID: kernelString(global["anchor_task_id"]), Kind: "supervisor_question", DedupeKey: id,
 			Data: map[string]any{"questionId": id, "revision": 1, "projectId": conversation.ProjectId}, HasData: true})
 	}
-	if input.Kind == "recovery" && selfOwned {
+	if questionPolicy(input.Kind).Escalate && selfOwned {
 		conversation := ConversationForTask(store, input.TaskId)
 		global := kernelRow(store.Db, "SELECT anchor_task_id FROM conversations WHERE role='global' AND archived_at IS NULL")
 		if conversation != nil && conversation.Role == ConversationProject && global != nil {

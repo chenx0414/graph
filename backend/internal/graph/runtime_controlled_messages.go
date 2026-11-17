@@ -13,6 +13,23 @@ import (
 	"context"
 )
 
+const providerRejectionBodyLimit = 2_000
+
+func providerRejection(status int, body io.Reader) error {
+	if status == http.StatusTooManyRequests || status >= 500 || body == nil {
+		return fmt.Errorf("Provider answered HTTP %d", status)
+	}
+	raw, err := io.ReadAll(io.LimitReader(body, providerRejectionBodyLimit))
+	if err != nil {
+		return fmt.Errorf("Provider answered HTTP %d", status)
+	}
+	text := strings.Join(strings.Fields(string(raw)), " ")
+	if text == "" {
+		return fmt.Errorf("Provider answered HTTP %d", status)
+	}
+	return fmt.Errorf("Provider answered HTTP %d: %s", status, text)
+}
+
 type controlledToolCall struct {
 	id        string
 	name      string
@@ -224,13 +241,14 @@ func (stream *controlledStream) attempt(request *http.Request, reservation float
 		return nil
 	}
 	if transport.StatusCode < 200 || transport.StatusCode >= 300 {
+		rejection := providerRejection(transport.StatusCode, transport.Body)
 		transport.Body.Close()
 		if stream.usageOptions.HasFallback {
 			stream.settle(&controlledZeroUsage)
 		} else {
 			stream.broker.Settle(stream.invocation, nil)
 		}
-		stream.failTransport(fmt.Errorf("Provider answered HTTP %d", transport.StatusCode))
+		stream.failTransport(rejection)
 		return nil
 	}
 	return stream.readEvents(transport, remaining)
