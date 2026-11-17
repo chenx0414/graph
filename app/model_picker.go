@@ -38,10 +38,10 @@ func (c *chatState) pickerModels() []modelChoice {
 	query := strings.ToLower(strings.TrimSpace(c.modelPicker.query))
 	models := make([]modelChoice, 0, len(c.models))
 	for _, model := range c.models {
-		if !c.providerAllowed(modelProviderID(model.id)) {
+		if !c.providerAllowed(c.modelProviderOf(model)) {
 			continue
 		}
-		if c.modelPicker.provider != "" && modelProviderID(model.id) != c.modelPicker.provider {
+		if c.modelPicker.provider != "" && c.modelProviderOf(model) != c.modelPicker.provider {
 			continue
 		}
 		if query != "" && !strings.Contains(strings.ToLower(model.id), query) {
@@ -56,7 +56,7 @@ func (c *chatState) pickerProviders() []string {
 	seen := map[string]bool{}
 	providers := []string{}
 	for _, model := range c.models {
-		id := modelProviderID(model.id)
+		id := c.modelProviderOf(model)
 		if id == "" || seen[id] {
 			continue
 		}
@@ -107,16 +107,16 @@ func (c *chatState) pickerRow(ctx *ui.Context, model modelChoice, index int, t g
 	}
 	row.OnClick(func() { c.chooseModel(model) })
 	row.Children(func() {
-		tint := providerTint(modelProviderID(model.id))
+		tint := providerTint(c.modelProviderOf(model))
 		tile := ui.Box(ctx).Size(16, 16).Radius(t.Radius.Xs).Background(tint.Alpha(0.16)).Center()
 		tile.Children(func() {
-			kit.Text(ctx, providerInitial(modelProviderID(model.id)), 9).FontWeight(600).TextColor(tint)
+			kit.Text(ctx, providerInitial(c.modelProviderOf(model)), 9).FontWeight(600).TextColor(tint)
 		})
 		label := ui.Row(ctx).Grow(1).Gap(6).AlignItems(ui.Center)
 		label.Children(func() {
 			kit.Text(ctx, shortModel(model.id), t.Text.Xs).FontWeight(500).TextColor(t.Foreground).SingleLine().Ellipsis("…")
 			if c.pickerDuplicate(model) {
-				kit.Text(ctx, modelProviderID(model.id), t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
+				kit.Text(ctx, c.modelProviderOf(model), t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
 			}
 		})
 		if model.id == c.currentModel {

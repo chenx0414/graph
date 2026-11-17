@@ -82,7 +82,18 @@ func (s *shellState) refreshProviders() {
 		return
 	}
 	s.providers.failed = ""
+	s.dropCachedModels()
 	s.loadProviders()
+}
+
+func (s *shellState) dropCachedModels() {
+	if chat := s.active(); chat != nil {
+		chat.models = nil
+		chat.modelsLoading = false
+	}
+	s.modelMeta = nil
+	s.modelMetaLoading = false
+	s.modelMetaError = ""
 }
 
 func (s *shellState) loadProviders() {

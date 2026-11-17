@@ -94,7 +94,9 @@ type processEntry struct {
 const processStartLayout = "Mon Jan _2 15:04:05 2006"
 
 func listProcessEntries() []processEntry {
-	output, err := exec.Command("ps", "-eww", "-o", "pid=,ppid=,pgid=,lstart=,command=").Output()
+	command := exec.Command("ps", "-eww", "-o", "pid=,ppid=,pgid=,lstart=,command=")
+	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
+	output, err := command.Output()
 	if err != nil {
 		return nil
 	}

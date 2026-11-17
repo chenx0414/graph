@@ -36,22 +36,20 @@ func (runtime *TaskRuntime) allowedProjects() map[string]bool {
 }
 
 func (runtime *TaskRuntime) liveEntries() []ModelEntry {
+	entries := []ConfiguredModel{}
 	if runtime.live != nil && runtime.live.Entries != nil {
-		entries := runtime.live.Entries()
-		out := make([]ModelEntry, 0, len(entries))
-		for _, entry := range entries {
-			out = append(out, entry.ModelEntry)
-		}
-		return out
+		entries = runtime.live.Entries()
+	} else if runtime.models != nil {
+		entries = runtime.models.Entries
 	}
-	if runtime.models != nil {
-		out := make([]ModelEntry, 0, len(runtime.models.Entries))
-		for _, entry := range runtime.models.Entries {
-			out = append(out, entry.ModelEntry)
-		}
-		return out
+	if runtime.magpie != nil {
+		entries = runtime.magpie.Merge(entries)
 	}
-	return []ModelEntry{}
+	out := make([]ModelEntry, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, entry.ModelEntry)
+	}
+	return out
 }
 
 func (runtime *TaskRuntime) masterModel() *string {

@@ -24,6 +24,7 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 	if runtime.models == nil {
 		runtime.models = &TaskRuntimeModels{}
 	}
+	runtime.magpie = options.Magpie
 	runtime.live = options.Live
 	if runtime.live == nil {
 		runtime.live = &TaskRuntimeLive{}

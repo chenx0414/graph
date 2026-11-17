@@ -72,6 +72,11 @@ func (runtime *TaskRuntime) liveCredentialFor(entry ModelEntry) *PiAdapterBindin
 	if !ok {
 		return nil
 	}
+	if runtime.magpie != nil {
+		if binding := runtime.magpie.CredentialFor(configured); binding != nil {
+			return binding
+		}
+	}
 	var resolved *ResolvedCredential
 	if runtime.live != nil && runtime.live.CredentialFor != nil {
 		resolved = runtime.live.CredentialFor(configured)

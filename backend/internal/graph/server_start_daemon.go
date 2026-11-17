@@ -331,6 +331,7 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 			Entries: live.Entries(), ModelRuntime: modelRuntime, ModelScheduler: scheduler,
 			CredentialFor: func(entry ConfiguredModel) *ResolvedCredential { return live.CredentialFor(entry) },
 		},
+		Magpie: NewMagpieModels(),
 		Live: &TaskRuntimeLive{
 			Revision: live.Revision, Config: live.Config, Entries: live.Entries,
 			CredentialFor: func(entry ConfiguredModel) *ResolvedCredential { return live.CredentialFor(entry) },

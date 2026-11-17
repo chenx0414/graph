@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 type magpieProviderAccount struct {
@@ -38,12 +37,13 @@ type magpieProviderRow struct {
 }
 
 type magpieProvidersView struct {
-	Available bool                `json:"available"`
-	Dir       string              `json:"dir"`
-	Error     string              `json:"error,omitempty"`
-	Gateway   string              `json:"gateway,omitempty"`
-	Models    map[string]int      `json:"models"`
-	Providers []magpieProviderRow `json:"providers"`
+	Available bool                 `json:"available"`
+	Dir       string               `json:"dir"`
+	Error     string               `json:"error,omitempty"`
+	Gateway   string               `json:"gateway,omitempty"`
+	Models    map[string]int       `json:"models"`
+	Providers []magpieProviderRow  `json:"providers"`
+	ModelRows []magpieGatewayModel `json:"-"`
 }
 
 func magpieConfigDir() string {
@@ -204,7 +204,12 @@ func loadMagpieProviders(dir, gateway string) magpieProvidersView {
 	}
 	view.Gateway = gateway
 	if gateway != "" {
-		view.Models = fetchMagpieModelCounts(gateway)
+		view.ModelRows = fetchMagpieGatewayModels(gateway)
+		for _, model := range view.ModelRows {
+			if model.OwnedBy != "" {
+				view.Models[model.OwnedBy]++
+			}
+		}
 	}
 	for _, provider := range providers.Providers {
 		if provider.ID == "" {
@@ -255,28 +260,7 @@ func shortMagpiePath(path string) string {
 
 func fetchMagpieModelCounts(gateway string) map[string]int {
 	counts := map[string]int{}
-	address := strings.TrimSuffix(gateway, "/")
-	if !strings.HasPrefix(address, "http") {
-		address = "http://" + address
-	}
-	client := &http.Client{Timeout: 2 * time.Second}
-	response, err := client.Get(address + "/v1/models")
-	if err != nil {
-		return counts
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return counts
-	}
-	var body struct {
-		Data []struct {
-			OwnedBy string `json:"owned_by"`
-		} `json:"data"`
-	}
-	if json.NewDecoder(response.Body).Decode(&body) != nil {
-		return counts
-	}
-	for _, model := range body.Data {
+	for _, model := range fetchMagpieGatewayModels(gateway) {
 		if model.OwnedBy != "" {
 			counts[model.OwnedBy]++
 		}
@@ -310,6 +294,10 @@ func MagpieProvidersJSON(view magpieProvidersView) string {
 }
 
 func (app *GraphApp) serveMagpieProviders(w http.ResponseWriter, r *http.Request) {
+	if app.runtime != nil && app.runtime.magpie != nil {
+		writeJSON(w, http.StatusOK, app.runtime.magpie.ProviderView())
+		return
+	}
 	dir := magpieConfigDir()
 	writeJSON(w, http.StatusOK, loadMagpieProviders(dir, magpieGatewayAddress(dir)))
 }

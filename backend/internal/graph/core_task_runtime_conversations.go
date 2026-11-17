@@ -174,13 +174,16 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 }
 
 func (runtime *TaskRuntime) liveConfiguredEntries() []ConfiguredModel {
+	entries := []ConfiguredModel{}
 	if runtime.live != nil && runtime.live.Entries != nil {
-		return runtime.live.Entries()
+		entries = runtime.live.Entries()
+	} else if runtime.models != nil {
+		entries = runtime.models.Entries
 	}
-	if runtime.models != nil {
-		return runtime.models.Entries
+	if runtime.magpie != nil {
+		entries = runtime.magpie.Merge(entries)
 	}
-	return []ConfiguredModel{}
+	return entries
 }
 
 func (runtime *TaskRuntime) createMasterNode(taskId string) string {

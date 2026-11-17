@@ -46,13 +46,22 @@ type projectListPayload struct {
 
 type modelChoice struct {
 	id        string
+	provider  string
 	thinking  string
 	available []string
+}
+
+func (c *chatState) modelProviderOf(model modelChoice) string {
+	if model.provider != "" {
+		return model.provider
+	}
+	return modelProviderID(model.id)
 }
 
 type modelListPayload struct {
 	Models []struct {
 		ID                   string `json:"id"`
+		Provider             string `json:"provider"`
 		DefaultThinkingLevel string `json:"defaultThinkingLevel"`
 		ThinkingOptions      []struct {
 			Level string `json:"level"`
@@ -88,7 +97,7 @@ func (c *chatState) modelChoices() []modelChoice {
 		if model.ID == "" {
 			continue
 		}
-		choice := modelChoice{id: model.ID, thinking: model.DefaultThinkingLevel}
+		choice := modelChoice{id: model.ID, provider: model.Provider, thinking: model.DefaultThinkingLevel}
 		for _, option := range model.ThinkingOptions {
 			if option.Level != "" {
 				choice.available = append(choice.available, option.Level)
@@ -112,6 +121,9 @@ func shortModel(id string) string {
 func (c *chatState) selectModel(model modelChoice, thinking string) {
 	if c.active == "" {
 		return
+	}
+	if thinking == "" {
+		thinking = "off"
 	}
 	body := map[string]string{
 		"model":         model.id,

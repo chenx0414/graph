@@ -65,6 +65,7 @@ type GraphServerOptions struct {
 	SystemContext        *TaskRuntimeSystemContext
 	AgentContext         *AgentContextLibrary
 	Models               *TaskRuntimeModels
+	Magpie               *MagpieModels
 	Master               *TaskRuntimeMaster
 	Limits               *TaskRuntimeLimits
 	Live                 *TaskRuntimeLive

@@ -128,6 +128,7 @@ type TaskRuntime struct {
 	projects        []ProjectConfig
 	live            *TaskRuntimeLive
 	models          *TaskRuntimeModels
+	magpie          *MagpieModels
 	master          *TaskRuntimeMaster
 	catalogOpt      *TaskRuntimeCatalog
 	limits          *TaskRuntimeLimits
