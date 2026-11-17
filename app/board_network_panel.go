@@ -102,9 +102,53 @@ func (s *shellState) panelChatNetwork(ctx *ui.Context, scope string) {
 		state.scene = scene
 	}
 	s.networkCaption(ctx, scene, scope)
-	s.infiniteView(ctx, &state.view, scene.width, scene.height, scene.edges, scene.hit, func(ctx *ui.Context, view *infiniteCanvas) {
+	s.infiniteViewBounds(ctx, &state.view, scene.width, scene.height, scene.bounds(), scene.edges, scene.hit, func(ctx *ui.Context, view *infiniteCanvas) {
 		s.networkCards(ctx, scene, view)
 	})
+}
+
+func (scene netScene) bounds() canvasFitBox {
+	if scene.mode == "graph" && scene.topology != nil {
+		return topologyBounds(scene.topology.Nodes, scene.width, scene.height)
+	}
+	return ringSceneBounds(scene.nodes, scene.width, scene.height)
+}
+
+func topologyBounds(nodes []fleetTopologyNode, worldW, worldH float32) canvasFitBox {
+	left, top := float32(math.MaxFloat32), float32(math.MaxFloat32)
+	right, bottom := -float32(math.MaxFloat32), -float32(math.MaxFloat32)
+	for _, node := range nodes {
+		if node.W <= 0 || node.H <= 0 {
+			continue
+		}
+		left = minFleetFloat(left, node.X)
+		top = minFleetFloat(top, node.Y)
+		right = maxFleetFloat(right, node.X+node.W)
+		bottom = maxFleetFloat(bottom, node.Y+node.H)
+	}
+	return fitBoxFromEdges(left, top, right, bottom, worldW, worldH)
+}
+
+func ringSceneBounds(nodes []fleetRingNode, worldW, worldH float32) canvasFitBox {
+	left, top := float32(math.MaxFloat32), float32(math.MaxFloat32)
+	right, bottom := -float32(math.MaxFloat32), -float32(math.MaxFloat32)
+	for _, node := range nodes {
+		if node.W <= 0 || node.H <= 0 {
+			continue
+		}
+		left = minFleetFloat(left, node.X)
+		top = minFleetFloat(top, node.Y)
+		right = maxFleetFloat(right, node.X+node.W)
+		bottom = maxFleetFloat(bottom, node.Y+node.H)
+	}
+	return fitBoxFromEdges(left, top, right, bottom, worldW, worldH)
+}
+
+func fitBoxFromEdges(left, top, right, bottom, worldW, worldH float32) canvasFitBox {
+	if right <= left || bottom <= top {
+		return canvasFitBox{W: worldW, H: worldH}
+	}
+	return canvasFitBox{X: left, Y: top, W: right - left, H: bottom - top}
 }
 
 func sameNetScene(left, right netScene) bool {

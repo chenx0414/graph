@@ -13,7 +13,13 @@ const (
 	canvasMinZoom    = 0.3
 	canvasMaxZoom    = 2.2
 	canvasFitMinZoom = 0.55
+	canvasFitMaxZoom = 1.2
+	canvasFitPadding = 24
 )
+
+type canvasFitBox struct {
+	X, Y, W, H float32
+}
 
 type infiniteCanvas struct {
 	zoom     float32
@@ -22,6 +28,8 @@ type infiniteCanvas struct {
 	dragging bool
 	lastX    float32
 	lastY    float32
+	worldX   float32
+	worldY   float32
 	worldW   float32
 	worldH   float32
 	viewW    float32
@@ -37,17 +45,19 @@ func (view *infiniteCanvas) clamp() {
 	scaledH := view.worldH * view.zoom
 	minVisibleX := minFleetFloat(visible, scaledW)
 	minVisibleY := minFleetFloat(visible, scaledH)
-	if view.x > view.viewW-minVisibleX {
-		view.x = view.viewW - minVisibleX
+	leftX := view.x + view.worldX*view.zoom
+	topY := view.y + view.worldY*view.zoom
+	if leftX > view.viewW-minVisibleX {
+		view.x = view.viewW - minVisibleX - view.worldX*view.zoom
 	}
-	if view.x+scaledW < minVisibleX {
-		view.x = minVisibleX - scaledW
+	if leftX+scaledW < minVisibleX {
+		view.x = minVisibleX - scaledW - view.worldX*view.zoom
 	}
-	if view.y > view.viewH-minVisibleY {
-		view.y = view.viewH - minVisibleY
+	if topY > view.viewH-minVisibleY {
+		view.y = view.viewH - minVisibleY - view.worldY*view.zoom
 	}
-	if view.y+scaledH < minVisibleY {
-		view.y = minVisibleY - scaledH
+	if topY+scaledH < minVisibleY {
+		view.y = minVisibleY - scaledH - view.worldY*view.zoom
 	}
 }
 
@@ -74,17 +84,31 @@ func (view *infiniteCanvas) zoomAt(x, y, factor float32) {
 }
 
 func (view *infiniteCanvas) fitWorld(width, height, viewWidth, viewHeight float32) {
-	if width <= 0 || height <= 0 || viewWidth <= 0 || viewHeight <= 0 {
+	view.fitBounds(canvasFitBox{W: width, H: height}, viewWidth, viewHeight)
+}
+
+func (view *infiniteCanvas) fitBounds(box canvasFitBox, viewWidth, viewHeight float32) {
+	if box.W <= 0 || box.H <= 0 || viewWidth <= 0 || viewHeight <= 0 {
 		return
 	}
-	zoom := minFleetFloat(viewWidth/width, viewHeight/height)
-	view.zoom = clampFleetFloat(zoom, canvasFitMinZoom, 1)
-	view.worldW, view.worldH = width, height
+	usableW := maxFleetFloat(1, viewWidth-2*canvasFitPadding)
+	usableH := maxFleetFloat(1, viewHeight-2*canvasFitPadding)
+	zoom := minFleetFloat(usableW/box.W, usableH/box.H)
+	view.zoom = clampFleetFloat(zoom, canvasFitMinZoom, canvasFitMaxZoom)
+	view.worldX, view.worldY = box.X, box.Y
+	view.worldW, view.worldH = box.W, box.H
 	view.viewW, view.viewH = viewWidth, viewHeight
-	view.x = (viewWidth - width*view.zoom) / 2
-	view.y = (viewHeight - height*view.zoom) / 2
+	view.x = (viewWidth-box.W*view.zoom)/2 - box.X*view.zoom
+	view.y = (viewHeight-box.H*view.zoom)/2 - box.Y*view.zoom
 	view.fit = true
 	view.clamp()
+}
+
+func maxFleetFloat(a, b float32) float32 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func clampFleetFloat(value, low, high float32) float32 {
@@ -111,6 +135,10 @@ type canvasEdge struct {
 }
 
 func (s *shellState) infiniteView(ctx *ui.Context, view *infiniteCanvas, worldW, worldH float32, edges []canvasEdge, hit func(x, y float32) bool, cards func(*ui.Context, *infiniteCanvas)) {
+	s.infiniteViewBounds(ctx, view, worldW, worldH, canvasFitBox{W: worldW, H: worldH}, edges, hit, cards)
+}
+
+func (s *shellState) infiniteViewBounds(ctx *ui.Context, view *infiniteCanvas, worldW, worldH float32, fitBox canvasFitBox, edges []canvasEdge, hit func(x, y float32) bool, cards func(*ui.Context, *infiniteCanvas)) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	stage := ui.Box(ctx).Fill().Clip().Label("无限画布")
 	stage.HandleInput(func(ev ui.InputEvent) bool {
@@ -155,7 +183,7 @@ func (s *shellState) infiniteView(ctx *ui.Context, view *infiniteCanvas, worldW,
 		view.worldW, view.worldH = worldW, worldH
 		view.viewW, view.viewH = r.W, r.H
 		if !view.fit {
-			view.fitWorld(worldW, worldH, r.W, r.H)
+			view.fitBounds(fitBox, r.W, r.H)
 		}
 		s.canvasGrid(p, r, view, t)
 		for _, edge := range edges {
