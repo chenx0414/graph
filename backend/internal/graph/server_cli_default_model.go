@@ -7,10 +7,11 @@ import (
 	"strconv"
 )
 
-const defaultModelUsage = "usage: graphd default-model [--config <path>] <model-id>"
+const defaultModelUsage = "usage: graphd default-model [--config <path>] [--state-dir <path>] <model-id>"
 
 func runDefaultModel(args []string, cwd string, env map[string]string) int {
 	path := ""
+	stateDir := ""
 	model := ""
 	for index := 0; index < len(args); index++ {
 		switch args[index] {
@@ -19,9 +20,17 @@ func runDefaultModel(args []string, cwd string, env map[string]string) int {
 			if index < len(args) {
 				path = args[index]
 			}
+		case "--state-dir":
+			index++
+			if index < len(args) {
+				stateDir = args[index]
+			}
 		default:
 			model = args[index]
 		}
+	}
+	if stateDir == "" {
+		stateDir = env["GRAPH_STATE_DIR"]
 	}
 	if path == "" {
 		path = env["GRAPH_CONFIG"]
@@ -61,7 +70,11 @@ func runDefaultModel(args []string, cwd string, env map[string]string) int {
 		return 1
 	}
 	document.set("masterModel", &orderedJSON{kind: 's', str: model})
-	result := OpenConfigStore(path).Save(document, revision, env, nil)
+	store := OpenConfigStore(path)
+	if stateDir != "" {
+		store = store.OwnStateDir(stateDir)
+	}
+	result := store.Save(document, revision, env, nil)
 	fmt.Fprintf(os.Stdout, "default model: %s (config revision %d)\n", result.Config.MasterModel, result.Revision)
 	return 0
 }
