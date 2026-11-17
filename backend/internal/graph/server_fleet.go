@@ -193,11 +193,12 @@ func fleetProjection(store *TaskStore, conversationId string) FleetView {
 	scope := fleetResolveScope(store, conversationId)
 	ledger := loadFleetLedger(store)
 	archived := archivedProjectSet(store)
+	archivedConversations := archivedConversationSet(store)
 	scoped := agentRecords(store)
 	if scope.rootId != "" {
 		scoped = agentSubtreeOf(scoped, scope.rootId)
 	}
-	scoped = fleetActiveAgents(scoped, archived)
+	scoped = fleetActiveAgents(scoped, archived, archivedConversations)
 	sort.SliceStable(scoped, func(left, right int) bool {
 		if leftRank, rightRank := fleetAgentRank(scoped[left].Kind), fleetAgentRank(scoped[right].Kind); leftRank != rightRank {
 			return leftRank < rightRank
@@ -336,10 +337,10 @@ func fleetDataRecord(raw string) map[string]any {
 	return record
 }
 
-func fleetActiveAgents(records []AgentRecord, archived map[string]bool) []AgentRecord {
+func fleetActiveAgents(records []AgentRecord, archived map[string]bool, archivedConversations map[string]bool) []AgentRecord {
 	active := make([]AgentRecord, 0, len(records))
 	for _, record := range records {
-		if archived[record.ProjectId] {
+		if archived[record.ProjectId] || archivedConversations[record.ConversationId] {
 			continue
 		}
 		active = append(active, record)

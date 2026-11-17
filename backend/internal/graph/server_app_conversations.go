@@ -22,6 +22,11 @@ func (app *GraphApp) serveProjectEntries(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"entries": app.runtime.ProjectEntries(projectID, query, limit)})
 }
 
+func (app *GraphApp) serveArchiveUnassigned(w http.ResponseWriter, r *http.Request) {
+	body := appJSONBody(w, r)
+	writeJSON(w, http.StatusOK, app.runtime.ArchiveUnassignedChildSessions(appBodyString(body, "requestId")))
+}
+
 func (app *GraphApp) serveConversations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().List(appQueryBool(r, "archived")))
 }

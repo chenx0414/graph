@@ -70,6 +70,7 @@ func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/projects/{projectId}/thread", app.serveProjectThread)
 	mux.HandleFunc("GET /api/conversations", app.serveConversations)
 	mux.HandleFunc("POST /api/conversations", app.serveConversationCreate)
+	mux.HandleFunc("POST /api/conversations/archive-unassigned", app.serveArchiveUnassigned)
 	mux.HandleFunc("GET /api/conversations/{conversationId}", app.serveConversation)
 	mux.HandleFunc("GET /api/conversations/{conversationId}/version", app.serveConversationVersion)
 	mux.HandleFunc("GET /api/messages/{messageId}/attachments/{index}", app.serveAttachment)

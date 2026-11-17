@@ -195,6 +195,8 @@ func (s *shellState) fleetOrphanCard(ctx *ui.Context, node fleetRingNode) ui.Ele
 	card := ui.Column(ctx).Clip().Padding(th.Space(0.75), th.Space(1)).Gap(th.Space(0.25)).
 		Radius(t.Radius.Lg).Background(t.Card).Justify(ui.Center)
 	card.Width(node.W).Height(node.H)
+	card.Label("未归属")
+	s.fleetOrphanMenu(card)
 	s.fleetHoverCard(card, node.ID, accent, t)
 	card.Children(func() {
 		kit.Text(ctx, "未归属", t.Text.Xs).FontWeight(600).TextColor(t.Muted).SingleLine().Ellipsis("…")

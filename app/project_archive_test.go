@@ -223,3 +223,36 @@ func TestArchivingAProjectForgetsCachedFleetData(t *testing.T) {
 		t.Fatalf("archiving forgets the cached fleet, data %+v global %+v", state.fleet.data, state.fleet.global)
 	}
 }
+
+func TestArchivingUnassignedChildSessionsRefreshesTheFleet(t *testing.T) {
+	received := make(chan map[string]any, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := map[string]any{}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		body["path"] = r.URL.Path
+		received <- body
+		_, _ = w.Write([]byte(`{"archived":2,"conversationIds":["c1","c2"]}`))
+	}))
+	defer server.Close()
+	state := newShellState(server.URL, "tok")
+	state.fleet.global = &fleetSnapshot{RootID: "g1"}
+	state.archiveUnassignedChildSessions()
+	select {
+	case body := <-received:
+		if body["path"] != "/api/conversations/archive-unassigned" || body["requestId"] == nil {
+			t.Fatalf("the bulk archive request is %+v", body)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the bulk archive request never arrived")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for state.fleet.global != nil && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if state.fleet.global != nil {
+		t.Fatal("archiving unassigned sessions forgets the global fleet")
+	}
+	if !strings.Contains(state.status, "已归档 2 个未归属子 Agent 会话") {
+		t.Fatalf("the bulk archive reports its result, status %q", state.status)
+	}
+}
