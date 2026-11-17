@@ -20,6 +20,7 @@ func (runtime *TaskRuntime) OpenProjectThread(projectID, requestID string) Super
 	if projectID == "" {
 		Raise("invalid_input", "A project is required")
 	}
+	requireProjectActive(runtime.store, projectID)
 	runtime.EnsureGlobalThread("project:" + projectID + ":global")
 	if runtime.ownCheckoutProject(projectID) {
 		return runtime.EnsureGlobalThread(requestID)

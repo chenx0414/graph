@@ -31,6 +31,7 @@ func (runtime *TaskRuntime) DelegateFromGlobal(taskID string, input DelegateWork
 	if runtime.ownCheckoutProject(input.ProjectID) {
 		Raise("invalid_input", "This project is the Graph checkout itself: do the work here instead of delegating it")
 	}
+	requireProjectActive(runtime.store, input.ProjectID)
 	work := runtime.CreateWork(WorkCreate{ConversationID: caller.Id, ProjectID: input.ProjectID, SourceMessageID: input.SourceMessageID, Brief: input.Brief, Acceptance: input.Acceptance}, input.RequestID)
 	thread := runtime.OpenProjectThread(input.ProjectID, input.RequestID+":thread")
 	result := runtime.store.Command("work:delegate:"+work.ID, input.RequestID, map[string]any{"revision": work.Revision, "target": thread.ConversationID}, func() any {

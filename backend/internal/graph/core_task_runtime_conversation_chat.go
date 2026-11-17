@@ -193,6 +193,7 @@ func (conversations *TaskRuntimeConversations) Bind(conversationId, projectId, r
 	if kernelRow(runtime.store.Db, "SELECT id FROM projects WHERE id=?", projectId) == nil {
 		Raise("invalid_input", "A known project is required")
 	}
+	requireProjectActive(runtime.store, projectId)
 	if !runtime.allowedProjects()[projectId] {
 		Raise("invalid_input", "The project is no longer part of the current configuration")
 	}

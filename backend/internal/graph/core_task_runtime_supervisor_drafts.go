@@ -3,7 +3,14 @@ package graph
 import "strings"
 
 func (supervisor *TaskRuntimeSupervisor) ListProjects() []map[string]any {
-	return supervisor.runtime.User().Projects()
+	projects := supervisor.runtime.User().Projects()
+	active := make([]map[string]any, 0, len(projects))
+	for _, project := range projects {
+		if project["archivedAt"] == nil {
+			active = append(active, project)
+		}
+	}
+	return active
 }
 
 func (supervisor *TaskRuntimeSupervisor) BindProject(projectId, requestId string) map[string]any {
@@ -51,4 +58,3 @@ func (input TaskRuntimeConfirmInput) AttestationInstruction() string {
 	}
 	return input.Attestation.Instruction
 }
-

@@ -13,6 +13,14 @@ func projectArchivedAt(store *TaskStore, projectID string) any {
 	return row["archived_at"]
 }
 
+func archivedProjectSet(store *TaskStore) map[string]bool {
+	archived := map[string]bool{}
+	for _, row := range kernelRows(store.Db, "SELECT id FROM projects WHERE archived_at IS NOT NULL") {
+		archived[kernelString(row["id"])] = true
+	}
+	return archived
+}
+
 func requireProjectActive(store *TaskStore, projectID string) {
 	if projectArchived(store, projectID) {
 		Raise("project_archived", "The project is archived; restore it before starting work")

@@ -192,10 +192,12 @@ func fleetAgentRank(kind string) int {
 func fleetProjection(store *TaskStore, conversationId string) FleetView {
 	scope := fleetResolveScope(store, conversationId)
 	ledger := loadFleetLedger(store)
+	archived := archivedProjectSet(store)
 	scoped := agentRecords(store)
 	if scope.rootId != "" {
 		scoped = agentSubtreeOf(scoped, scope.rootId)
 	}
+	scoped = fleetActiveAgents(scoped, archived)
 	sort.SliceStable(scoped, func(left, right int) bool {
 		if leftRank, rightRank := fleetAgentRank(scoped[left].Kind), fleetAgentRank(scoped[right].Kind); leftRank != rightRank {
 			return leftRank < rightRank
@@ -203,6 +205,7 @@ func fleetProjection(store *TaskStore, conversationId string) FleetView {
 		return scoped[left].Id < scoped[right].Id
 	})
 	tasks, taskSet := fleetTasks(store, scope, scoped)
+	tasks = fleetActiveTasks(tasks, archived)
 	stats := FleetStats{Tasks: int64(len(tasks))}
 	agents := make([]FleetAgent, 0, len(scoped))
 	for _, agent := range scoped {
@@ -227,10 +230,12 @@ func fleetProjection(store *TaskStore, conversationId string) FleetView {
 	}
 	index := fleetIndex(agents, ledger)
 	events, eventsTruncated := fleetEvents(store, scope, taskSet, index)
+	events = fleetActiveEvents(events, archived, ledger.taskProject)
 	if eventsTruncated {
 		truncated = true
 	}
 	artifacts, artifactsTruncated := fleetArtifacts(store, scope, taskSet, index)
+	artifacts = fleetActiveArtifacts(artifacts, archived, ledger.taskProject)
 	if artifactsTruncated {
 		truncated = true
 	}
@@ -329,4 +334,48 @@ func fleetDataRecord(raw string) map[string]any {
 		return map[string]any{}
 	}
 	return record
+}
+
+func fleetActiveAgents(records []AgentRecord, archived map[string]bool) []AgentRecord {
+	active := make([]AgentRecord, 0, len(records))
+	for _, record := range records {
+		if archived[record.ProjectId] {
+			continue
+		}
+		active = append(active, record)
+	}
+	return active
+}
+
+func fleetActiveTasks(tasks []FleetTask, archived map[string]bool) []FleetTask {
+	active := make([]FleetTask, 0, len(tasks))
+	for _, task := range tasks {
+		if archived[task.ProjectId] {
+			continue
+		}
+		active = append(active, task)
+	}
+	return active
+}
+
+func fleetActiveEvents(events []FleetEvent, archived map[string]bool, taskProjects map[string]string) []FleetEvent {
+	active := make([]FleetEvent, 0, len(events))
+	for _, event := range events {
+		if archived[taskProjects[event.TaskId]] {
+			continue
+		}
+		active = append(active, event)
+	}
+	return active
+}
+
+func fleetActiveArtifacts(artifacts []FleetArtifact, archived map[string]bool, taskProjects map[string]string) []FleetArtifact {
+	active := make([]FleetArtifact, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		if archived[taskProjects[artifact.TaskId]] {
+			continue
+		}
+		active = append(active, artifact)
+	}
+	return active
 }

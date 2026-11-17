@@ -40,6 +40,11 @@ func (s *shellState) dropArchivedProject(projectID string) {
 		}
 	}
 	s.conversations = kept
+	s.fleet.data = nil
+	s.fleet.global = nil
+	if s.window != nil {
+		s.refreshFleet()
+	}
 	if s.activeID != "" && s.activeID == s.supervisorID {
 		return
 	}

@@ -208,3 +208,18 @@ func TestAnArchivedProjectHasNoArchiveAction(t *testing.T) {
 		t.Fatalf("an archived project says so, texts %q", tester.Texts())
 	}
 }
+
+func TestArchivingAProjectForgetsCachedFleetData(t *testing.T) {
+	state := newShellState("http://127.0.0.1:1", "tok")
+	state.conversations = []conversationSummary{
+		{ID: "c1", Role: "project", ProjectID: "p1"},
+		{ID: "c2", Role: "project", ProjectID: "p2"},
+	}
+	state.activeID = "c2"
+	state.fleet.data = &fleetSnapshot{RootID: "p1"}
+	state.fleet.global = &fleetSnapshot{RootID: "g1"}
+	state.dropArchivedProject("p1")
+	if state.fleet.data != nil || state.fleet.global != nil {
+		t.Fatalf("archiving forgets the cached fleet, data %+v global %+v", state.fleet.data, state.fleet.global)
+	}
+}
