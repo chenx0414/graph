@@ -1,0 +1,4 @@
+.run/
+.scratch/
+.pstack/
+.DS_Store

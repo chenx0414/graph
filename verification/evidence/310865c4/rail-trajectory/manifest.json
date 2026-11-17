@@ -1,0 +1,35 @@
+{
+  "createdAt": "2026-11-17T05:41:10Z",
+  "files": [
+    {
+      "bytes": 718,
+      "path": "assertions.json",
+      "sha256": "e9135a239a18decfd74ee3529374492112ff9ecddf2ef23acdb5418ac0b6a0b8"
+    },
+    {
+      "bytes": 1052,
+      "path": "check-01.json",
+      "sha256": "9f82556ae3532f8a2c3661f503281378eb1ee17474b811ccbf9cd90087c38f34"
+    },
+    {
+      "bytes": 445,
+      "path": "prepare-01.json",
+      "sha256": "70515cb8cab1a6c685390a8d1c0fa3f5f14205443279dbdd5068be525e3dc87f"
+    },
+    {
+      "bytes": 1043,
+      "path": "prepare-02.json",
+      "sha256": "7db58bab88842ddfbf752c12cee942ec35e8a809332e27ce5906cdd256ae1b0c"
+    },
+    {
+      "bytes": 112785,
+      "path": "rail-trajectory.png",
+      "sha256": "36c032feb7fee5400d5bad6872da9f2884ec89f9e5c280c108584f044bd3d501"
+    },
+    {
+      "bytes": 3863,
+      "path": "result.json",
+      "sha256": "fea67577c6ae1e43b7a5b188ea47386012ad6355ade90d5cdafc4e786b88a5e6"
+    }
+  ]
+}

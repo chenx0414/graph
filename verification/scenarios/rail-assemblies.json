@@ -1,0 +1,44 @@
+{
+  "id": "rail-assemblies",
+  "feature": "rail-assemblies",
+  "description": "The 装配 rail entry opens its own workspace page (能力装配) whose panel actually renders, and it is exposed to assistive technology as a button.",
+  "steps": [
+    {
+      "verb": "waitText",
+      "text": "白板标题",
+      "timeoutMs": 25000
+    },
+    {
+      "verb": "click",
+      "name": "装配"
+    },
+    {
+      "verb": "waitText",
+      "text": "标签页 能力装配",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "assertText",
+      "text": "标签页 能力装配"
+    },
+    {
+      "verb": "waitText",
+      "text": "能力装配窗口",
+      "timeoutMs": 20000
+    },
+    {
+      "verb": "assertAccess",
+      "name": "装配",
+      "role": "button"
+    },
+    {
+      "verb": "screenshot",
+      "path": "rail-assemblies.png"
+    },
+    {
+      "verb": "clickIf",
+      "name": "标签页 白板"
+    }
+  ],
+  "checks": []
+}

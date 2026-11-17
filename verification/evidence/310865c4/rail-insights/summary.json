@@ -1,0 +1,15 @@
+{
+  "commit": "209da10e87785baa6f855081e34fff4ac93942d7",
+  "endedAt": "2026-11-17T05:40:57Z",
+  "error": "",
+  "failed": 0,
+  "feature": "rail-insights",
+  "lane": "headless",
+  "ok": true,
+  "passed": 0,
+  "run": "310865c4",
+  "scenario": "rail-insights",
+  "skippedSteps": 0,
+  "startedAt": "2026-11-17T05:39:51Z",
+  "steps": 8
+}

@@ -1,0 +1,18 @@
+{
+  "id": "F-14",
+  "feature": "F-14",
+  "description": "设置页：点侧栏「设置」后出现运行设置页签与面板，配置、限额、启动模式都能从 daemon 回读。",
+  "steps": [
+    { "verb": "waitText", "text": "设置", "timeoutMs": 20000 },
+    { "verb": "click", "name": "设置" },
+    { "verb": "waitText", "text": "标签页 运行设置", "timeoutMs": 15000 },
+    { "verb": "assertText", "text": "运行设置" },
+    { "verb": "screenshot", "path": "settings.png" }
+  ],
+  "checks": [
+    { "id": "settings.config", "method": "GET", "path": "/api/config", "expectStatus": 200 },
+    { "id": "settings.limits", "method": "GET", "path": "/api/limits", "expectStatus": 200 },
+    { "id": "settings.startup", "method": "GET", "path": "/api/startup", "expectStatus": 200,
+      "expect": { "mode": "view" } }
+  ]
+}

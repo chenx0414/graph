@@ -1,0 +1,25 @@
+{
+  "createdAt": "2026-11-17T05:40:09Z",
+  "files": [
+    {
+      "bytes": 226,
+      "path": "assertions.json",
+      "sha256": "6c2d6f023657b145f7e889362f437cde879a43f6945198d1ded02e80f228f24f"
+    },
+    {
+      "bytes": 171,
+      "path": "check-01.json",
+      "sha256": "e71a491285adbb1826620a847da311db94bbd56c7b150e968eadc428cfd783ca"
+    },
+    {
+      "bytes": 59339,
+      "path": "conversations.png",
+      "sha256": "ca960088a2e6ed9ea33d5b3e0b1c38956d3078e7398150bb7d42d6750b6ba1e0"
+    },
+    {
+      "bytes": 1794,
+      "path": "result.json",
+      "sha256": "b6b774355f705770df537ab3fbd53d42b9ea310e2561497013dee6e39d7c46b6"
+    }
+  ]
+}

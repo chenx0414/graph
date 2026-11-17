@@ -1,0 +1,38 @@
+{
+  "id": "F-03-conversations",
+  "feature": "F-03",
+  "description": "左栏结构契约：会话列表标题 + main agent 卡片始终存在（不依赖是否已有项目会话），并与 daemon 的 /api/conversations 同时可读。",
+  "width": 1440,
+  "height": 900,
+  "steps": [
+    {
+      "verb": "waitText",
+      "text": "白板标题",
+      "timeoutMs": 25000
+    },
+    {
+      "verb": "clickIf",
+      "name": "标签页 白板"
+    },
+    {
+      "verb": "assertText",
+      "text": "会话列表标题"
+    },
+    {
+      "verb": "assertText",
+      "text": "main agent 会话"
+    },
+    {
+      "verb": "screenshot",
+      "path": "conversations.png"
+    }
+  ],
+  "checks": [
+    {
+      "id": "check.conversations-empty",
+      "method": "GET",
+      "path": "/api/conversations",
+      "expectStatus": 200
+    }
+  ]
+}

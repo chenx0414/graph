@@ -1,0 +1,56 @@
+{
+  "id": "rail-settings",
+  "feature": "rail-settings",
+  "description": "The settings rail entry opens the run-settings page and its rows reflect the live daemon.",
+  "steps": [
+    {
+      "verb": "waitText",
+      "text": "设置",
+      "timeoutMs": 20000
+    },
+    {
+      "verb": "click",
+      "name": "设置"
+    },
+    {
+      "verb": "waitText",
+      "text": "运行模式",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "assertText",
+      "text": "可用模型"
+    },
+    {
+      "verb": "assertText",
+      "text": "源码"
+    },
+    {
+      "verb": "screenshot",
+      "path": "settings.png"
+    }
+  ],
+  "checks": [
+    {
+      "id": "settings.readable",
+      "method": "GET",
+      "path": "/api/settings",
+      "expectStatus": 200
+    },
+    {
+      "id": "settings.state-machines",
+      "method": "GET",
+      "path": "/api/state-machines",
+      "expectStatus": 200
+    },
+    {
+      "id": "settings.startup-mode",
+      "method": "GET",
+      "path": "/api/startup",
+      "expectStatus": 200,
+      "expect": {
+        "mode": "view"
+      }
+    }
+  ]
+}

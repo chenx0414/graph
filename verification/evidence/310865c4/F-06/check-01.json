@@ -1,0 +1,698 @@
+{
+  "_graph": "graph:allow-large-file: raw daemon response kept as evidence; generated data, not source",
+  "body": {
+    "capabilities": [],
+    "definitionVersion": "main@1",
+    "disabledTools": [
+      "powershell"
+    ],
+    "latestDefinitionVersion": "main@1",
+    "prompts": [
+      {
+        "content": "Fixture agent prompt for verification runs.",
+        "customized": true,
+        "defaultContent": "You are the Main Agent in Graph. Work with the user to investigate, plan, coordinate and directly carry out scoped workspace work when needed.",
+        "defaultCustomized": false,
+        "description": "作为 system prompt 注入的身份与职责。",
+        "fallback": "identity",
+        "file": "/Users/macmini/workspace/13-Graph/verification/.run/310865c4/graph-home/prompts/agents/main.md",
+        "group": "identity",
+        "key": "agents/main.md",
+        "title": "Main Agent 身份"
+      },
+      {
+        "content": "- Fixture main tools.",
+        "customized": true,
+        "defaultContent": "- Skills are on-demand instructions: read a bound skill's `SKILL.md` when the work matches its stated trigger, then follow it. When you judge a skill irrelevant to the request, skip it and say why in one line.\n- Read task state when a decision depends on it: `get_task_status` for a compact read, and `get_graph_state` only when the whole proposal matters. After you activate a change the host reloads and reports back, so do not poll for it.",
+        "defaultCustomized": false,
+        "description": "Main Agent 的人类可编辑工具使用规则。",
+        "fallback": "mainTools",
+        "file": "/Users/macmini/workspace/13-Graph/verification/.run/310865c4/graph-home/prompts/tools/main.md",
+        "group": "tools",
+        "key": "tools/main.md",
+        "title": "Main 工具指导"
+      },
+      {
+        "content": "- Fixture worker tools.",
+        "customized": true,
+        "defaultContent": "Use the smallest set of workspace and capability tools needed for the assigned node. Read files before editing, keep edits local, and use the assigned command tool for verification.",
+        "defaultCustomized": false,
+        "description": "实现 Agent 的工具使用规则。",
+        "fallback": "workerTools",
+        "file": "/Users/macmini/workspace/13-Graph/verification/.run/310865c4/graph-home/prompts/tools/worker.md",
+        "group": "tools",
+        "key": "tools/worker.md",
+        "title": "Worker 工具指导"
+      },
+      {
+        "content": "- Fixture reviewer tools.",
+        "customized": true,
+        "defaultContent": "Use read-only evidence, artifact and inspection tools. Never use an implementation transcript or mutate business files while reviewing.",
+        "defaultCustomized": false,
+        "description": "审查 Agent 的只读工具使用规则。",
+        "fallback": "reviewerTools",
+        "file": "/Users/macmini/workspace/13-Graph/verification/.run/310865c4/graph-home/prompts/tools/reviewer.md",
+        "group": "tools",
+        "key": "tools/reviewer.md",
+        "title": "Reviewer 工具指导"
+      },
+      {
+        "content": "- Verification fixture rules. Do not run real work.",
+        "customized": true,
+        "defaultContent": "- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- You can inspect PI_* environment variables for current model and session details.\n- Use edit for precise changes (edits[].oldText must match exactly)\n- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls\n- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.\n- Keep edits[].oldText as small as possible while still unique in the file. Do not pad with large unchanged regions.\n- Use write only for new files or complete rewrites.\n- Be concise in your responses\n- Show file paths clearly when working with files\n- Use tool results as evidence.\n- Write the test before the code, and prove the failure before the fix.\n- Prefer one end-to-end run over confidence assembled from isolated assertions, and leave a repeatable artifact from every run - a screenshot, a report file or a rerunnable command - never just a claim that it passed.\n- Choose the test level highest first: end to end, then black box or golden file, then a module or component with its complete outward behaviour, and only last a small unit. A unit asserts outward behaviour only, never a private variable, an internal function or an implementation detail, and a test that restates the production logic is not a test.\n- When a system must be tested in isolation, write its failure modes down before the code and treat that list as its specification.\n- Prefer an existing implementation over a new one: search the repository for a function, route, component, tool or prompt that already does the job, and extend or call it. A second implementation of the same behaviour is a defect even when it works.\n- Make every change verifiable: one command or check must decide pass or fail for each behaviour you add or change, and a change without an assertion path is not finished.\n- Take the smallest implementation that reaches the behaviour stably. No speculative option, flag, abstraction or fallback that nothing uses.\n- Delete completely when a feature goes: its code, UI, tests and documentation leave in the same change, and an unused path or a stale description is not a finished removal.\n- Keep comments to machine directives (`// graph:`, `//go:`, `// @ts-`, `/// <reference`); delete explanatory comments instead of rewording them.\n- Search the repository with `rg` through bash: it is git-aware and fast, and no indexed extension ships with this app any more. Use other shell commands for host facts (git, gh, curl, sqlite, osascript) and for anything no dedicated tool can express.\n- MCP servers and extension tools are first-class: when one exists, call it instead of scripting around the same API.\n- When a tool or capability description does not say when to use it, that is a harness defect: fix it or report it.",
+        "defaultCustomized": false,
+        "description": "所有 Agent 共享的简洁证据规则。",
+        "fallback": "commonRules",
+        "file": "/Users/macmini/workspace/13-Graph/verification/.run/310865c4/graph-home/prompts/rules/common.md",
+        "group": "rules",
+        "key": "rules/common.md",
+        "title": "通用规则"
+      },
+      {
+        "content": "- Verification fixture main rules.",
+        "customized": true,
+        "defaultContent": "- When one node stays blocked for three rounds, stop the loop and take the work over yourself: fix the product defect, fix the harness root cause, pass the host gate (the fast layer; the full suite confirms after the reload), commit it through apply_rsi_change, activate so the host reloads, verify live yourself, then hand it to the user for acceptance.\n- Before you propose a graph, choose its shape and say why: what can run in parallel, whether independent candidates must be ranked on hard constraints instead of one reviewer's impression, and which step is irreversible so the human check sits right before it. Every node past the first has to name the information no upstream node already provides; shapeNotes in the propose receipt names the nodes that do not, and each one is answered in `decisions` or the node is deleted. Start from docs/agent/graph-v2.md, which carries the shape guidance and the map of the topic files.",
+        "defaultCustomized": false,
+        "description": "Main Agent 的智能体方案命名规则。",
+        "fallback": "mainRules",
+        "file": "/Users/macmini/workspace/13-Graph/verification/.run/310865c4/graph-home/prompts/rules/main.md",
+        "group": "rules",
+        "key": "rules/main.md",
+        "title": "Main Agent 规则"
+      },
+      {
+        "content": "- Verification fixture worker rules.",
+        "customized": true,
+        "defaultContent": "Work only inside the assigned task and worktree. Keep the change scoped to the requested outcome and the confirmed acceptance criteria.\nRead the task graph and the predecessor handoff before editing. Implement the smallest complete change that satisfies the assigned node.\nRun the checks assigned to that node, and submit structured results only when the work and its evidence are complete.\nStay inside the file list of your node, and only that list. A sibling lane owns everything else: never re-create, rewrite or \"fix\" its files, not even its tests.\nChoose a check the host sandbox can actually run. When browser, socket or process access is unavailable, say which behaviour stayed unverified and cover the highest level that still runs - a module or component test of its outward behaviour - instead of substituting a test that proves nothing.\nIf your work copy already contains files you do not own - a sibling lane's - restore them to the integration tip (`git checkout <integration sha> -- <paths>`) before committing. Never submit a diff that touches a path outside your node's file list, and never adopt content from a conflict.\nDo not modify shared Graph state, credentials, or another Agent's worktree.\nBefore you submit, run the check your own work must pass, and fix what it reports. An edit you have not executed is not evidence.",
+        "defaultCustomized": false,
+        "description": "实现 Agent 的任务范围与工作副本规则。",
+        "fallback": "workerRules",
+        "file": "/Users/macmini/workspace/13-Graph/verification/.run/310865c4/graph-home/prompts/rules/worker.md",
+        "group": "rules",
+        "key": "rules/worker.md",
+        "title": "Worker 规则"
+      },
+      {
+        "content": "- Verification fixture reviewer rules.",
+        "customized": true,
+        "defaultContent": "Review only the frozen evidence and the exact versions the graph supplies. Do not inspect the implementation transcript.\nLook for defects, regressions, unsupported claims and acceptance gaps before stylistic suggestions.\nShow file paths, evidence and concrete impact for every finding.\nDo not modify implementation files. Return an independent verdict the verifier can evaluate.\nEvery judgment you report carries `files`: the repository-relative paths a fix would have to touch for that finding. Name real files (no absolute paths, no directories as a guess); when a finding needs a file no lane owns, say so in the reason as well.\nHold the change to every shared rule in `rules/common.md`, and report a duplicate path, an incomplete removal, an unverifiable change and an explanatory comment as defects rather than style notes.",
+        "defaultCustomized": false,
+        "description": "独立审查的证据隔离和只读规则。",
+        "fallback": "reviewerRules",
+        "file": "/Users/macmini/workspace/13-Graph/verification/.run/310865c4/graph-home/prompts/rules/reviewer.md",
+        "group": "rules",
+        "key": "rules/reviewer.md",
+        "title": "Reviewer 规则"
+      },
+      {
+        "content": "Fixture worker runtime prompt.",
+        "customized": true,
+        "defaultContent": "Use the native Pi tools to read, search, edit and run commands in the assigned worktree. Use artifact_list/read to discover published task knowledge and artifact_publish for reports, plans, source lists and other shared deliverables that are not code changes. Send required named graph outputs with submit; one execution permits one valid submission, and omitted outputs are disabled. Direct chat may be answered without submitting. Native bash is sandboxed by the workspace and host access policy.{{retrievalNote}}",
+        "defaultCustomized": false,
+        "description": "普通实现、审查和验证 Agent 每次 operation 注入 system prompt 的 runtime rules。",
+        "fallback": "worker",
+        "file": "/Users/macmini/workspace/13-Graph/verification/.run/310865c4/graph-home/prompts/runtime/worker.md",
+        "group": "runtime",
+        "key": "runtime/worker.md",
+        "title": "Worker 运行规则"
+      },
+      {
+        "content": "Fixture node runtime prompt.",
+        "customized": true,
+        "defaultContent": "Work within the assigned node task, acceptance criteria, workspace and bound capabilities. Use submit to send the named graph outputs when the task requires them. One execution permits one valid submit; omitted outputs are disabled. A direct chat can be answered without submit. Peer chat and interface delivery are separate channels. Read published artifacts by their exact ID and version. Code and review references must identify the exact commit. Respect the recipe rules and host permissions; a review task does not grant permission to implement changes.",
+        "defaultCustomized": false,
+        "description": "接口投递内核中实现和审查节点使用的运行规则；任务和输出要求由节点声明。",
+        "fallback": "node",
+        "file": "/Users/macmini/workspace/13-Graph/verification/.run/310865c4/graph-home/prompts/runtime/node.md",
+        "group": "runtime",
+        "key": "runtime/node.md",
+        "title": "Graph 节点运行规则"
+      }
+    ],
+    "root": "/Users/macmini/workspace/13-Graph/verification/.run/310865c4/graph-home/prompts",
+    "sent": null,
+    "tools": [
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Change Graph files, check and commit to main. A change is a path plus write, replace, \"copy\", delete or fromPath (a file already written); copy mirrors a revision. Failed checks keep edits; changes:[] retries. Activation runs the full gate, ends this operation and schedules reload. Wait while a reload is pending; ask before force interrupts work.",
+        "enabled": true,
+        "name": "apply_rsi_change",
+        "parameters": [
+          "activate",
+          "changes",
+          "checks",
+          "diagnosis",
+          "dryRun",
+          "evidence",
+          "force",
+          "impact",
+          "problem",
+          "risk",
+          "title"
+        ],
+        "permission": "Graph source checkout (self-improvement)",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "List published task artifacts and shared project knowledge. Metadata only - use artifact_read for content.",
+        "enabled": true,
+        "name": "artifact_list",
+        "parameters": [
+          "cursor",
+          "includeRetired",
+          "latestOnly",
+          "limit",
+          "namespace",
+          "prefix",
+          "schema",
+          "tag",
+          "trust"
+        ],
+        "permission": "task artifact workspace",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Promote one exact task artifact version into project-scoped shared knowledge for later tasks in the same project. The source version is neither mutated nor retired.",
+        "enabled": true,
+        "name": "artifact_promote",
+        "parameters": [
+          "artifactId",
+          "requestId",
+          "version"
+        ],
+        "permission": "task artifact workspace",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Publish an immutable version from sourcePath or content, never both. sourcePath is inside this work copy. expectedVersion guards updates. Declared deliverables publish at settlement. Namespaces: plans, research, reviews, deliverables, summaries. Set graphId to publish or revise an artifact in a graph you own; omit it to publish in your own task. A revision keeps the namespace, the name and every earlier version.",
+        "enabled": true,
+        "name": "artifact_publish",
+        "parameters": [
+          "content",
+          "expectedVersion",
+          "graphId",
+          "mediaType",
+          "metadata",
+          "name",
+          "namespace",
+          "requestId",
+          "schema",
+          "sourcePath",
+          "summary",
+          "tags",
+          "title"
+        ],
+        "permission": "task artifact workspace",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Read one immutable artifact by artifactId. Omit version for the latest published version: discovery, not a frozen reference. Text returns within maxBytes; binary content returns its path and metadata.",
+        "enabled": true,
+        "name": "artifact_read",
+        "parameters": [
+          "artifactId",
+          "maxBytes",
+          "version"
+        ],
+        "permission": "task artifact workspace",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Execute bash commands (ls, grep, find, etc.)",
+        "enabled": true,
+        "group": "pi_native",
+        "name": "bash",
+        "order": 1,
+        "parameters": [
+          "command",
+          "timeout",
+          "async",
+          "requestId"
+        ],
+        "permission": "sandboxed shell",
+        "runtimeAvailable": true,
+        "source": "Pi",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Confirm only when the user explicitly asked; quote their words verbatim and use their target branch. proposalVersion and draftRevision must still match the draft.",
+        "enabled": true,
+        "name": "confirm_draft",
+        "parameters": [
+          "draftRevision",
+          "instruction",
+          "proposalVersion",
+          "requestId",
+          "targetBranch"
+        ],
+        "permission": "Graph call gate and current access policy",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Control the task you serve, or another task of the same conversation. pause soft-stops the turn until resume; resume continues it; abandon stops at once, refused while a worker still writes; set_budget takes a positive token count or null for unlimited, and a finite cap must cover the node's context reservation; steer injects a message into the running turn; stop_node interrupts one node and pauses its queue. Every action records its reason; abandoning work the user still expects is never right. Resuming work paused by archive needs the current user message ID and an exact quotation.",
+        "enabled": true,
+        "name": "control_task",
+        "parameters": [
+          "action",
+          "instruction",
+          "nodeId",
+          "reason",
+          "requestId",
+          "sourceMessageId",
+          "taskId",
+          "text",
+          "tokens"
+        ],
+        "permission": "Graph call gate and current access policy",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Make precise file edits with exact text replacement, including multiple disjoint edits in one call.",
+        "enabled": true,
+        "group": "pi_native",
+        "name": "edit",
+        "order": 2,
+        "parameters": [
+          "path",
+          "edits"
+        ],
+        "permission": "workspace write",
+        "runtimeAvailable": true,
+        "source": "Pi",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Fetch a text document from a granted domain and return its body.",
+        "enabled": true,
+        "name": "fetch",
+        "parameters": [
+          "url"
+        ],
+        "permission": "declared network domains",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Find files by pattern",
+        "enabled": true,
+        "group": "pi_native",
+        "name": "find",
+        "order": 5,
+        "parameters": [
+          "pattern",
+          "path",
+          "limit"
+        ],
+        "permission": "workspace and granted read roots",
+        "runtimeAvailable": true,
+        "source": "Pi",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Read the graph state of this conversation: proposal, revision, phase, node statuses, evidence, worktrees and internal problems.",
+        "enabled": true,
+        "name": "get_graph_state",
+        "parameters": [],
+        "permission": "current conversation graph",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Read compact task status and active problems before polling full graph state. Filter by task or node; use get_graph_state for the complete proposal.",
+        "enabled": true,
+        "name": "get_task_status",
+        "parameters": [
+          "nodeId",
+          "taskId",
+          "timeoutMs",
+          "waitForNode"
+        ],
+        "permission": "current conversation graph",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Run one read-only git command in the work copy. Output is capped at 20000 characters (a longer diff or log falls back to --stat). Allowed: status, log, diff, show, blame, describe, rev-parse, ls-files, shortlog, grep, rev-list.",
+        "enabled": true,
+        "name": "git",
+        "parameters": [
+          "args",
+          "path",
+          "subcommand"
+        ],
+        "permission": "Graph call gate and current access policy",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Change one graph's state: pause, resume, retry or skip a queue item, cancel, stop a node, sync the integration commit, reconcile one call's usage. A requestId replays a retried action. A graph whose unmet items lack evidence - never a failed check - closes complete_with_limitations, one reason per item; only the user waives a human item.",
+        "enabled": true,
+        "name": "graph_control",
+        "parameters": [
+          "action",
+          "callId",
+          "graphId",
+          "instruction",
+          "limitations",
+          "moduleId",
+          "nodeId",
+          "operationId",
+          "proof",
+          "requestId",
+          "seq",
+          "sourceMessageId",
+          "usage"
+        ],
+        "permission": "Graph call gate and current access policy",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Create an independently owned graph from a complete JSON definition. Nodes wait for input; read graph-v2.md for the schema.",
+        "enabled": true,
+        "name": "graph_create",
+        "parameters": [
+          "definition",
+          "requestId",
+          "targetBranch"
+        ],
+        "permission": "Graph call gate and current access policy",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Read graph state: summary, revision, nodes, queue, executions, results, edge deliveries, module judgments, acceptance, host operations, provider calls. A fallback is its own call beside the failed one. graph-v2.md lists query ids.",
+        "enabled": true,
+        "name": "graph_inspect",
+        "parameters": [
+          "after",
+          "deliveryId",
+          "graphId",
+          "id",
+          "limit",
+          "query",
+          "transitionId"
+        ],
+        "permission": "Graph call gate and current access policy",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Publish a full definition or a local JSON merge patch against baseRevision. Named objects merge, null removes a field. Current work keeps its config; connections apply at the next submit.",
+        "enabled": true,
+        "name": "graph_patch",
+        "parameters": [
+          "baseRevision",
+          "changes",
+          "graphId"
+        ],
+        "permission": "task graph control",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Send text as queued chat, or a value through a named input, under the same protocol and serial execution rules.",
+        "enabled": true,
+        "name": "graph_send",
+        "parameters": [
+          "graphId",
+          "input",
+          "nodeId",
+          "text",
+          "value"
+        ],
+        "permission": "Graph call gate and current access policy",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Search file contents",
+        "enabled": true,
+        "group": "pi_native",
+        "name": "grep",
+        "order": 6,
+        "parameters": [
+          "pattern",
+          "path",
+          "glob",
+          "ignoreCase",
+          "literal",
+          "context",
+          "limit"
+        ],
+        "permission": "workspace and granted read roots",
+        "runtimeAvailable": true,
+        "source": "Pi",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Inspect runtime health for this conversation: invalid capabilities, open internal problems, failed nodes, unknown-usage records, artifact counts, pending system changes.",
+        "enabled": true,
+        "name": "inspect_graph_system",
+        "parameters": [],
+        "permission": "Graph call gate and current access policy",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Inspect source root, branch, pending reload, operations, unpublished branches and deployment differences before changing the harness; an interrupted apply is answered here.",
+        "enabled": true,
+        "name": "inspect_rsi_status",
+        "parameters": [],
+        "permission": "Graph source checkout (self-improvement)",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "List the internal execution problems the main Agent owns. These are not user questions; inspect them before retrying, revising the graph or asking the user.",
+        "enabled": true,
+        "name": "list_problems",
+        "parameters": [],
+        "permission": "Graph call gate and current access policy",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "List the configured projects with their preparation state.",
+        "enabled": true,
+        "name": "list_projects",
+        "parameters": [],
+        "permission": "configured project binding",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "List directory contents",
+        "enabled": true,
+        "group": "pi_native",
+        "name": "ls",
+        "order": 4,
+        "parameters": [
+          "path",
+          "limit"
+        ],
+        "permission": "workspace and granted read roots",
+        "runtimeAvailable": true,
+        "source": "Pi",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Submit or revise a schemaVersion:2 graph draft. Read docs/agent/graph-v2.md for the shape; every node past the first must name what no upstream node provides. shapeNotes names what to justify or drop. Default edits the draft; newVersion:true forks.",
+        "enabled": true,
+        "name": "propose_graph",
+        "parameters": [
+          "newVersion",
+          "proposal",
+          "requestId"
+        ],
+        "permission": "task graph control",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Read file contents",
+        "enabled": true,
+        "group": "pi_native",
+        "name": "read",
+        "order": 0,
+        "parameters": [
+          "path",
+          "offset",
+          "limit"
+        ],
+        "permission": "workspace and granted read roots",
+        "runtimeAvailable": true,
+        "source": "Pi",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Read the configuration inventory: redacted subscription plans, model connections, Agent recipes and definitions, graph architectures, quota windows. Secrets are never included. Use it before choosing a model or claiming something exists.",
+        "enabled": true,
+        "name": "read_system_capabilities",
+        "parameters": [],
+        "permission": "Graph call gate and current access policy",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Resolve main-owned problems: retry fixable failures, acknowledge cleared obstacles, answer routed questions with the expectedRevision list_problems reports. Reconcile usage only without authoritative provider data; escalate what only the user can decide.",
+        "enabled": true,
+        "name": "resolve_problem",
+        "parameters": [
+          "action",
+          "expectedRevision",
+          "proof",
+          "questionId",
+          "requestId",
+          "response"
+        ],
+        "permission": "Graph call gate and current access policy",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Search the capability directory (Skills, MCP servers, Pi extensions, Graph extensions, prompt identities). Discovery only: bind a capability into an Agent recipe or definition to make its tools available.",
+        "enabled": true,
+        "name": "search_resources",
+        "parameters": [
+          "kind",
+          "limit",
+          "offset",
+          "query",
+          "role"
+        ],
+        "permission": "Graph call gate and current access policy",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Validate a propose_graph object without creating a draft. Returns validity, errors, and shapeNotes naming unexplained, duplicated or unwired nodes.",
+        "enabled": true,
+        "name": "validate_proposal",
+        "parameters": [
+          "proposal"
+        ],
+        "permission": "current conversation graph",
+        "runtimeAvailable": true,
+        "source": "Graph",
+        "version": null
+      },
+      {
+        "available": true,
+        "capabilityId": null,
+        "description": "Create or overwrite files",
+        "enabled": true,
+        "group": "pi_native",
+        "name": "write",
+        "order": 3,
+        "parameters": [
+          "path",
+          "content"
+        ],
+        "permission": "workspace write",
+        "runtimeAvailable": true,
+        "source": "Pi",
+        "version": null
+      }
+    ]
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/agent-context",
+    "expectStatus": 200,
+    "id": "context.readable"
+  },
+  "status": 200
+}

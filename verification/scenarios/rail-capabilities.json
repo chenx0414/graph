@@ -1,0 +1,44 @@
+{
+  "id": "rail-capabilities",
+  "feature": "rail-capabilities",
+  "description": "The 资源 rail entry opens its own workspace page (资源库) whose panel actually renders, and it is exposed to assistive technology as a button.",
+  "steps": [
+    {
+      "verb": "waitText",
+      "text": "白板标题",
+      "timeoutMs": 25000
+    },
+    {
+      "verb": "click",
+      "name": "资源"
+    },
+    {
+      "verb": "waitText",
+      "text": "标签页 资源库",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "assertText",
+      "text": "标签页 资源库"
+    },
+    {
+      "verb": "waitText",
+      "text": "资源库窗口",
+      "timeoutMs": 20000
+    },
+    {
+      "verb": "assertAccess",
+      "name": "资源",
+      "role": "button"
+    },
+    {
+      "verb": "screenshot",
+      "path": "rail-capabilities.png"
+    },
+    {
+      "verb": "clickIf",
+      "name": "标签页 白板"
+    }
+  ],
+  "checks": []
+}

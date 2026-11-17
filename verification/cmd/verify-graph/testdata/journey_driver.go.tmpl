@@ -1,0 +1,272 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"image/png"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/egoist/mygo/ui"
+)
+
+type vgStep struct {
+	Verb      string  `json:"verb"`
+	Name      string  `json:"name,omitempty"`
+	Role      string  `json:"role,omitempty"`
+	Value     string  `json:"value,omitempty"`
+	Text      string  `json:"text,omitempty"`
+	Key       string  `json:"key,omitempty"`
+	Path      string  `json:"path,omitempty"`
+	TimeoutMs int     `json:"timeoutMs,omitempty"`
+	ScrollY   float32 `json:"scrollY,omitempty"`
+}
+
+type vgJourney struct {
+	ID     string   `json:"id"`
+	Width  int      `json:"width"`
+	Height int      `json:"height"`
+	Steps  []vgStep `json:"steps"`
+}
+
+type vgOutcome struct {
+	Index   int    `json:"index"`
+	Verb    string `json:"verb"`
+	OK      bool   `json:"ok"`
+	Skipped bool   `json:"skipped,omitempty"`
+	Detail  string `json:"detail,omitempty"`
+}
+
+type vgResult struct {
+	OK     bool        `json:"ok"`
+	Error  string      `json:"error,omitempty"`
+	Steps  []vgOutcome `json:"steps"`
+	Texts  []string    `json:"texts,omitempty"`
+	Frames []string    `json:"frames,omitempty"`
+	Access []vgAccess  `json:"access,omitempty"`
+}
+
+type vgAccess struct {
+	Name      string `json:"name"`
+	Role      string `json:"role"`
+	Value     string `json:"value,omitempty"`
+	Focusable bool   `json:"focusable,omitempty"`
+	Offscreen bool   `json:"offscreen,omitempty"`
+}
+
+func vgRole(name string) (ui.Role, string) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "", "any":
+		return ui.RoleAuto, "any"
+	case "button":
+		return ui.RoleButton, "button"
+	case "text", "textfield", "textbox":
+		return ui.RoleText, "text"
+	case "list":
+		return ui.RoleList, "list"
+	case "row":
+		return ui.RoleRow, "row"
+	case "table":
+		return ui.RoleTable, "table"
+	case "group":
+		return ui.RoleGroup, "group"
+	case "link":
+		return ui.RoleLink, "link"
+	}
+	return ui.RoleAuto, ""
+}
+
+func TestVerifyGraphJourney(t *testing.T) {
+	outDir := os.Getenv("VG_OUT")
+	specPath := os.Getenv("VG_JOURNEY")
+	if outDir == "" || specPath == "" {
+		t.Fatal("VG_OUT and VG_JOURNEY are required")
+	}
+	raw, err := os.ReadFile(specPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec vgJourney
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	if spec.Width <= 0 {
+		spec.Width = 1440
+	}
+	if spec.Height <= 0 {
+		spec.Height = 900
+	}
+	out := vgResult{OK: true}
+	write := func() {
+		payload, _ := json.MarshalIndent(out, "", "  ")
+		_ = os.WriteFile(filepath.Join(outDir, "result.json"), payload, 0o644)
+	}
+	defer write()
+
+	state := newShellState(os.Getenv("VG_URL"), os.Getenv("VG_TOKEN"))
+	state.stateDir = os.Getenv("VG_STATE_DIR")
+	state.load()
+	tester := ui.NewTester(state.view, spec.Width, spec.Height)
+	settle := func() {
+		tester.Frame()
+		tester.Frame()
+	}
+	settle()
+
+	summarise := func() string {
+		texts := tester.Texts()
+		if len(texts) <= 32 {
+			return strings.Join(texts, " | ")
+		}
+		return fmt.Sprintf("%s | …%d more… | %s",
+			strings.Join(texts[:12], " | "), len(texts)-32, strings.Join(texts[len(texts)-20:], " | "))
+	}
+	waitText := func(text string, timeout time.Duration) bool {
+		deadline := time.Now().Add(timeout)
+		for {
+			settle()
+			if tester.HasText(text) {
+				return true
+			}
+			if time.Now().After(deadline) {
+				return false
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+
+	for index, s := range spec.Steps {
+		outcome := vgOutcome{Index: index + 1, Verb: s.Verb, OK: true}
+		fail := func(format string, args ...any) {
+			outcome.OK = false
+			outcome.Detail = fmt.Sprintf(format, args...)
+			out.OK = false
+			out.Error = fmt.Sprintf("step %d (%s): %s", index+1, s.Verb, outcome.Detail)
+			out.Steps = append(out.Steps, outcome)
+			out.Texts = tester.Texts()
+			write()
+			t.Fatalf("%s", out.Error)
+		}
+		timeout := 8 * time.Second
+		if s.TimeoutMs > 0 {
+			timeout = time.Duration(s.TimeoutMs) * time.Millisecond
+		}
+		switch s.Verb {
+		case "frame":
+			settle()
+		case "click":
+			if err := tester.Click(s.Name); err != nil {
+				fail("cannot click %q: %v; visible texts: %s", s.Name, err, summarise())
+			}
+			settle()
+		case "clickIf":
+			if !tester.HasText(s.Name) {
+				outcome.Skipped = true
+				outcome.Detail = "skipped: " + s.Name + " is not on screen"
+				out.Steps = append(out.Steps, outcome)
+				continue
+			}
+			if err := tester.Click(s.Name); err != nil {
+				fail("cannot click %q: %v; visible texts: %s", s.Name, err, summarise())
+			}
+			settle()
+		case "type":
+			if err := tester.Click(s.Name); err != nil {
+				fail("cannot focus %q: %v; visible texts: %s", s.Name, err, summarise())
+			}
+			settle()
+			tester.Type(s.Text)
+			settle()
+		case "key":
+			switch strings.ToLower(strings.TrimSpace(s.Key)) {
+			case "enter", "return":
+				tester.Key(0, ui.KeyEnter)
+			case "escape":
+				tester.Key(0, ui.KeyEscape)
+			case "tab":
+				tester.Key(0, ui.KeyTab)
+			case "down":
+				tester.Key(0, ui.KeyDown)
+			case "up":
+				tester.Key(0, ui.KeyUp)
+			case "space":
+				tester.Key(0, ui.KeySpace)
+			default:
+				fail("unsupported key %q; add it to scenarios when a feature needs it", s.Key)
+			}
+			settle()
+		case "scroll":
+			tester.Scroll(float32(spec.Width)/2, float32(spec.Height)/2, 0, s.ScrollY)
+			settle()
+		case "waitText":
+			if !waitText(s.Text, timeout) {
+				fail("text %q did not appear within %s; visible texts: %s", s.Text, timeout, summarise())
+			}
+			outcome.Detail = "visible: " + s.Text
+		case "assertText":
+			settle()
+			if !tester.HasText(s.Text) {
+				fail("expected text %q; visible texts: %s", s.Text, summarise())
+			}
+		case "assertNoText":
+			settle()
+			if tester.HasText(s.Text) {
+				fail("unexpected text %q", s.Text)
+			}
+		case "assertAccess":
+			role, roleName := vgRole(s.Role)
+			if roleName == "" {
+				fail("unknown role %q; supported: any, button, text, list, row, table, group, link", s.Role)
+			}
+			settle()
+			info, ok := tester.Access(s.Name)
+			if !ok {
+				fail("%q is not exposed to assistive tech; visible texts: %s", s.Name, summarise())
+			}
+			if role != ui.RoleAuto {
+				byRole, found := tester.AccessByRole(role, s.Name)
+				if !found {
+					fail("%q is not exposed as a %s to assistive tech; visible texts: %s", s.Name, roleName, summarise())
+				}
+				info = byRole
+			}
+			if s.Value != "" && !strings.Contains(info.Value, s.Value) {
+				fail("%q reads %q to assistive tech, which does not contain %q; a text field keeps its content as a value, not as visible text", s.Name, info.Value, s.Value)
+			}
+			out.Access = append(out.Access, vgAccess{Name: info.Name, Role: roleName, Value: info.Value, Focusable: info.Focusable, Offscreen: info.Offscreen})
+			outcome.Detail = "exposed as " + roleName
+			if s.Value != "" {
+				outcome.Detail = fmt.Sprintf("exposed as %s with value %q", roleName, info.Value)
+			}
+		case "assertNoAccess":
+			settle()
+			if info, ok := tester.Access(s.Name); ok {
+				fail("%q is still exposed to assistive tech (value %q)", s.Name, info.Value)
+			}
+		case "screenshot":
+			name := s.Path
+			if name == "" {
+				name = fmt.Sprintf("frame-%02d.png", index+1)
+			}
+			path := filepath.Join(outDir, name)
+			file, err := os.Create(path)
+			if err != nil {
+				fail("cannot create %s: %v", path, err)
+			}
+			if err := png.Encode(file, tester.Image()); err != nil {
+				file.Close()
+				fail("cannot encode %s: %v", path, err)
+			}
+			file.Close()
+			out.Frames = append(out.Frames, path)
+			outcome.Detail = path
+		default:
+			fail("unknown verb %q", s.Verb)
+		}
+		out.Steps = append(out.Steps, outcome)
+	}
+	out.Texts = tester.Texts()
+}

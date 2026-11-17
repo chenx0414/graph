@@ -1,0 +1,34 @@
+{
+  "id": "rail-fleet",
+  "feature": "rail-fleet",
+  "description": "The 编队 rail entry opens its own workspace page (编队) whose panel actually renders, and it is exposed to assistive technology as a button.",
+  "steps": [
+    {
+      "verb": "waitText",
+      "text": "白板标题",
+      "timeoutMs": 25000
+    },
+    {
+      "verb": "click",
+      "name": "编队"
+    },
+    {
+      "verb": "waitText",
+      "text": "标签页 编队",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "assertText",
+      "text": "标签页 编队"
+    },
+    {
+      "verb": "screenshot",
+      "path": "rail-fleet.png"
+    },
+    {
+      "verb": "clickIf",
+      "name": "标签页 白板"
+    }
+  ],
+  "checks": []
+}

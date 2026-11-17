@@ -1,0 +1,205 @@
+---
+name: verify-graph
+description: "Drive the real Graph desktop app (Go + MyGo native window, plus its loopback daemon) and prove a user-facing feature works: launch an isolated instance, seed real data with a stub model, click through the accessibility tree, and leave AX snapshots, PNG frames, API reads and an exit code as evidence. Use for /verify-graph, \"does this Graph feature actually work\", \"prove the UI still works\", or before handing a Graph change to the user."
+---
+
+# verify-graph
+
+Graph is a desktop app: one Go + MyGo binary (the window) and the same binary as `daemon` (loopback HTTP on
+`127.0.0.1`, 120+ routes). This skill is the scripted way to answer "is this feature really usable?" without
+clicking by hand and without trusting "it compiles".
+
+Everything runs through one entry point, `verification/verify-graph`. It builds its own binary on first use.
+Every command prints exactly one JSON envelope on stdout, human hints on stderr.
+
+- `ok` is the verdict; `data` carries the details; `evidence[]` carries `{kind, path, sha256}` for everything
+  that proves it.
+- Exit codes: `0` ok, `1` a check failed, `2` usage, `3` environment (doctor), `4` timeout. `1` and `3` are
+  different answers: a red check means the product is broken, `3` means this machine cannot judge yet.
+
+Run every command from `verification/` (`cd verification`), or prefix with `go -C verification run ./cmd/verify-graph`.
+
+## Launch
+
+Isolated instance, empty data dir, ready when the daemon answers — not just when a process exists:
+
+```sh
+verification/verify-graph launch                     # view-only daemon, random port, .run/<run-id>/
+verification/verify-graph launch --mode execute      # same, but the run may dispatch work
+verification/verify-graph status                     # every run under .run/, plus orphans (reported, never killed)
+```
+
+What `launch` guarantees (this is the whole safety story; do not hand-roll `graphd` invocations instead):
+
+- `--state-dir`, `--graph-home`, `--config` all live under `verification/.run/<run-id>/`. The user's real state
+  (`~/Library/Application Support/Graph`) is read-only and never driven.
+- `HOME`, `TMPDIR` and `PATH` are redirected for every child. `PATH` starts with a `launchctl` shim that logs and
+  exits non-zero, so the window path can never `launchctl bootout gui/<uid>/dev.graph.daemon` and take the user's
+  running daemon down with it.
+- A window run uses a renamed build (`GraphVerify-<run>`), so MyGo's single-instance lock cannot hand our launch to
+  the user's Graph.
+- Ready means `GET /api/health` answers **and** `/api/conversations` refuses an unauthenticated call with 401 (the
+  session cookie is really enforced). `launch` reports `readyMs` and the URL; the token never leaves the run dir.
+
+Teardown is `cleanup` (see below), never `pkill`.
+
+## Doctor
+
+Run this first whenever anything looks off. It is read-only and answers "is this instance worth driving?":
+
+```sh
+verification/verify-graph doctor --run <run-id>
+```
+
+It checks: the run's daemon process and its `console.json` agree; `GET /api/health`; 401 without a cookie; the run
+lives under `verification/.run` (isolated); the daemon binary is not older than the source it was built from; the
+agent-desktop binary exists and its accessibility permission is `granted`; and the user's own Graph instance and
+launchd service are untouched (fingerprinted before and after). A `3` exit from `doctor` means stop and fix the
+environment — do not record a product failure.
+
+## Drive
+
+Three lanes, pick the one the feature needs. Each one asserts on the real thing.
+
+**1. Headless render (real `app/` view code, no window, no screen permission).**
+The fastest lane and the one that works on any machine: it runs the app's own `shellState.view` through MyGo's
+tester, so the layout, labels and state transitions are the product's, not a mock.
+
+```sh
+verification/verify-graph ui render <journey> --run <run-id> --width 1440 --height 900
+```
+
+**2. Live accessibility tree (the real window).**
+`ui snapshot` reads the window's AX tree; MyGo sets each element's AX name from its `Label()`, so the handles are
+the product's own Chinese UI text (`轨迹`, `洞察`, `编队`, `供应商`, `资源`, `装配`, `设置`, `标签页 白板`,
+`main agent 会话`, `消息`, `附件`, `模型`, `暂停`, `上下文` / `System Prompt` / `工具声明`).
+
+```sh
+verification/verify-graph ui snapshot --run <run-id> --app Graph
+```
+
+When the run has its own window process, `ui window open|click|shot|close` drives that window and captures it with
+`ui shot`; use it instead of the `--app Graph` selector whenever two Graph windows can be on screen at once.
+
+Gotchas that cost runs: match on `role` + exact `name`, never substring (`find --text` also matches whole message
+bodies); always scope to our own window (`--window-id`) because the user's Graph window has the same title and
+agent-desktop answers `AMBIGUOUS_TARGET` when two instances match; inventory commands need a long
+`--timeout-ms` (they report `APP_UNRESPONSIVE` at the 5s default); an element that reads `offscreen` can still be
+clicked semantically; a stale ref answers `STALE_REF`, so re-snapshot instead of sleeping.
+
+**3. Daemon API (state behind the UI).**
+For setup and for reading the side effect the UI claims to have caused:
+
+```sh
+verification/verify-graph api GET /api/health --run <run-id>
+verification/verify-graph api POST /api/conversations --run <run-id> --body '{"projectId":"verify","model":"seed","text":"hi","requestId":"r1"}'
+```
+
+The cookie and `Origin` header are added for you. Paths worth knowing: `/api/startup`, `/api/conversations`,
+`/api/conversations/{id}`, `/api/conversations/{id}/trajectory`, `/api/tasks`, `/api/tasks/{id}/operations`,
+`/api/fleet`, `/api/insights`, `/api/providers/magpie`, `/api/catalog`, `/api/settings`, `/api/config`,
+`/api/state-machines`.
+
+**Seed real data instead of asserting empty states.** An empty state dir renders "no sessions, no agents, no
+usage", which proves nothing about fleet/insights/trajectory pages. `launch --mode execute --seed` starts a local
+`openai-completions` stub model on loopback, points a `seed` model in the run's own config at it, and keeps serving
+until `cleanup` stops it: the daemon really runs the agent loop, really calls the model, and really records a
+trajectory with token usage — without credentials, network or cost.
+
+```sh
+verification/verify-graph launch --mode execute --seed --run <run-id>
+verification/verify-graph api GET /api/startup --run <run-id>      # configured:true, modelCount:1
+echo '{"projectId":"verify","model":"seed","text":"hi","requestId":"r1"}' > /tmp/body.json
+verification/verify-graph api POST /api/conversations --run <run-id> --body "$(cat /tmp/body.json)"
+```
+
+The stub answers with `已就绪。这条回答来自验证用的替身模型…`, the conversation gains an `assistant` turn and
+`/api/conversations/{id}/trajectory` records one request with token usage (`input 40 / output 10`). Verified on this
+machine; `internal/seed` also has its own end-to-end test:
+
+```sh
+GRAPH_VERIFY_DAEMON="$PWD/.run/bin/graphd" GRAPH_VERIFY_REPO="$(cd .. && pwd)" \
+  go test -run TestSeedingBuildsRealDataInAnIsolatedDaemon -v ./internal/seed/
+```
+
+`--seed` requires `--mode execute` (a view-only instance may not dispatch). Plain `launch` stays view-only with no
+model, which is what the empty-state journeys expect: `/api/startup` then answers `configured:false, modelCount:0`,
+and a `POST /api/conversations` leaves a `role:legacy` conversation with no assistant turn.
+
+**Whole journeys.** A journey file pins one feature to its assertions and its evidence:
+
+```sh
+verification/verify-graph scenario <journey> --run <run-id>
+verification/verify-graph verify --run <run-id> --journey <id>
+verification/verify-graph verify --all
+```
+
+## Evidence
+
+Proof standard — a feature is `pass` only when all three exist, and any one missing makes it `evidence_partial`,
+never `pass`:
+
+1. **What the user sees**: an AX snapshot JSON (live window) or a PNG render frame (headless lane), plus the
+   stable handles the journey asserted on.
+2. **What the app actually did**: the daemon API read-back (message count, task state, revision, row count) or a
+   file read (`whiteboard.json`, `graph.config.json`), not just the screen.
+3. **A human can re-check it**: the PNG and the JSON sit in `verification/evidence/<run-id>/<feature>/`, listed in
+   `assertions.json` and `summary.json` with a sha256 per file.
+
+```sh
+verification/verify-graph evidence list --run <run-id>
+verification/verify-graph evidence verify --run <run-id>   # recompute the manifest hashes
+```
+
+Rules that keep the evidence honest:
+
+- Never weaken a journey to make it pass; write the failing precondition into that feature's `Gotchas` instead.
+- Exercise the user path, not an internal setter or a test-only endpoint. A `POST` that only the CLI calls is
+  setup, not proof.
+- Capture the action **and** the resulting state; a final screenshot alone cannot tell "clicked" from "was already
+  open".
+- Stub models are allowed exactly where production already isolates the boundary (an external model provider). The
+  daemon loop, the scheduler, the store and the window stay real.
+- No token, cookie, `secrets.json` or message body in evidence. Say `$HOME` as a hash prefix, never literally.
+- Pixel capture needs a **region**, not the whole display: a `launchd` background session answers
+  `could not create image from display` for bare `-x <path>` (and for agent-desktop's `screenshot`) while
+  `permissions` still reports `screen_recording: granted`. `/usr/sbin/screencapture -x -R<x>,<y>,<w>,<h> <path>`
+  with the window bounds from `list-windows` works. Verified on this machine: `-R0,0,400,300` produced a 123 KB
+  PNG and `-R15,180,157,158` a 157×158 PNG of the app window. If the region capture fails too, mark the feature
+  `evidence_partial` and say why; do not silently downgrade to an API-only pass.
+
+## Cleanup
+
+```sh
+verification/verify-graph cleanup --run <run-id>    # stop the app, then the daemon, then remove .run/<run-id>
+verification/verify-graph cleanup --all --dry-run   # list first; drop --dry-run to act
+```
+
+Cleanup only signals pids recorded in that run's `run.json`, after checking the process start time still matches
+(no pid reuse). It never kills by process name, never touches the user's Graph, and never removes
+`verification/evidence` — the proof outlives the instance. After stopping, it re-checks the launchd fingerprint and
+the user's `console.json`; a change is reported as `isolation-violation`, not swallowed.
+
+Orphans from abandoned runs are reported by `status` and left alone; they are not yours to kill.
+
+## Helpers
+
+- `verification/verify-graph` — the entry point shell. Builds `.run/bin/verify-graph` when the sources are newer,
+  then execs it. Same arguments either way.
+- `verification/skills/verify-graph/features/` — the feature map: `index.json` plus one file per feature, each with
+  `Sub-features`, `How to get to it (user POV)`, `Driving it with verify-graph`, `Gotchas`. Start here to find the
+  journey for the feature you are checking.
+- `verification/internal/seed` — the stub model and the seeded conversation described under **Drive**.
+- `verification/evidence/<run-id>/` — what a previous run proved; `evidence verify` re-checks the hashes.
+
+## What this has proven so far
+
+- `internal/seed` (unit): the stub provider streams `openai-completions` turns, calls a scripted tool exactly once
+  when the turn offers it, and skips it when the turn does not; the config it writes is an executable
+  `graph-openai` model with a `secretRef` credential, not a key; `Seed` creates one conversation, polls
+  `/api/tasks/{id}/operations` until every operation is terminal, and reports a failed or stuck run instead of a
+  green one.
+- `internal/seed` (live): a real `graphd` on an isolated state dir, `--execute`, with the stub provider — one seeded
+  conversation settled `succeeded`, the conversation held the messages the model produced, `/api/tasks/{taskId}`
+  existed, and `/api/conversations/{id}/trajectory` recorded the request with real token usage
+  (`input 40 / output 10`). Evidence: `verification/evidence/seed-b6t4n8x2/{seed.json,daemon.log}`.

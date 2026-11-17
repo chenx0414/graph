@@ -1,0 +1,16 @@
+{
+  "id": "F-08",
+  "feature": "F-08",
+  "description": "轨迹页：点侧栏「轨迹」后出现轨迹量化页签与它的量化面板。",
+  "steps": [
+    { "verb": "waitText", "text": "轨迹", "timeoutMs": 20000 },
+    { "verb": "click", "name": "轨迹" },
+    { "verb": "waitText", "text": "标签页 轨迹量化", "timeoutMs": 15000 },
+    { "verb": "assertText", "text": "上下文统计窗口" },
+    { "verb": "assertText", "text": "Token 统计窗口" },
+    { "verb": "screenshot", "path": "trajectory.png" }
+  ],
+  "checks": [
+    { "id": "trajectory.insights", "method": "GET", "path": "/api/trajectory/insights", "expectStatus": 200 }
+  ]
+}

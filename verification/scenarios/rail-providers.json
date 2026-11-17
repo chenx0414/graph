@@ -1,0 +1,44 @@
+{
+  "id": "rail-providers",
+  "feature": "rail-providers",
+  "description": "The 供应商 rail entry opens its own workspace page (供应商) whose panel actually renders, and it is exposed to assistive technology as a button.",
+  "steps": [
+    {
+      "verb": "waitText",
+      "text": "白板标题",
+      "timeoutMs": 25000
+    },
+    {
+      "verb": "click",
+      "name": "供应商"
+    },
+    {
+      "verb": "waitText",
+      "text": "标签页 供应商",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "assertText",
+      "text": "标签页 供应商"
+    },
+    {
+      "verb": "waitText",
+      "text": "供应商窗口",
+      "timeoutMs": 20000
+    },
+    {
+      "verb": "assertAccess",
+      "name": "供应商",
+      "role": "button"
+    },
+    {
+      "verb": "screenshot",
+      "path": "rail-providers.png"
+    },
+    {
+      "verb": "clickIf",
+      "name": "标签页 白板"
+    }
+  ],
+  "checks": []
+}

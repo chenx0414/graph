@@ -1,0 +1,37 @@
+{
+  "id": "F-10",
+  "feature": "F-10",
+  "description": "编队页：点侧栏「编队」后出现编队页签与面板，/api/fleet 可读。空实例的 stats 计数（agents/cost/messages）随调度漂移，所以这里不把它钉进断言 —— 钉住它们会让这个检查在负载变化时翻转。",
+  "steps": [
+    {
+      "verb": "waitText",
+      "text": "编队",
+      "timeoutMs": 20000
+    },
+    {
+      "verb": "click",
+      "name": "编队"
+    },
+    {
+      "verb": "waitText",
+      "text": "标签页 编队",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "assertText",
+      "text": "编队"
+    },
+    {
+      "verb": "screenshot",
+      "path": "fleet.png"
+    }
+  ],
+  "checks": [
+    {
+      "id": "fleet.readable",
+      "method": "GET",
+      "path": "/api/fleet",
+      "expectStatus": 200
+    }
+  ]
+}

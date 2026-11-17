@@ -1,0 +1,77 @@
+{
+  "id": "rail-trajectory",
+  "feature": "rail-trajectory",
+  "description": "With a project conversation selected, the 轨迹 rail entry opens the 轨迹量化 page and its trajectory panels (Token 组成 / 上下文统计 …) actually render from that conversation.",
+  "prepare": [
+    {
+      "id": "trajectory.prepare-thread",
+      "method": "POST",
+      "path": "/api/projects/verify/thread",
+      "body": {
+        "requestId": "vg-trajectory-thread",
+        "text": "trajectory seed"
+      },
+      "expectStatus": 200
+    },
+    {
+      "id": "trajectory.conversations",
+      "method": "GET",
+      "path": "/api/conversations",
+      "expectStatus": 200
+    }
+  ],
+  "steps": [
+    {
+      "verb": "waitText",
+      "text": "白板标题",
+      "timeoutMs": 25000
+    },
+    {
+      "verb": "waitText",
+      "text": "verify",
+      "timeoutMs": 20000
+    },
+    {
+      "verb": "click",
+      "name": "verify"
+    },
+    {
+      "verb": "frame"
+    },
+    {
+      "verb": "click",
+      "name": "轨迹"
+    },
+    {
+      "verb": "waitText",
+      "text": "标签页 轨迹量化",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "waitText",
+      "text": "Token 组成窗口",
+      "timeoutMs": 25000
+    },
+    {
+      "verb": "assertAccess",
+      "name": "轨迹",
+      "role": "button"
+    },
+    {
+      "verb": "screenshot",
+      "path": "rail-trajectory.png"
+    },
+    {
+      "verb": "clickIf",
+      "name": "标签页 白板"
+    }
+  ],
+  "checks": [
+    {
+      "id": "trajectory.conversations-readable",
+      "method": "GET",
+      "path": "/api/conversations",
+      "expectStatus": 200
+    }
+  ]
+}

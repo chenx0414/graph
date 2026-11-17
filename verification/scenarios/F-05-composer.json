@@ -1,0 +1,22 @@
+{
+  "id": "F-05-composer",
+  "feature": "F-05",
+  "description": "选中项目会话后 composer 出现；键入中文与符号进输入框，且只键入不发送（消息数不变）。",
+  "width": 1440,
+  "height": 900,
+  "prepare": [
+    { "id": "prepare.project-thread", "method": "POST", "path": "/api/projects/verify/thread", "body": { "requestId": "vg-f05-thread", "text": "F-05 准备：建立项目会话" }, "expectStatus": 200 },
+    { "id": "prepare.history-before", "method": "GET", "path": "/api/conversations", "expectStatus": 200 }
+  ],
+  "steps": [
+    { "verb": "click", "name": "verify" },
+    { "verb": "waitText", "text": "消息", "timeoutMs": 12000 },
+    { "verb": "assertText", "text": "模型" },
+    { "verb": "type", "name": "消息", "text": "验证用文本 verify-graph 123" },
+    { "verb": "assertAccess", "name": "消息", "value": "验证用文本 verify-graph 123" },
+    { "verb": "screenshot", "path": "composer-typed.png" }
+  ],
+  "checks": [
+    { "id": "check.no-extra-message", "method": "GET", "path": "/api/conversations", "expectStatus": 200 }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "id": "F-06",
+  "feature": "F-06",
+  "description": "上下文窗口在默认白板上；三个页签按钮（上下文 / System Prompt / 工具声明）在可访问树里可点，内容来自当前会话。空实例没有会话时只显示窗口本身，这是预期空态。",
+  "steps": [
+    { "verb": "waitText", "text": "当前上下文窗口", "timeoutMs": 20000 },
+    { "verb": "assertAccess", "name": "当前上下文窗口" },
+    { "verb": "screenshot", "path": "context-empty.png" },
+    { "verb": "clickIf", "name": "System Prompt" },
+    { "verb": "frame" },
+    { "verb": "screenshot", "path": "context-system-prompt.png" },
+    { "verb": "clickIf", "name": "工具声明" },
+    { "verb": "frame" },
+    { "verb": "screenshot", "path": "context-tools.png" },
+    { "verb": "waitText", "text": "当前上下文窗口", "timeoutMs": 15000 }
+  ],
+  "checks": [
+    { "id": "context.readable", "method": "GET", "path": "/api/agent-context", "expectStatus": 200 }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "id": "F-11",
+  "feature": "F-11",
+  "description": "供应商页：面板出现，供应商列表可读。",
+  "steps": [
+    { "verb": "waitText", "text": "供应商", "timeoutMs": 20000 },
+    { "verb": "click", "name": "供应商" },
+    { "verb": "waitText", "text": "供应商窗口", "timeoutMs": 15000 },
+    { "verb": "screenshot", "path": "providers.png" }
+  ],
+  "checks": [
+    { "id": "providers.readable", "method": "GET", "path": "/api/providers", "expectStatus": 200 },
+    { "id": "providers.magpie", "method": "GET", "path": "/api/providers/magpie", "expectStatus": 200 }
+  ]
+}

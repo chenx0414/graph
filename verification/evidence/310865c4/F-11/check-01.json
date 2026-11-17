@@ -1,0 +1,171 @@
+{
+  "body": {
+    "credentials": {},
+    "platforms": [
+      {
+        "api": "openai-completions",
+        "baseUrl": "https://opencode.ai/zen/go/v1",
+        "credentialConfigured": false,
+        "credentialKind": "subscription",
+        "credentialRef": "GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY",
+        "custom": false,
+        "docsUrl": "https://opencode.ai/docs/zen",
+        "headers": {
+          "x-opencode-session": "graph-console"
+        },
+        "id": "opencode-go",
+        "label": "OpenCode Go",
+        "modelsListSupported": true,
+        "notes": [
+          "订阅凭据；\u003cbaseUrl\u003e/models 实测可用，自动列出订阅侧模型；端点拒绝时按原始错误提示并允许手动添加模型 id。",
+          "所有请求自动附带 x-opencode-session。"
+        ]
+      },
+      {
+        "api": "openai-completions",
+        "baseUrl": "https://api.commandcode.ai/provider/v1",
+        "credentialConfigured": false,
+        "credentialKind": "subscription",
+        "credentialRef": "GRAPH_SUBSCRIPTION_COMMAND_GOAT_API_KEY",
+        "custom": false,
+        "id": "command-goat",
+        "label": "Command Goat",
+        "modelsListSupported": true,
+        "notes": [
+          "订阅凭据；优先从 \u003cbaseUrl\u003e/models 探测可用模型。"
+        ]
+      },
+      {
+        "api": "openai-completions",
+        "baseUrl": "https://api.x.ai/v1",
+        "credentialConfigured": false,
+        "credentialKind": "subscription",
+        "credentialRef": "GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN",
+        "custom": false,
+        "id": "grok",
+        "label": "Grok",
+        "modelsListSupported": true,
+        "notes": [
+          "订阅访问令牌；可点「使用 xAI 账号登录」走设备码授权，也可以直接粘贴访问令牌。",
+          "设备码登录会写访问令牌与一个 `\u003ccredentialRef\u003e_REFRESH` 伴随条目，访问令牌到期前自动刷新。"
+        ],
+        "oauthProvider": "xai"
+      },
+      {
+        "api": "openai-responses",
+        "baseUrl": "https://chatgpt.com/backend-api/codex",
+        "credentialConfigured": false,
+        "credentialKind": "subscription",
+        "credentialRef": "GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN",
+        "custom": false,
+        "id": "chatgpt",
+        "label": "ChatGPT",
+        "modelsListSupported": true,
+        "notes": [
+          "已不再提供：Codex 后端只按 Responses 形状（input 项目、扁平工具、response.* 事件）应答，但它在握手后直接 EOF（连接早关），本仓的流式解析器不接受这条事件流，所以这个端点上没有任何一轮能跑完。",
+          "配置里仍写该平台的模型条目会被拒绝；请改用它的传输 fallback：grok:grok-4.5（api openai-completions，baseUrl https://api.x.ai/v1）。"
+        ],
+        "unsupported": true,
+        "unsupportedReason": "the Codex endpoint closes the connection before answering (EOF) and this runtime does not accept its openai-responses event stream, so no turn can complete on it; use grok (grok:grok-4.5) instead"
+      },
+      {
+        "api": "openai-completions",
+        "baseUrl": "https://api.openai.com/v1",
+        "credentialConfigured": false,
+        "credentialKind": "api-key",
+        "credentialRef": "OPENAI_API_KEY",
+        "custom": false,
+        "docsUrl": "https://platform.openai.com/docs/api-reference/chat",
+        "id": "openai",
+        "label": "OpenAI",
+        "modelsListSupported": true,
+        "notes": [
+          "API key 登录；本轮只启用 Chat Completions 传输。仅支持 Responses 的模型需另行验收后才会标注可用。"
+        ]
+      },
+      {
+        "api": "anthropic-messages",
+        "baseUrl": "https://api.anthropic.com",
+        "credentialConfigured": false,
+        "credentialKind": "api-key",
+        "credentialRef": "ANTHROPIC_API_KEY",
+        "custom": false,
+        "docsUrl": "https://platform.claude.com/docs/en/api/overview",
+        "id": "anthropic",
+        "label": "Anthropic",
+        "modelsListSupported": true,
+        "notes": [
+          "API key 登录；使用原生 Messages 传输，不复用 OpenAI 请求格式。"
+        ]
+      },
+      {
+        "api": "openai-completions",
+        "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "credentialConfigured": false,
+        "credentialKind": "api-key",
+        "credentialRef": "GEMINI_API_KEY",
+        "custom": false,
+        "docsUrl": "https://ai.google.dev/gemini-api/docs/openai",
+        "id": "gemini",
+        "label": "Google Gemini",
+        "modelsListSupported": true,
+        "notes": [
+          "使用官方 OpenAI 兼容模式；工具与用量按兼容层实际行为验收后才算可用。"
+        ]
+      },
+      {
+        "api": "openai-completions",
+        "baseUrl": "https://api.deepseek.com/v1",
+        "credentialConfigured": false,
+        "credentialKind": "api-key",
+        "credentialRef": "GRAPH_SUBSCRIPTION_DEEPSEEK_API_KEY",
+        "custom": false,
+        "docsUrl": "https://api-docs.deepseek.com/guides/function_calling",
+        "id": "deepseek",
+        "label": "DeepSeek",
+        "modelsListSupported": true,
+        "notes": [
+          "使用官方兼容传输；以厂商实际支持的字段与契约为准。"
+        ]
+      },
+      {
+        "api": "openai-completions",
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "credentialConfigured": false,
+        "credentialKind": "api-key",
+        "credentialRef": "OPENROUTER_API_KEY",
+        "custom": false,
+        "docsUrl": "https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties",
+        "id": "openrouter",
+        "label": "OpenRouter",
+        "modelsListSupported": true,
+        "notes": [
+          "兼容传输；模型目录与价格随路由变化，需刷新并从来源标注，不覆盖历史费用。"
+        ],
+        "oauthProvider": "openrouter"
+      },
+      {
+        "api": "openai-completions",
+        "baseUrl": "",
+        "credentialConfigured": false,
+        "credentialKind": "api-key",
+        "credentialRef": "GRAPH_PROVIDER_API_KEY",
+        "custom": true,
+        "docsUrl": "",
+        "id": "custom",
+        "label": "自定义兼容平台 / 本地服务",
+        "modelsListSupported": true,
+        "notes": [
+          "高级入口：端点、模型与可选 key；不宣称支持任意协议。无 key 的本地服务不要填伪密钥。"
+        ]
+      }
+    ]
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/providers",
+    "expectStatus": 200,
+    "id": "providers.readable"
+  },
+  "status": 200
+}

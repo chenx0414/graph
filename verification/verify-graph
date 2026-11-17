@@ -1,0 +1,16 @@
+#!/bin/sh
+# Single entry point. Builds the Go binary on first use (and when sources are newer), then execs it.
+set -e
+here=$(cd "$(dirname "$0")" && pwd)
+bin="$here/.run/bin/verify-graph"
+mkdir -p "$here/.run/bin"
+stale=0
+if [ ! -x "$bin" ]; then
+  stale=1
+elif [ -n "$(find "$here/cmd" "$here/internal" "$here/go.mod" -newer "$bin" -print -quit 2>/dev/null)" ]; then
+  stale=1
+fi
+if [ "$stale" = 1 ]; then
+  ( cd "$here" && go build -o "$bin" ./cmd/verify-graph ) || { echo '{"command":"build","ok":false,"error":{"code":"build-failed","message":"go build failed","hint":"run: cd '"$here"' && go build ./cmd/verify-graph"}}'; exit 1; }
+fi
+exec "$bin" "$@"

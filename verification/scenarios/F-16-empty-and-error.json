@@ -1,0 +1,74 @@
+{
+  "id": "F-16-empty-and-error",
+  "feature": "F-16",
+  "description": "空实例的空态契约：每个页面在无数据时给明确文案而不是白屏，同时 daemon 的健康与启动契约可回读。",
+  "width": 1440,
+  "height": 900,
+  "steps": [
+    {
+      "verb": "waitText",
+      "text": "白板标题",
+      "timeoutMs": 25000
+    },
+    {
+      "verb": "clickIf",
+      "name": "标签页 白板"
+    },
+    {
+      "verb": "click",
+      "name": "编队"
+    },
+    {
+      "verb": "waitText",
+      "text": "编队总览窗口",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "screenshot",
+      "path": "fleet-page.png"
+    },
+    {
+      "verb": "click",
+      "name": "资源"
+    },
+    {
+      "verb": "waitText",
+      "text": "资源库窗口",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "screenshot",
+      "path": "resources-page.png"
+    },
+    {
+      "verb": "clickIf",
+      "name": "标签页 白板"
+    }
+  ],
+  "checks": [
+    {
+      "id": "check.health",
+      "method": "GET",
+      "path": "/api/health",
+      "expectStatus": 200,
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "id": "check.startup-view",
+      "method": "GET",
+      "path": "/api/startup",
+      "expectStatus": 200,
+      "expect": {
+        "mode": "view"
+      }
+    },
+    {
+      "id": "check.fleet-empty",
+      "method": "GET",
+      "path": "/api/fleet",
+      "expectStatus": 200
+    }
+  ]
+}
