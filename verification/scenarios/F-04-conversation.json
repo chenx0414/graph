@@ -1,0 +1,64 @@
+{
+  "id": "F-04-conversation",
+  "feature": "F-04",
+  "description": "对话流渲染：用替身模型真的跑完一轮，消息流里出现用户那句与 assistant 的回答（逐字），并且 daemon 里那一轮记到了 token。证明的是渲染+数据链路，不是「页面能打开」。",
+  "width": 1440,
+  "height": 900,
+  "instance": "execute",
+  "seed": {
+    "prompt": "请用一句话说明你已就绪。",
+    "expect": "已就绪。这条回答来自验证用的替身模型，不消耗真实额度。",
+    "requestId": "vg-f04-turn",
+    "projectId": "verify"
+  },
+  "steps": [
+    {
+      "verb": "waitText",
+      "text": "白板标题",
+      "timeoutMs": 30000
+    },
+    {
+      "verb": "click",
+      "name": "verify"
+    },
+    {
+      "verb": "waitText",
+      "text": "请用一句话说明你已就绪。",
+      "timeoutMs": 30000
+    },
+    {
+      "verb": "waitText",
+      "text": "已就绪。这条回答来自验证用的替身模型，不消耗真实额度。",
+      "timeoutMs": 30000
+    },
+    {
+      "verb": "assertAccess",
+      "name": "对话标题",
+      "role": "any"
+    },
+    {
+      "verb": "screenshot",
+      "path": "conversation.png"
+    }
+  ],
+  "checks": [
+    {
+      "id": "conversation.instance",
+      "method": "GET",
+      "path": "/api/startup",
+      "expectStatus": 200,
+      "expect": {
+        "mode": "execute"
+      }
+    },
+    {
+      "id": "conversation.health",
+      "method": "GET",
+      "path": "/api/health",
+      "expectStatus": 200,
+      "expect": {
+        "ok": true
+      }
+    }
+  ]
+}

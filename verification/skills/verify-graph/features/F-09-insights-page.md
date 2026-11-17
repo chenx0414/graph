@@ -22,14 +22,14 @@
 ## Driving it with verify-graph
 
 ```sh
-verification/verify-graph ui click --label "洞察" --json
-verification/verify-graph ui expect --name "洞察概览" --role group --json
-verification/verify-graph api --run <run> --get /api/usage --save evidence/<run>/F-09/usage.json
-verification/verify-graph ui click --label "30 天" --json
-verification/verify-graph ui screenshot --out evidence/<run>/F-09/insights.png
+verification/verify-graph verify --journey F-09
+verification/verify-graph verify --journey F-09 --lane window
+verification/verify-graph evidence verify --run <run>
 ```
 
-判过：三卡存在；KPI 数字 = `usage` JSON 对应字段；天数切换后界面点数 = 新请求返回的点数。
+本 journey 实测覆盖：洞察页：总览、用量趋势、会话排行三块都在，数据来自 /api/insights。
+
+人工复核项（**尚未写进 journey**，不要当成已覆盖）：三卡存在；KPI 数字 = `usage` JSON 对应字段；天数切换后界面点数 = 新请求返回的点数。
 
 ## Gotchas
 

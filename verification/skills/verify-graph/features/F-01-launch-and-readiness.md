@@ -2,7 +2,7 @@
 
 一条命令起一个**隔离**的 Graph 实例，并判定它「可以开始验证了」。这是所有其它 feature 的前置。
 
-- 入口：CLI，不是界面。`verify-graph launch`（daemon 车道）、`verify-graph launch --window`（窗口车道）
+- 入口：CLI，不是界面。`verify-graph launch`（daemon 车道）、`verify-graph ui window open --run <run>`（真窗口车道；`verify --lane window` 会自动开窗）
 - 现有自动化覆盖：无（`app/daemon_test.go`、`app/daemon_phase_test.go` 只测状态机，不测真启动）
 - 源码事实：`app/main.go:main()` → `ensureDaemon()`；daemon 就绪的唯一信号是 `<state>/console.json` 出现且 `/api/health` 回 `{"ok":true}`；没有 config 文件时 daemon 直接 `invalid_config` 退出
 

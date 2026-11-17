@@ -1,137 +1,181 @@
-# Graph 验证基础设施——怎么用、验了什么、证据在哪、还缺什么
+# Graph 验证能力：怎么用、验了什么、证据在哪
 
-唯一入口：`/Users/macmini/workspace/13-Graph/verification/verify-graph`（Go，只用标准库）。
-唯一 skill：`verification/skills/verify-graph/`（`SKILL.md` + `features/`）。
+唯一入口：`/Users/macmini/workspace/13-Graph/verification/verify-graph`（Go，标准库）。
+唯一 skill：`verification/skills/verify-graph/`（`SKILL.md` + `features/`，冷启动只读这里）。
 
 ---
 
-## 1. 怎么用（三条命令够用）
+## 1. 结论（本轮实测）
+
+```
+cd /Users/macmini/workspace/13-Graph/verification
+./verify-graph verify --all
+```
+
+- 结果：**23/23 通过**，退出码 `0`，耗时 **56.2 s**（本机，2026-11-17 14:46:11 开跑、14:47:07 结束）。
+- runId：主 run `a8290242`（view 实例，22 条 journey）；execute 实例 `e353d253`（F-04 真实一轮对话）。
+- 证据根：`verification/evidence/a8290242/`、`verification/evidence/e353d253/`；
+  `evidence verify` 重算 104 + 6 个文件，`problems: []`。
+- 每条 journey 都是独立文件、独立证据目录、独立结论；失败时 `data.failures[]` 给出
+  journey / 预期 / 实际 / 证据 / 复现命令（见 §5）。
+
+一次跑完会按 journey 声明的实例自动分组：普通页面跑 view 实例；需要真实 dispatch 的 F-04 自动起
+execute + 本地替身模型；F-15 托盘自动走 surface 车道。`--lane window` 可以把同一批 journey 放到真实窗口里再跑一遍。
+
+真实窗口车道也是绿的（同代码实测）：`./verify-graph verify --all --lane window` **23/23 通过**，耗时 **274 s**（run `6473fb09` + execute `c0405509`）。每一步按 AX `role+name` 点击/键入，留 AX dump + PNG；`evidence verify` 重算 104 + 6 个文件，`problems: []`。证据根：`verification/evidence/6473fb09/`、`verification/evidence/c0405509/`。
+
+---
+
+## 2. 怎么用（冷启动三条命令）
 
 ```sh
 cd /Users/macmini/workspace/13-Graph/verification
 
-./verify-graph doctor                       # 这台机器现在值不值得跑（只读）
-./verify-graph verify --journey F-14        # 验一个功能（每条 feature 一个 journey）
-./verify-graph verify --all                 # 全套 21 条
+./verify-graph doctor                       # 这台机器现在值不值得驱动（只读，退出码 3 = 环境问题）
+./verify-graph verify --journey F-09        # 只验一个功能
+./verify-graph verify --all                 # 全套 23 条
 ```
 
-- 每次调用 stdout 只有一个 JSON 信封：`{command, ok, runId, lane, data, artifacts, warnings, nextActions, error}`；
-  人读提示走 stderr。退出码：`0` 通过 / `1` 断言失败 / `2` 用法 / `3` 环境 / `4` 超时。
-- 失败时 `error.{code,message,hint}` 里必须给出下一步命令（例如 `verify-graph ui snapshot --run <id>`）。
-- 其它子命令：`build launch status api ui scenario seed evidence cleanup help version`
-  （`ui render|snapshot|window|motion` 是四条驱动车道，见 §5）。
-
-「这个功能到底能不能用」的完整回答路径：
+再加两条复核命令：
 
 ```sh
-./verify-graph verify --journey F-09                       # 1. 跑
-cat evidence/<run>/F-09/assertions.json                    # 2. 哪条断言、期望、实际
-open evidence/<run>/F-09/*.png                             # 3. 人复核截图
-./verify-graph evidence verify --run <run>                 # 4. 证据未被篡改（重算 sha256）
-./verify-graph api GET /api/insights --run <run>           # 5. 直接回读同一状态
+./verify-graph evidence verify --run <run>  # 重算证据 sha256，证明没人改过
+./verify-graph verify --all --lane window   # 同一套 journey 在真实窗口里跑（需要辅助功能授权）
 ```
+
+只想知道某个控件到底叫什么、点一下会不会变，用逐控件动词（复用本 run 自己的真窗口，每次落 AX JSON + PNG）：
+
+```sh
+./verify-graph ui text --run <run>                                  # 列出可访问树里的所有名字
+./verify-graph ui expect --run <run> --name 洞察概览窗口 --role group
+./verify-graph ui click --run <run> --name 洞察 --expect 洞察概览
+./verify-graph ui screenshot --run <run> --out evidence/<run>/manual/insights.png
+```
+
+约定：stdout 只有一个 JSON 信封
+`{command, ok, runId, lane, data, artifacts, warnings, nextActions, error}`，人读提示走 stderr。
+退出码：`0` 通过 / `1` 断言失败 / `2` 用法 / `3` 环境 / `4` 超时。
+
+其它命令：`build launch status api ui scenario seed evidence cleanup help version`。
+`cleanup --orphans [--dry-run]` 只清理 `verification/.run/` 下没有活 run 记录、且命令行与开工时间都对得上的
+`graphd` 守护进程；不会按名字杀进程，也不会碰用户的 Graph。
 
 ---
 
-## 2. 验了什么（本轮实测，不是设计意图）
+## 3. 验了什么（本轮 23 条，逐条实测）
 
-`./verify-graph verify --all` 在隔离实例上跑完 21 条 journey、约 62–82 秒，**21/21 通过**
-（本机实测两次：run `3deff78b`（我）与 run `310865c4`（captain 亲跑，退出码 0））。
+| journey | feature | 实例/车道 | 步骤 | API 检查 | 证明的关键事实 |
+| --- | --- | --- | --- | --- | --- |
+| `F-02-nav` | F-02 模块导航 | view / headless | 32 | 0 | 七个 rail 逐个点开，每页出现自己的页签与面板窗口 |
+| `F-03-conversations` | F-03 会话列表 | view / headless | 5 | 1 | 空实例不白屏；会话题目与 main agent 卡片存在 |
+| `F-04-conversation` | F-04 对话渲染 | execute / headless | 6 | 3 | 替身模型真的跑完一轮；用户句与 assistant 回答逐字出现在消息流；token 记录 40/10 |
+| `F-05-composer` | F-05 输入区 | view / headless | 6 | 3 | 键入后 `消息` 的 AX **value** 逐字等于输入；消息数不变（未发送） |
+| `F-06` | F-06 上下文窗口 | view / headless | 10 | 1 | `当前上下文窗口` + 三页签可点，空态记 skipped |
+| `F-07` | F-07 白板布局 | view / headless | 7 | 1 | 默认白板页签、洞察页签、切回；布局来自真实 `shellState` |
+| `F-08` | F-08 轨迹页 | view / headless | 6 | 1 | `标签页 轨迹量化` + `上下文统计窗口` + `Token 统计窗口` |
+| `F-09` | F-09 洞察页 | view / headless | 6 | 2 | `洞察概览窗口` + `用量趋势窗口` + `会话排行窗口`；API 回读 |
+| `F-10` | F-10 编队页 | view / headless | 5 | 1 | `标签页 编队` + `编队` 面板 |
+| `F-11` | F-11 供应商页 | view / headless | 4 | 2 | `供应商窗口`；Magpie 状态可读 |
+| `F-12` | F-12 资源页 | view / headless | 4 | 2 | `资源库窗口`；catalog 可读 |
+| `F-13` | F-13 装配页 | view / headless | 4 | 1 | `能力装配窗口`；catalog/组合可读 |
+| `F-14` | F-14 设置页 | view / headless | 5 | 3 | `标签页 运行设置` + `运行设置`；config/limits/startup 回读 |
+| `F-15-tray` | F-15 托盘 | view / surface | 6 | 1 | 本 run 窗口的 `menu-bar-extras` 里 `打开 Graph`/`退出 Graph` 均为 menuitem；只点未命名托盘根，绝不点退出 |
+| `F-16-empty-and-error` | F-16 空态/错误态 | view / headless | 9 | 3 | 无数据下编队/资源页仍渲染面板；health/startup/fleet 全 200 |
+| `rail-insights` | 侧栏级 | view / headless | 8 | 0 | 点侧栏 → 页签/面板真的换了 |
+| `rail-fleet` | 侧栏级 | view / headless | 6 | 0 | 同上 |
+| `rail-providers` | 侧栏级 | view / headless | 8 | 0 | 同上 |
+| `rail-capabilities` | 侧栏级 | view / headless | 8 | 0 | 同上 |
+| `rail-assemblies` | 侧栏级 | view / headless | 8 | 0 | 同上 |
+| `rail-settings` | 侧栏级 | view / headless | 6 | 3 | 同上 + daemon 回读 |
+| `rail-trajectory` | 侧栏级 | view / headless | 10 | 3 | 同上 + 轨迹量化数据 |
+| `shell-workspace` | 外壳/工作区 | view / headless | 12 | 3 | shell 级布局与状态 |
 
-| feature | journey | 断言要点 | API 回读 |
-| --- | --- | --- | --- |
-| F-01 启动与就绪 | （CLI 本身就是入口） | `doctor`/`launch`/`status`/`cleanup` 的自检 | `/api/health`、`/api/startup` |
-| F-02 模块导航 | `F-02-nav` | 32 步：七个 rail 文字 + 每页页签/面板窗口 | — |
-| F-03 会话列表 | `F-03-conversations` | 空实例不白屏；会话行渲染 | `/api/conversations` |
-| F-04 对话渲染 | （未覆盖，见 §4） | — | — |
-| F-05 输入区 | `F-05-composer` | 键入后 `消息` 的 AX **value** 逐字等于输入（不是「看到文字」） | `/api/conversations` 计数不变（未发送） |
-| F-06 上下文窗口 | `F-06` | `当前上下文窗口` + 三页签按钮可点（空态记 skipped） | `/api/agent-context` |
-| F-07 白板布局 | `F-07` | `标签页 白板` → 洞察页签 → 切回 | `/api/settings` |
-| F-08 轨迹页 | `F-08` | `标签页 轨迹量化` + `上下文统计窗口` + `Token 统计窗口` | `/api/trajectory/insights` |
-| F-09 洞察页 | `F-09` | `洞察概览窗口` + `用量趋势窗口` + `会话排行窗口` | `/api/insights`、`/api/tool-stats` |
-| F-10 编队页 | `F-10` | `标签页 编队` + `编队` | `/api/fleet` |
-| F-11 供应商页 | `F-11` | `供应商窗口` | `/api/providers`、`/api/providers/magpie` |
-| F-12 资源页 | `F-12` | `资源库窗口` | `/api/catalog`、`/api/capabilities/config` |
-| F-13 装配页 | `F-13` | `能力装配窗口` | `/api/catalog` |
-| F-14 设置页 | `F-14` | `标签页 运行设置` + `运行设置` | `/api/config`、`/api/limits`、`/api/startup.mode=view` |
-| F-15 托盘 | （未覆盖，见 §4） | — | — |
-| F-16 空态/错误态 | `F-16-empty-and-error` | 无数据下编队/资源页仍渲染面板；开头先归一化到 `标签页 白板` | `/api/health`、`/api/startup`、`/api/fleet` |
-
-另有 6 条 rail 级 journey（`rail-insights|fleet|providers|capabilities|assemblies|settings|trajectory`）
-与 `shell-workspace`，逐页验证「点侧栏 → 页签与面板真的换了 → daemon 数据可读」，并各自留 PNG。
-
-**这套东西自己也被验证过**：
-- `go test ./acceptance` 黑盒跑 `./verify-graph`，断言 help/doctor/未知命令/skill 结构/仓库边界；
-- `go test ./internal/skilldoc` 断言 skill 与 Feature Map 的结构、以及**文档里写的每一条 `verify-graph <cmd>` 都真实存在**
-  （命令面可由 `verify-graph help --json` 自报，所以新增命令不会让这条检查过期）；
-- `go test ./internal/evidence` 断言证据三件套（assertions/summary/manifest）与 `verify`/`pack` 的行为。
+F-01（启动与就绪）是入口本身：`doctor`/`launch`/`status`/`cleanup` 由
+`acceptance/acceptance_test.go` 黑盒覆盖，且每次 `verify --all` 都必须先成功 `launch` 才能开始。
 
 ---
 
-## 3. 证据在哪
+## 4. 证据在哪、怎么复核
 
 ```
-verification/evidence/<runId>/<feature>/          # cleanup 不删，git 不跟踪大文件除外
+verification/evidence/<runId>/<feature>/
   assertions.json      每条断言的 id / expected / actual / evidence 路径
-  summary.json         passed / failed / skippedSteps / 起止时间 / commit
-  manifest.json        目录内除自身外每个文件的 sha256 + bytes
-  *.png                该功能的人可复核截图（-R<窗口 bounds> 区域截图）
-  check-NN.json        对应 /api/* 的请求与响应体
+  summary.json         ok / passed / failed / steps / 起止时间 / commit / lane
   result.json          渲染树文案、access[{name,role,value}]、每步 outcome
-verification/.run/<runId>/                        # 运行态（cleanup 删除）
-  run.json / instance.json   记录 pid、端口、state/graph-home/config 路径
-  state/ graph-home/ home/ tmp/ run/ logs/       隔离三件套 + 日志 + 单实例锁目录
+  manifest.json        目录内除自身外每个文件的 sha256 + bytes
+  *.png                人可复核截图（headless 渲染帧 / 窗口区域 / 托盘区域）
+  check-NN.json        对应 /api/* 的请求与响应体
+  seed.json            （F-04）那一轮真实对话：conversation/task/assistantText/tokens
+  surface.json         （F-15）surface、窗口、元素树
+verification/.run/<runId>/                   # 运行态（cleanup 删除）
 ```
 
-隔离铁律（每 run 一套，已实测与用户实例并存）：`GRAPH_STATE_DIR/GRAPH_CONFIG/GRAPH_HOME` 指向 `.run/<id>`，
-`HOME/TMPDIR/XDG_RUNTIME_DIR` 重定向，`PATH` 首位放 `launchctl` 影子（exit 1，记录调用），窗口用
-`-X mygo.packageIdentifier=dev.graph.verify.<id>` 改名。`cleanup` 只杀 `run.json` 记账且 `ps` 身份核对过的 pid。
+隔离铁律（每 run 一套，已实测与用户实例并存）：
+
+- `GRAPH_STATE_DIR` / `GRAPH_CONFIG` / `GRAPH_HOME` 指向 `.run/<id>`；
+- `HOME` / `TMPDIR` / `XDG_RUNTIME_DIR` 重定向；
+- `PATH` 首位放 `launchctl` 影子（exit 1 并记录调用），`doctor` 会现场证明影子真的生效；
+- 两套窗口构建：`ui motion` 用 `-X mygo.packageIdentifier=dev.graph.verify.<id>` 重编译，单实例锁与 app-support 目录都和用户 Graph 分开；`ui window` 复用 `dist/app` 的 adhoc 构建，但 `HOME` / `GRAPH_STATE_DIR` / `GRAPH_CONFIG` 全部重定向到本 run，窗口与托盘只按本 run 的 window id scope 读取，不按 `Graph` app 名（同名多实例时 `--app Graph` 会 AMBIGUOUS_TARGET）；
+- `cleanup` 只杀 `run.json` 记账且进程身份核对过的 pid；`launch` 用 keeper 父进程避免 app 把 daemon 当 launchd 托管后停掉。
 
 ---
 
-## 4. 已知限制（不粉饰）
+## 5. 失败时你看到什么
 
-1. **F-04 对话渲染、F-15 托盘没有 journey。** F-04 现在有可行工具（`launch --mode execute --seed` 起本地替身模型，
-   会话会得到真的 assistant turn、轨迹记录 input/output token），但没有写成 journey：收敛阶段停止扩展，所以它仍是空白；
-   补的时候要断言「消息流出现该 assistant 文本 + `/trajectory` 记到请求与 token」，不要断言「页面能打开」。
-   F-15 在菜单栏 surface，headless 车道看不见，要走窗口/系统 surface 车道。
-2. **窗口车道的多步连续驱动还残。** `ui window open` 把 appPid 写进 `instance.json`，而 `ui window click|shot` 读
-   `run.json`（那里 appPid 为 null），于是 open 成功后 click 报 `this run has no window process`（窗口其实活着）。
-   修法：两个命令读同一份记录。窗口车道现在只适合单步取证，不适合「点五次」的长journey。
-3. **`checks[].expect` 是深相等，不是子集匹配。** 写 `{"stats":{"agents":0}}` 会因为同时要求
-   `cost/tokens/messages` 相等而判红——而那正是 AGENTS.md 禁止的「比随调度变化的字段」。
-   现在只能对稳定响应用 `expect`，其余只写 `expectStatus`；建议改成子集递归匹配，另留 `expectExact`。
-4. **截图必须带区域。** 本机 `screencapture -x <path>` 在 launchd 后台会话里返回
-   `could not create image from display`，`-x -R<x>,<y>,<w>,<h>` 才成功；窗口被别的 App 遮住时 PNG 拍到的是那个 App，
-   `ui motion shot` 会检查前台 pid 并拒绝把这种图当证据。
-5. **`launchd` 是全局共享资源。** App 的 daemon 监督会用 `bootout/bootstrap gui/<uid>/dev.graph.daemon`，
-   label 全局唯一。不装影子时，一个验证窗口就能把用户正在用的 Graph 顶掉（本轮真的发生过一次，已恢复）。
-   所以 `launchctl` 影子不是可选项，`doctor` 必须能证明它生效。
-6. **孤儿 daemon 只报不清。** `status`/`doctor` 会列出 `.run/` 下没有活 run 记录的 graphd（目前 7 个历史遗留），
-   但按规则不按名字杀进程，`cleanup --orphans` 还没实现。
-7. **headless 车道与真实窗口车道不是同一件事。** headless 走 `go test -overlay` 注入 `app` 包里的真实
-   `shellState.view`，证明「渲染逻辑 + 交互状态机」对，但证明不了「真窗口里点得到」；后者要 `ui window|motion`
-   或 `ui snapshot`。两边的断言文案必须各自实测过再写。
+`verify --all` 失败时 `ok=false`、退出码 1，`data.failures[]` 每条都包含：
+
+- `journey` / `feature` / `path`（用户路径）；
+- `expected` / `actual`（逐字差异）；
+- `failedSteps[]`（第几步、什么动作、实际看到什么）；
+- `failedChecks[]`（API 期望/实际/证据文件）；
+- `evidence`（断言 JSON 与截图路径）；
+- `nextCommand`（只复现这条路径的命令，例如 `verify-graph verify --journey F-09`；window 车道会带
+  `--lane window`。`verify --all` 结束时会停掉实例，所以提示不再钉一个已停止的 `--run`；要复核那次证据就用
+  `runId` 与 `evidence` 路径）。
+
+`error.hint` 直接给出同一条复现命令。单个 journey 也可以用 `--lane window` 复跑到真实窗口里定位。
 
 ---
 
-## 5. 四条驱动车道（选哪条看你要证明什么）
+## 6. v1“已知限制”逐条结论
 
-| 车道 | 命令 | 证明什么 | 前提 |
-| --- | --- | --- | --- |
-| daemon/API | `api GET|POST`、`scenario` 的 `checks` | 服务端契约、状态迁移 | 只要 daemon |
-| headless 渲染 | `verify --journey X`、`ui render X` | 真实 `app` 视图代码的渲染与交互状态机 | 无需窗口/权限 |
-| 真窗口 AX | `ui snapshot`、`ui window open|click|shot|close` | 用户真的点得到、点完真的变（含 PNG） | 辅助功能授权 |
-| 自动化 socket | `ui motion open|tree|press|shot|global|close` | 应用自身驱动的精确交互 + 用户状态指纹 | 独立构建的窗口 |
+| v1 限制 | 本轮结论 |
+| --- | --- |
+| 1. F-04 对话渲染、F-15 托盘没有 journey | **已覆盖**。F-04 用 `instance: execute` + 本地替身模型真的跑完一轮（`seed.json`：assistant 文本、messages=2、turns=1、input 40 / output 10）；F-15 用 `surface: menu-bar-extras` 读取本 run 窗口的托盘并按窗口 scope 打开未命名根，断言两个菜单项。两者都在 `verify --all` 里。 |
+| 2. 窗口车道多步驱动会断 | **已修**。`ui window open` 写 `instance.json`，`click/shot/close` 读同一份记录；daemon 改由 keeper 父进程持有，避免被 app 当成 launchd 托管而停掉。`acceptance` 有 `VERIFY_GRAPH_WINDOW=1` 的多步回归。 |
+| 3. `checks[].expect` 是深相等 | **已改成子集递归匹配**；另留 `expectExact` 做精确匹配。嵌套对象/数组只要求期望字段存在且相等，响应里随调度变化的字段不再让检查翻转；有单测 `TestChecksMatchSubsetsByDefaultAndExactWhenAsked`。 |
+| 4. 截图必须带区域 | **保留为事实并写进 skill**。窗口/托盘截图按 bounds 区域抓；拿不到真实 bounds 时失败并报坐标，不写黑图。 |
+| 5. `launchctl` 是全局共享资源 | **已加固**。窗口 PATH 的 launchctl 影子是必需的；`doctor` 新增 `launchctl-shim` 检查，现场执行并断言它拒绝 `bootstrap`。 |
+| 6. 孤儿 daemon 只报不清 | **已实现** `cleanup --orphans`：只处理 `verification/.run/<id>` 下、无活 run、年龄超过 `--older-than`（默认 120s）、命令行与开工时间都核对的进程；支持 `--dry-run`；有单测与 acceptance 覆盖。 |
+| 7. headless 与真实窗口不是同一件事 | **两条车道都在且都留了证据**：`verify --all` 默认 headless（终版证据见 §1）；`verify --all --lane window` 用同一批 journey 在真实窗口里按 AX `role+name` 驱动，实测 **23/23**（run `6473fb09` + `c0405509`，274 s，104 + 6 个证据文件 `problems: []`）。`acceptance` 的 `TestTheWindowLaneDrivesSeveralStepsOnOneLiveDaemon`（`VERIFY_GRAPH_WINDOW=1`）钉住多步驱动回归。F-15 只能用 surface 车道，这一点写进了 feature 的 Gotchas。 |
 
 ---
 
-## 6. 加一个新功能怎么接
+## 7. 仍然没覆盖的（明确标注，不装成已覆盖）
 
-1. 在 `skills/verify-graph/features/` 写 `F-XX-*.md`，四个 H2 固定：
-   `Sub-features` / `How to get to it (user POV)` / `Driving it with verify-graph` / `Gotchas`；
-2. 在 `features/index.json` 加一条（`id`、`file`、`command`、`evidence`、`api`、`measured`）；
-3. 写 `scenarios/F-XX.json`：`prepare`（造前置数据）→ `steps`（`click`/`waitText`/`assertText`/`assertAccess`/`screenshot`）
-   → `checks`（API 回读）；
-4. `./verify-graph verify --journey F-XX` 跑通，把实际文案与坑写进 `Gotchas`；
-5. `go test ./internal/skilldoc` 会检查文档结构与命令真实性（写不存在的命令会红）。
+- **消息动作条**（复制/赞/踩/朗读/更多）、markdown 表格/代码块、长会话分页：只有 `app/chat_*_test.go` 单测，
+  未进 journey；F-04 的“判过”只声称消息流与 token 链路。
+- **系统通知点击回到会话**：需要先产生真实待答/完成任务，没有稳定、不打扰用户的做法；
+  `notifications.json` 作为证据保留，但不作为 pass 条件。F-15 的“判过”只声称托盘菜单项。
+- **托盘“打开 Graph”再开窗**：会抢焦点，不在 journey 里点；`ui window close` 后 daemon 仍 healthy 由 acceptance 覆盖。
+- **窗口车道**依赖辅助功能授权与屏幕可见性；`doctor` 退出码 3 时是环境不能判，不是产品失败。
+
+这些都在对应 `features/F-XX-*.md` 的 `Gotchas` / “尚未覆盖”里逐条写明。
+
+---
+
+## 8. 加一个新功能怎么接
+
+1. 在 `skills/verify-graph/features/` 写 `F-XX-*.md`（四个 H2：`Sub-features` / `How to get to it (user POV)` /
+   `Driving it with verify-graph` / `Gotchas`）；
+2. 在 `features/index.json` 加一条：`id/file/command/scenario/evidence/api/measured/provenInJourney`；
+3. 写 `scenarios/F-XX.json`：
+   - `instance: "execute"` + `seed`：需要真实 dispatch 时自动起替身模型；
+   - `surface: "menu-bar-extras"`：shell surface（托盘）车道；
+   - `prepare` → `steps`（`click`/`type`/`key`/`waitText`/`assertText`/`assertAccess`/`screenshot`/`open`）
+     → `checks`（`expect` 子集 / `expectExact` 精确 / `expectStatus`）；
+4. `./verify-graph verify --journey F-XX` 跑通，把实测文案与坑写进 `Gotchas`；
+5. `go test ./...` 会检查 skill 结构、文档里出现的每条命令真实存在、证据三件套与命令面契约。
+
+这套东西自己也被验证：`acceptance`（黑盒跑 CLI）、`internal/skilldoc`（skill/Feature Map 结构与命令真实性）、
+`internal/evidence`（manifest 与 `evidence verify`）、`cmd/verify-graph`（信封、断言匹配、seed、诊断、cleanup）。

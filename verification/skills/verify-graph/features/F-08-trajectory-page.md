@@ -23,13 +23,14 @@
 ## Driving it with verify-graph
 
 ```sh
-verification/verify-graph ui click --label "轨迹" --json
-verification/verify-graph ui expect --name "轨迹量化" --role button --json
-verification/verify-graph api --run <run> --get /api/conversations/<id>/trajectory --save evidence/<run>/F-08/trajectory.json
-verification/verify-graph ui screenshot --out evidence/<run>/F-08/trajectory.png
+verification/verify-graph verify --journey F-08
+verification/verify-graph verify --journey F-08 --lane window
+verification/verify-graph evidence verify --run <run>
 ```
 
-判过：12 个分组名全部出现（或空态文案全部出现）；`Token 统计` 的首个大数字 = `trajectory.totalTokens`；`请求浏览` 行数 = `requests[]` 长度。
+本 journey 实测覆盖：轨迹页：点侧栏「轨迹」后出现轨迹量化页签与它的量化面板。
+
+人工复核项（**尚未写进 journey**，不要当成已覆盖）：12 个分组名全部出现（或空态文案全部出现）；`Token 统计` 的首个大数字 = `trajectory.totalTokens`；`请求浏览` 行数 = `requests[]` 长度。
 
 ## Gotchas
 

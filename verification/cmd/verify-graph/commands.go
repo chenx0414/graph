@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"graph/verification/internal/appinstance"
 )
 
 func sha256File(path string) (string, int64, error) {
@@ -72,6 +74,11 @@ func doctorCommand(p paths, args []string) int {
 		ok := err == nil && strings.Contains(string(output), `"accessibility":{"state":"granted"}`)
 		add("agent-desktop", ok, strings.TrimSpace(string(output)), "run the agent-desktop permissions check and grant accessibility")
 	}
+	if ok, detail := proveLaunchctlShim(p); ok {
+		add("launchctl-shim", true, detail, "")
+	} else {
+		add("launchctl-shim", false, detail, "the window lane must shadow launchctl with a refusing shim; a broken shim can bootout the user's Graph daemon")
+	}
 	userState := userGraphStateDir()
 	if console, ok := readConsole(userState); ok {
 		status, _ := newAPIClient(console.URL, readToken(userState)).getJSON("/api/health", nil)
@@ -109,6 +116,52 @@ func doctorCommand(p paths, args []string) int {
 		return 3
 	}
 	return code
+}
+
+// proveLaunchctlShim writes the same refusing launchctl shim the window lane
+// installs, then resolves `launchctl` through that PATH and asserts it exits
+// non-zero with the shim's message. It is the only proof that a window run
+// cannot `launchctl bootout gui/<uid>/dev.graph.daemon` and take the user's
+// running Graph daemon down with it.
+func proveLaunchctlShim(p paths) (bool, string) {
+	tmp, err := os.MkdirTemp(p.RunRoot, ".doctor-shim-")
+	if err != nil {
+		return false, "cannot create a probe directory under " + p.RunRoot + ": " + err.Error()
+	}
+	defer os.RemoveAll(tmp)
+	instance, err := appinstance.New(appinstance.Options{Repo: p.Repo, Root: tmp})
+	if err != nil {
+		return false, err.Error()
+	}
+	if err := os.MkdirAll(instance.ShimDir(), 0o755); err != nil {
+		return false, "cannot create the probe shim directory: " + err.Error()
+	}
+	shim, err := instance.WriteShim()
+	if err != nil {
+		return false, "cannot write the shim: " + err.Error()
+	}
+	path := strings.Join([]string{instance.ShimDir(), "/usr/bin", "/bin", "/usr/sbin", "/sbin", "/opt/homebrew/bin", "/usr/local/bin"}, ":")
+	command := exec.Command("/bin/sh", "-c", "launchctl bootstrap gui/$(id -u)/dev.graph.daemon 2>&1")
+	command.Env = append(os.Environ(), "PATH="+path)
+	output, runErr := command.CombinedOutput()
+	detail := fmt.Sprintf("%s -> exit %v: %s", shim, exitCode(runErr), strings.TrimSpace(string(output)))
+	if runErr == nil {
+		return false, detail + " (the shim did not refuse)"
+	}
+	if !strings.Contains(string(output), "refusing") {
+		return false, detail + " (some other launchctl answered, not the shim)"
+	}
+	return true, detail
+}
+
+func exitCode(err error) any {
+	if err == nil {
+		return 0
+	}
+	if exit, ok := err.(*exec.ExitError); ok {
+		return exit.ExitCode()
+	}
+	return err.Error()
 }
 
 func agentDesktopBinary() string {
@@ -281,12 +334,14 @@ func uiCommand(p paths, args []string) int {
 		return renderCommand(p, flags, reference)
 	case "snapshot":
 		return snapshotCommand(p, flags)
+	case "text", "expect", "click", "screenshot":
+		return uiManualCommand(p, flags, verb)
 	case "window":
 		return uiWindowCommand(p, flags)
 	case "motion":
 		return motionCommand(p, parseFlags(args[1:]))
 	default:
-		return failEnvelope("ui", "", codeUsage, "unknown ui verb "+verb, "use: ui render | ui snapshot | ui window open|click|shot|close | ui motion open|tree|press|shot|close").print()
+		return failEnvelope("ui", "", codeUsage, "unknown ui verb "+verb, "use: ui render | ui text|expect|click|screenshot (real window) | ui snapshot | ui window open|click|shot|close | ui motion ...").print()
 	}
 }
 

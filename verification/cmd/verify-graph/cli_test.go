@@ -274,3 +274,39 @@ func TestATimedOutJourneyIsReportedAsAFailure(t *testing.T) {
 		t.Fatal("a timeout keeps its own exit code")
 	}
 }
+
+func TestChecksMatchSubsetsByDefaultAndExactWhenAsked(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"stats":{"agents":0,"cost":1.5,"tokens":3},"mode":"view","items":[{"id":"a","n":1},{"id":"b","n":2}]}`))
+	}))
+	defer server.Close()
+	stateDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stateDir, "session-token"), []byte("token-1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	meta := runMeta{RunID: "run-1", StateDir: stateDir, Daemon: daemonMeta{URL: server.URL}}
+	checks := []apiCheck{
+		{ID: "nested-subset", Path: "/api/x", ExpectStatus: 200, Expect: map[string]any{"stats": map[string]any{"agents": 0}}},
+		{ID: "dotted-subset", Path: "/api/x", ExpectStatus: 200, Expect: map[string]any{"stats.cost": 1.5}},
+		{ID: "array-subset", Path: "/api/x", ExpectStatus: 200, Expect: map[string]any{"items": []any{map[string]any{"id": "a"}, map[string]any{"id": "b"}}}},
+		{ID: "array-length", Path: "/api/x", ExpectStatus: 200, Expect: map[string]any{"items": []any{map[string]any{"id": "a"}}}},
+		{ID: "exact-scalar", Path: "/api/x", ExpectStatus: 200, ExpectExact: map[string]any{"mode": "view"}},
+		{ID: "exact-nested", Path: "/api/x", ExpectStatus: 200, ExpectExact: map[string]any{"stats": map[string]any{"agents": 0}}},
+		{ID: "missing-key", Path: "/api/x", ExpectStatus: 200, Expect: map[string]any{"nope": 1}},
+	}
+	assertions := runCheckList(meta, checks, t.TempDir(), "check")
+	for index, want := range []bool{true, true, true, false, true, false, false} {
+		if assertions[index].OK != want {
+			t.Fatalf("%s: ok=%v want %v (actual: %s)", assertions[index].ID, assertions[index].OK, want, assertions[index].Actual)
+		}
+	}
+	if !strings.Contains(assertions[3].Actual, "items") {
+		t.Fatalf("an array length mismatch must name the path: %s", assertions[3].Actual)
+	}
+	if !strings.Contains(assertions[5].Actual, "want exactly") {
+		t.Fatalf("an exact mismatch must say it wanted an exact value: %s", assertions[5].Actual)
+	}
+	if !strings.Contains(assertions[6].Actual, "missing") {
+		t.Fatalf("a missing key must say so: %s", assertions[6].Actual)
+	}
+}

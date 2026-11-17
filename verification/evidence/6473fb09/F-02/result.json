@@ -1,0 +1,608 @@
+{
+  "ok": true,
+  "lane": "window",
+  "steps": [
+    {
+      "index": 1,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 白板标题"
+    },
+    {
+      "index": 2,
+      "verb": "clickIf",
+      "ok": true,
+      "detail": "clicked: 标签页 白板"
+    },
+    {
+      "index": 3,
+      "verb": "assertText",
+      "ok": true,
+      "detail": "visible: 轨迹"
+    },
+    {
+      "index": 4,
+      "verb": "assertText",
+      "ok": true,
+      "detail": "visible: 洞察"
+    },
+    {
+      "index": 5,
+      "verb": "assertText",
+      "ok": true,
+      "detail": "visible: 编队"
+    },
+    {
+      "index": 6,
+      "verb": "assertText",
+      "ok": true,
+      "detail": "visible: 供应商"
+    },
+    {
+      "index": 7,
+      "verb": "assertText",
+      "ok": true,
+      "detail": "visible: 资源"
+    },
+    {
+      "index": 8,
+      "verb": "assertText",
+      "ok": true,
+      "detail": "visible: 装配"
+    },
+    {
+      "index": 9,
+      "verb": "assertText",
+      "ok": true,
+      "detail": "visible: 设置"
+    },
+    {
+      "index": 10,
+      "verb": "assertText",
+      "ok": true,
+      "detail": "visible: 白板标题"
+    },
+    {
+      "index": 11,
+      "verb": "click",
+      "ok": true,
+      "detail": "clicked: 洞察"
+    },
+    {
+      "index": 12,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 洞察概览窗口"
+    },
+    {
+      "index": 13,
+      "verb": "assertText",
+      "ok": true,
+      "detail": "visible: 用量趋势窗口"
+    },
+    {
+      "index": 14,
+      "verb": "assertText",
+      "ok": true,
+      "detail": "visible: 会话排行窗口"
+    },
+    {
+      "index": 15,
+      "verb": "screenshot",
+      "ok": true,
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/6473fb09/F-02/nav-insights.png"
+    },
+    {
+      "index": 16,
+      "verb": "click",
+      "ok": true,
+      "detail": "clicked: 供应商"
+    },
+    {
+      "index": 17,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 供应商窗口"
+    },
+    {
+      "index": 18,
+      "verb": "click",
+      "ok": true,
+      "detail": "clicked: 资源"
+    },
+    {
+      "index": 19,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 资源库窗口"
+    },
+    {
+      "index": 20,
+      "verb": "click",
+      "ok": true,
+      "detail": "clicked: 装配"
+    },
+    {
+      "index": 21,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 能力装配窗口"
+    },
+    {
+      "index": 22,
+      "verb": "click",
+      "ok": true,
+      "detail": "clicked: 设置"
+    },
+    {
+      "index": 23,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 运行设置窗口"
+    },
+    {
+      "index": 24,
+      "verb": "click",
+      "ok": true,
+      "detail": "clicked: 编队"
+    },
+    {
+      "index": 25,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 编队总览窗口"
+    },
+    {
+      "index": 26,
+      "verb": "screenshot",
+      "ok": true,
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/6473fb09/F-02/nav-fleet.png"
+    },
+    {
+      "index": 27,
+      "verb": "click",
+      "ok": true,
+      "detail": "clicked: 轨迹"
+    },
+    {
+      "index": 28,
+      "verb": "screenshot",
+      "ok": true,
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/6473fb09/F-02/nav-trajectory.png"
+    },
+    {
+      "index": 29,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 标签页 轨迹量化"
+    },
+    {
+      "index": 30,
+      "verb": "assertText",
+      "ok": true,
+      "detail": "visible: 上下文统计窗口"
+    },
+    {
+      "index": 31,
+      "verb": "assertText",
+      "ok": true,
+      "detail": "visible: Token 统计窗口"
+    },
+    {
+      "index": 32,
+      "verb": "screenshot",
+      "ok": true,
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/6473fb09/F-02/nav-trajectory.png"
+    }
+  ],
+  "texts": [
+    "Graph",
+    "轨迹",
+    "洞察",
+    "编队",
+    "供应商",
+    "资源",
+    "装配",
+    "设置",
+    "会话列表标题",
+    "对话标题",
+    "白板标题",
+    "标签页 白板",
+    "标签页 洞察概览",
+    "标签页 供应商",
+    "标签页 资源库",
+    "标签页 能力装配",
+    "标签页 运行设置",
+    "标签页 编队",
+    "标签页 轨迹量化",
+    "主区域卡片",
+    "main agent 会话",
+    "还没有项目会话。",
+    "从左侧选择一个项目",
+    "上下文统计窗口",
+    "上下文统计窗口",
+    "上下文统计",
+    "先打开一个会话",
+    "Token 统计窗口",
+    "Token 统计窗口",
+    "Token 统计",
+    "先打开一个会话",
+    "当前上下文窗口",
+    "当前上下文窗口",
+    "当前上下文",
+    "先打开一个会话",
+    "耗时统计窗口",
+    "耗时统计窗口",
+    "耗时统计",
+    "先打开一个会话",
+    "上下文趋势窗口",
+    "上下文趋势窗口",
+    "上下文趋势",
+    "先打开一个会话",
+    "上下文事件窗口",
+    "上下文事件窗口",
+    "上下文事件",
+    "先打开一个会话",
+    "命令执行窗口",
+    "命令执行窗口",
+    "命令执行",
+    "先打开一个会话",
+    "文件活动窗口",
+    "文件活动窗口",
+    "文件活动",
+    "先打开一个会话",
+    "Token 组成窗口",
+    "Token 组成窗口",
+    "Token 组成",
+    "先打开一个会话",
+    "请求浏览窗口",
+    "请求浏览窗口",
+    "请求浏览",
+    "先打开一个会话",
+    "Agent 网络窗口",
+    "Agent 网络窗口",
+    "Agent 网络",
+    "先打开一个会话",
+    "请求详情窗口",
+    "请求详情窗口",
+    "请求详情",
+    "先打开一个会话",
+    "Close",
+    "Full Screen",
+    "Minimize"
+  ],
+  "frames": [
+    "/Users/macmini/workspace/13-Graph/verification/evidence/6473fb09/F-02/nav-insights.png",
+    "/Users/macmini/workspace/13-Graph/verification/evidence/6473fb09/F-02/nav-fleet.png",
+    "/Users/macmini/workspace/13-Graph/verification/evidence/6473fb09/F-02/nav-trajectory.png",
+    "/Users/macmini/workspace/13-Graph/verification/evidence/6473fb09/F-02/nav-trajectory.png"
+  ],
+  "access": [
+    {
+      "name": "Graph",
+      "role": "window"
+    },
+    {
+      "name": "轨迹",
+      "role": "button"
+    },
+    {
+      "name": "洞察",
+      "role": "button"
+    },
+    {
+      "name": "编队",
+      "role": "button"
+    },
+    {
+      "name": "供应商",
+      "role": "button"
+    },
+    {
+      "name": "资源",
+      "role": "button"
+    },
+    {
+      "name": "装配",
+      "role": "button"
+    },
+    {
+      "name": "设置",
+      "role": "button"
+    },
+    {
+      "name": "会话列表标题",
+      "role": "group"
+    },
+    {
+      "name": "对话标题",
+      "role": "group"
+    },
+    {
+      "name": "白板标题",
+      "role": "group"
+    },
+    {
+      "name": "标签页 白板",
+      "role": "button"
+    },
+    {
+      "name": "标签页 洞察概览",
+      "role": "button"
+    },
+    {
+      "name": "标签页 供应商",
+      "role": "button"
+    },
+    {
+      "name": "标签页 资源库",
+      "role": "button"
+    },
+    {
+      "name": "标签页 能力装配",
+      "role": "button"
+    },
+    {
+      "name": "标签页 运行设置",
+      "role": "button"
+    },
+    {
+      "name": "标签页 编队",
+      "role": "button"
+    },
+    {
+      "name": "标签页 轨迹量化",
+      "role": "button"
+    },
+    {
+      "name": "主区域卡片",
+      "role": "group"
+    },
+    {
+      "name": "main agent 会话",
+      "role": "button"
+    },
+    {
+      "name": "还没有项目会话。",
+      "role": "statictext",
+      "value": "还没有项目会话。"
+    },
+    {
+      "name": "",
+      "role": "table"
+    },
+    {
+      "name": "从左侧选择一个项目",
+      "role": "statictext",
+      "value": "从左侧选择一个项目"
+    },
+    {
+      "name": "上下文统计窗口",
+      "role": "group"
+    },
+    {
+      "name": "上下文统计窗口",
+      "role": "group"
+    },
+    {
+      "name": "上下文统计",
+      "role": "statictext",
+      "value": "上下文统计"
+    },
+    {
+      "name": "先打开一个会话",
+      "role": "statictext",
+      "value": "先打开一个会话"
+    },
+    {
+      "name": "Token 统计窗口",
+      "role": "group"
+    },
+    {
+      "name": "Token 统计窗口",
+      "role": "group"
+    },
+    {
+      "name": "Token 统计",
+      "role": "statictext",
+      "value": "Token 统计"
+    },
+    {
+      "name": "先打开一个会话",
+      "role": "statictext",
+      "value": "先打开一个会话"
+    },
+    {
+      "name": "当前上下文窗口",
+      "role": "group"
+    },
+    {
+      "name": "当前上下文窗口",
+      "role": "group"
+    },
+    {
+      "name": "当前上下文",
+      "role": "statictext",
+      "value": "当前上下文"
+    },
+    {
+      "name": "先打开一个会话",
+      "role": "statictext",
+      "value": "先打开一个会话"
+    },
+    {
+      "name": "耗时统计窗口",
+      "role": "group"
+    },
+    {
+      "name": "耗时统计窗口",
+      "role": "group"
+    },
+    {
+      "name": "耗时统计",
+      "role": "statictext",
+      "value": "耗时统计"
+    },
+    {
+      "name": "先打开一个会话",
+      "role": "statictext",
+      "value": "先打开一个会话"
+    },
+    {
+      "name": "上下文趋势窗口",
+      "role": "group"
+    },
+    {
+      "name": "上下文趋势窗口",
+      "role": "group"
+    },
+    {
+      "name": "上下文趋势",
+      "role": "statictext",
+      "value": "上下文趋势"
+    },
+    {
+      "name": "先打开一个会话",
+      "role": "statictext",
+      "value": "先打开一个会话"
+    },
+    {
+      "name": "上下文事件窗口",
+      "role": "group"
+    },
+    {
+      "name": "上下文事件窗口",
+      "role": "group"
+    },
+    {
+      "name": "上下文事件",
+      "role": "statictext",
+      "value": "上下文事件"
+    },
+    {
+      "name": "先打开一个会话",
+      "role": "statictext",
+      "value": "先打开一个会话"
+    },
+    {
+      "name": "命令执行窗口",
+      "role": "group"
+    },
+    {
+      "name": "命令执行窗口",
+      "role": "group"
+    },
+    {
+      "name": "命令执行",
+      "role": "statictext",
+      "value": "命令执行"
+    },
+    {
+      "name": "先打开一个会话",
+      "role": "statictext",
+      "value": "先打开一个会话"
+    },
+    {
+      "name": "文件活动窗口",
+      "role": "group"
+    },
+    {
+      "name": "文件活动窗口",
+      "role": "group"
+    },
+    {
+      "name": "文件活动",
+      "role": "statictext",
+      "value": "文件活动"
+    },
+    {
+      "name": "先打开一个会话",
+      "role": "statictext",
+      "value": "先打开一个会话"
+    },
+    {
+      "name": "Token 组成窗口",
+      "role": "group"
+    },
+    {
+      "name": "Token 组成窗口",
+      "role": "group"
+    },
+    {
+      "name": "Token 组成",
+      "role": "statictext",
+      "value": "Token 组成"
+    },
+    {
+      "name": "先打开一个会话",
+      "role": "statictext",
+      "value": "先打开一个会话"
+    },
+    {
+      "name": "请求浏览窗口",
+      "role": "group"
+    },
+    {
+      "name": "请求浏览窗口",
+      "role": "group"
+    },
+    {
+      "name": "请求浏览",
+      "role": "statictext",
+      "value": "请求浏览"
+    },
+    {
+      "name": "先打开一个会话",
+      "role": "statictext",
+      "value": "先打开一个会话"
+    },
+    {
+      "name": "Agent 网络窗口",
+      "role": "group"
+    },
+    {
+      "name": "Agent 网络窗口",
+      "role": "group"
+    },
+    {
+      "name": "Agent 网络",
+      "role": "statictext",
+      "value": "Agent 网络"
+    },
+    {
+      "name": "先打开一个会话",
+      "role": "statictext",
+      "value": "先打开一个会话"
+    },
+    {
+      "name": "请求详情窗口",
+      "role": "group"
+    },
+    {
+      "name": "请求详情窗口",
+      "role": "group"
+    },
+    {
+      "name": "请求详情",
+      "role": "statictext",
+      "value": "请求详情"
+    },
+    {
+      "name": "先打开一个会话",
+      "role": "statictext",
+      "value": "先打开一个会话"
+    },
+    {
+      "name": "Close",
+      "role": "button"
+    },
+    {
+      "name": "Full Screen",
+      "role": "button"
+    },
+    {
+      "name": "Minimize",
+      "role": "button"
+    }
+  ]
+}

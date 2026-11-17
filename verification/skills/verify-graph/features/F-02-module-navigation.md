@@ -25,17 +25,12 @@
 ## Driving it with verify-graph
 
 ```sh
-# 一次跑完七页（journey 文件 verification/scenarios/F-02-nav.json，32 步）
 verification/verify-graph verify --journey F-02-nav
-# 只渲染不判（看它到底渲染出什么）
-verification/verify-graph ui render F-02-nav
-# 看证据
-verification/verify-graph evidence list --run <run>
+verification/verify-graph verify --journey F-02-nav --lane window
+verification/verify-graph evidence verify --run <run>
 ```
 
-判过（已实测）：`verify --journey F-02-nav` 的 32 步全 pass —— 七个 rail 按钮文字都在；点「洞察」后 `洞察概览窗口`/`用量趋势窗口`/`会话排行窗口` 出现；「供应商」→`供应商窗口`；「资源」→`资源库窗口`；「装配」→`能力装配窗口`；「设置」→`运行设置窗口`；「编队」→`编队总览窗口`；「轨迹」→页签 `标签页 轨迹量化` + `上下文统计窗口`、`Token 统计窗口`。证据：`evidence/<run>/F-02/{nav-insights,nav-fleet,nav-trajectory}.png` + `result.json` + `summary.json`。
-
-**页面形态（写断言前必须知道）**：每个模块是「一个页签 + 若干面板窗口」，页签文案是 `boardPanelTitle(kind)`（如 `轨迹量化`、`洞察概览`），面板是 `<面板标题>窗口`。轨迹页有 12 个面板，所以**没有**「轨迹量化窗口」这个东西——它只有页签 `标签页 轨迹量化` 和 12 个面板窗口。
+本 journey 实测覆盖：侧栏七项逐个点开，每一页必须出现它自己的面板窗口（不是上一页残留，也不是白屏）。
 
 ## Gotchas
 

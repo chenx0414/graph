@@ -21,13 +21,14 @@
 ## Driving it with verify-graph
 
 ```sh
-verification/verify-graph ui click --label "装配" --json
-verification/verify-graph api --run <run> --get /api/catalog --save evidence/<run>/F-13/catalog.json
-verification/verify-graph ui expect --text "把资源库里的技能、指令、MCP 与 Pi 扩展装配成 Agent 角色" --json
-verification/verify-graph ui screenshot --out evidence/<run>/F-13/assemblies.png
+verification/verify-graph verify --journey F-13
+verification/verify-graph verify --journey F-13 --lane window
+verification/verify-graph evidence verify --run <run>
 ```
 
-判过：`装配 <name>` 行数 = `/api/catalog` 里 combinations 数；空态时 `还没有装配。` 存在。新建/编译属写操作，只在隔离实例上跑，且断言 `GET /api/catalog` 回读出现新 id。
+本 journey 实测覆盖：装配页：能力装配面板出现，装配依赖的定义目录可读。
+
+人工复核项（**尚未写进 journey**，不要当成已覆盖）：`装配 <name>` 行数 = `/api/catalog` 里 combinations 数；空态时 `还没有装配。` 存在。新建/编译属写操作，只在隔离实例上跑，且断言 `GET /api/catalog` 回读出现新 id。
 
 ## Gotchas
 

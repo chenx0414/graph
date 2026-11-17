@@ -1,0 +1,23 @@
+[
+  {
+    "id": "check.health",
+    "ok": true,
+    "expected": "status 200; ok contains true",
+    "actual": "status 200",
+    "evidence": "/Users/macmini/workspace/13-Graph/verification/evidence/6473fb09/F-16/check-01.json"
+  },
+  {
+    "id": "check.startup-view",
+    "ok": true,
+    "expected": "status 200; mode contains \"view\"",
+    "actual": "status 200",
+    "evidence": "/Users/macmini/workspace/13-Graph/verification/evidence/6473fb09/F-16/check-02.json"
+  },
+  {
+    "id": "check.fleet-empty",
+    "ok": true,
+    "expected": "status 200",
+    "actual": "status 200",
+    "evidence": "/Users/macmini/workspace/13-Graph/verification/evidence/6473fb09/F-16/check-03.json"
+  }
+]

@@ -1,0 +1,12 @@
+{
+  "body": {
+    "items": []
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/capabilities/config",
+    "expectStatus": 200,
+    "id": "capabilities.config"
+  },
+  "status": 200
+}

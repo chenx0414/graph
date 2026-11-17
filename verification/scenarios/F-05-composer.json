@@ -9,6 +9,7 @@
     { "id": "prepare.history-before", "method": "GET", "path": "/api/conversations", "expectStatus": 200 }
   ],
   "steps": [
+    { "verb": "waitText", "text": "verify", "timeoutMs": 15000 },
     { "verb": "click", "name": "verify" },
     { "verb": "waitText", "text": "消息", "timeoutMs": 12000 },
     { "verb": "assertText", "text": "模型" },

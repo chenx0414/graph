@@ -23,18 +23,18 @@
 ## Driving it with verify-graph
 
 ```sh
-verification/verify-graph ui click --label "编队" --json
-verification/verify-graph api --run <run> --get /api/fleet --save evidence/<run>/F-10/fleet.json
-verification/verify-graph ui expect --name "编队总览" --role group --json
-verification/verify-graph ui click --role button --label "编队 Agent Main" --json
-verification/verify-graph ui screenshot --out evidence/<run>/F-10/fleet.png
+verification/verify-graph verify --journey F-10
+verification/verify-graph verify --journey F-10 --lane window
+verification/verify-graph evidence verify --run <run>
 ```
 
-判过：`编队 Agent *` 按钮数量 = `fleet.agents.length`；KPI 六项与 `fleet.stats` 一致；点 Agent 后详情区出现该 agent id 的最近运行字段。
+本 journey 实测覆盖：编队页：点侧栏「编队」后出现编队页签与面板，/api/fleet 可读。空实例的 stats 计数（agents/cost/messages）随调度漂移，所以这里不把它钉进断言 —— 钉住它们会让这个检查在负载变化时翻转。
+
+人工复核项（**尚未写进 journey**，不要当成已覆盖）：`编队 Agent *` 按钮数量 = `fleet.agents.length`；KPI 六项与 `fleet.stats` 一致；点 Agent 后详情区出现该 agent id 的最近运行字段。
 
 ## Gotchas
 
 - 隔离实例通常 `stats.agents = 0`：Agent 卡片断言只在有数据时成立；否则判「空态 + 网络面板不崩」。
-- `编队 Agent Main` 这类名字带前缀，且同名可能多个：用 `--index` 或先取 `fleet.agents[i].name` 再精确匹配。
+- `编队 Agent Main` 这类名字带前缀，且同名可能多个：先取 `fleet.agents[i].name`，再用 `ui click --name <完整名字>` 精确匹配；不要用前缀。
 - 网络面板是无限画布，节点位置是布局计算的结果：只断言节点/边数量与存在性，不断言坐标（坐标会随窗口尺寸变）。
 - `board_network_panel` 有缓存（历史上出现过「按 store 指针地址串味」的假回归）：断言前先 `api` 回读一次，别依赖上一次截图。

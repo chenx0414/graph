@@ -1,0 +1,282 @@
+{
+  "ok": true,
+  "lane": "window",
+  "steps": [
+    {
+      "index": 1,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 装配"
+    },
+    {
+      "index": 2,
+      "verb": "click",
+      "ok": true,
+      "detail": "clicked: 装配"
+    },
+    {
+      "index": 3,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 能力装配窗口"
+    },
+    {
+      "index": 4,
+      "verb": "screenshot",
+      "ok": true,
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/6473fb09/F-13/assemblies.png"
+    }
+  ],
+  "texts": [
+    "Graph",
+    "轨迹",
+    "洞察",
+    "编队",
+    "供应商",
+    "资源",
+    "装配",
+    "设置",
+    "会话列表标题",
+    "对话标题",
+    "对话标题名",
+    "白板标题",
+    "标签页 白板",
+    "标签页 洞察概览",
+    "标签页 供应商",
+    "标签页 资源库",
+    "标签页 能力装配",
+    "标签页 运行设置",
+    "标签页 编队",
+    "标签页 轨迹量化",
+    "主区域卡片",
+    "main agent 会话",
+    "verify",
+    "verify",
+    "还没有对话",
+    "在下面输入第一条消息",
+    "这个会话还没有可显示的对话。",
+    "消息",
+    "附件",
+    "模型",
+    "语音",
+    "发送",
+    "能力装配窗口",
+    "能力装配窗口",
+    "能力装配",
+    "使用",
+    "/",
+    "能力装配",
+    "打开装配文件",
+    "刷新",
+    "把资源库里的技能、指令、MCP 与 Pi 扩展装配成 Agent 角色；编译后得到可被节点引用的 definition。",
+    "…/graph-home/agent-combinations.json",
+    "装配 Atlas_main",
+    "Close",
+    "Full Screen",
+    "Minimize"
+  ],
+  "frames": [
+    "/Users/macmini/workspace/13-Graph/verification/evidence/6473fb09/F-13/assemblies.png"
+  ],
+  "access": [
+    {
+      "name": "Graph",
+      "role": "window"
+    },
+    {
+      "name": "轨迹",
+      "role": "button"
+    },
+    {
+      "name": "洞察",
+      "role": "button"
+    },
+    {
+      "name": "编队",
+      "role": "button"
+    },
+    {
+      "name": "供应商",
+      "role": "button"
+    },
+    {
+      "name": "资源",
+      "role": "button"
+    },
+    {
+      "name": "装配",
+      "role": "button"
+    },
+    {
+      "name": "设置",
+      "role": "button"
+    },
+    {
+      "name": "会话列表标题",
+      "role": "group"
+    },
+    {
+      "name": "对话标题",
+      "role": "group"
+    },
+    {
+      "name": "对话标题名",
+      "role": "statictext",
+      "value": "对话标题名"
+    },
+    {
+      "name": "白板标题",
+      "role": "group"
+    },
+    {
+      "name": "标签页 白板",
+      "role": "button"
+    },
+    {
+      "name": "标签页 洞察概览",
+      "role": "button"
+    },
+    {
+      "name": "标签页 供应商",
+      "role": "button"
+    },
+    {
+      "name": "标签页 资源库",
+      "role": "button"
+    },
+    {
+      "name": "标签页 能力装配",
+      "role": "button"
+    },
+    {
+      "name": "标签页 运行设置",
+      "role": "button"
+    },
+    {
+      "name": "标签页 编队",
+      "role": "button"
+    },
+    {
+      "name": "标签页 轨迹量化",
+      "role": "button"
+    },
+    {
+      "name": "主区域卡片",
+      "role": "group"
+    },
+    {
+      "name": "main agent 会话",
+      "role": "button"
+    },
+    {
+      "name": "",
+      "role": "table"
+    },
+    {
+      "name": "verify",
+      "role": "row"
+    },
+    {
+      "name": "verify",
+      "role": "button"
+    },
+    {
+      "name": "还没有对话",
+      "role": "statictext",
+      "value": "还没有对话"
+    },
+    {
+      "name": "在下面输入第一条消息",
+      "role": "statictext",
+      "value": "在下面输入第一条消息"
+    },
+    {
+      "name": "这个会话还没有可显示的对话。",
+      "role": "statictext",
+      "value": "这个会话还没有可显示的对话。"
+    },
+    {
+      "name": "消息",
+      "role": "textfield",
+      "value": "验证用文本 verify-graph 123"
+    },
+    {
+      "name": "附件",
+      "role": "button"
+    },
+    {
+      "name": "模型",
+      "role": "button"
+    },
+    {
+      "name": "语音",
+      "role": "group"
+    },
+    {
+      "name": "发送",
+      "role": "button"
+    },
+    {
+      "name": "能力装配窗口",
+      "role": "group"
+    },
+    {
+      "name": "能力装配窗口",
+      "role": "group"
+    },
+    {
+      "name": "能力装配",
+      "role": "statictext",
+      "value": "能力装配"
+    },
+    {
+      "name": "使用",
+      "role": "statictext",
+      "value": "使用"
+    },
+    {
+      "name": "/",
+      "role": "statictext",
+      "value": "/"
+    },
+    {
+      "name": "能力装配",
+      "role": "statictext",
+      "value": "能力装配"
+    },
+    {
+      "name": "打开装配文件",
+      "role": "button"
+    },
+    {
+      "name": "刷新",
+      "role": "button"
+    },
+    {
+      "name": "把资源库里的技能、指令、MCP 与 Pi 扩展装配成 Agent 角色；编译后得到可被节点引用的 definition。",
+      "role": "statictext",
+      "value": "把资源库里的技能、指令、MCP 与 Pi 扩展装配成 Agent 角色；编译后得到可被节点引用的 definition。"
+    },
+    {
+      "name": "…/graph-home/agent-combinations.json",
+      "role": "statictext",
+      "value": "…/graph-home/agent-combinations.json"
+    },
+    {
+      "name": "装配 Atlas_main",
+      "role": "button"
+    },
+    {
+      "name": "Close",
+      "role": "button"
+    },
+    {
+      "name": "Full Screen",
+      "role": "button"
+    },
+    {
+      "name": "Minimize",
+      "role": "button"
+    }
+  ]
+}

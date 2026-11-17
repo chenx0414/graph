@@ -21,13 +21,14 @@
 ## Driving it with verify-graph
 
 ```sh
-verification/verify-graph ui click --label "资源" --json
-verification/verify-graph api --run <run> --get /api/catalog --save evidence/<run>/F-12/catalog.json
-verification/verify-graph ui expect --name "资源库" --json
-verification/verify-graph ui screenshot --out evidence/<run>/F-12/resources.png
+verification/verify-graph verify --journey F-12
+verification/verify-graph verify --journey F-12 --lane window
+verification/verify-graph evidence verify --run <run>
 ```
 
-判过：`资源 <name>` 行集合 = `/api/catalog` 里 resources 的 name 集合（允许分类折叠时按分类逐个数）。
+本 journey 实测覆盖：资源页：资源库面板出现，能力目录可读。
+
+人工复核项（**尚未写进 journey**，不要当成已覆盖）：`资源 <name>` 行集合 = `/api/catalog` 里 resources 的 name 集合（允许分类折叠时按分类逐个数）。
 
 ## Gotchas
 

@@ -1,0 +1,10 @@
+{
+  "body": [],
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks",
+    "expectStatus": 200,
+    "id": "check.tasks-source"
+  },
+  "status": 200
+}

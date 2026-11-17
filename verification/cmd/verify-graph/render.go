@@ -31,19 +31,33 @@ type apiCheck struct {
 	Body         any            `json:"body,omitempty"`
 	ExpectStatus int            `json:"expectStatus,omitempty"`
 	Expect       map[string]any `json:"expect,omitempty"`
+	ExpectExact  map[string]any `json:"expectExact,omitempty"`
 	ID           string         `json:"id,omitempty"`
 	Capture      string         `json:"capture,omitempty"`
 }
 
 type journey struct {
-	ID          string     `json:"id"`
-	Feature     string     `json:"feature"`
-	Description string     `json:"description,omitempty"`
-	Width       int        `json:"width,omitempty"`
-	Height      int        `json:"height,omitempty"`
-	Prepare     []apiCheck `json:"prepare,omitempty"`
-	Steps       []step     `json:"steps"`
-	Checks      []apiCheck `json:"checks,omitempty"`
+	ID          string      `json:"id"`
+	Feature     string      `json:"feature"`
+	Description string      `json:"description,omitempty"`
+	Width       int         `json:"width,omitempty"`
+	Height      int         `json:"height,omitempty"`
+	Instance    string      `json:"instance,omitempty"`
+	Surface     string      `json:"surface,omitempty"`
+	Seed        *seedPrompt `json:"seed,omitempty"`
+	Prepare     []apiCheck  `json:"prepare,omitempty"`
+	Steps       []step      `json:"steps"`
+	Checks      []apiCheck  `json:"checks,omitempty"`
+}
+
+// mode is the instance a journey needs. A journey that seeds a conversation
+// needs an execute-capable daemon (view-only refuses dispatch); everything else
+// runs on the default view instance so journeys stay cheap and read-only.
+func (j journey) mode() string {
+	if strings.EqualFold(strings.TrimSpace(j.Instance), "execute") || j.Seed != nil {
+		return "execute"
+	}
+	return "view"
 }
 
 type stepOutcome struct {
@@ -56,6 +70,7 @@ type stepOutcome struct {
 
 type journeyResult struct {
 	OK       bool          `json:"ok"`
+	Lane     string        `json:"lane,omitempty"`
 	Error    string        `json:"error,omitempty"`
 	Steps    []stepOutcome `json:"steps"`
 	Texts    []string      `json:"texts,omitempty"`

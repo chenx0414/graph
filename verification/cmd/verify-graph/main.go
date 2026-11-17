@@ -22,7 +22,7 @@ Commands:
   scenario                   Run one journey file against an isolated instance
   verify                     Run journeys (--all or --journey) and write evidence
   evidence                   List or verify evidence manifests
-  cleanup                    Stop and remove a run (evidence is kept)
+  cleanup                    Stop and remove a run, or --orphans for daemons left by abandoned runs (evidence is kept)
   help                       Print this help (--json for the command table)
   version                    Print the CLI version
 
@@ -35,6 +35,8 @@ Flags:
   --width, --height          Headless render size (default 1440x900)
   --timeout <seconds>        Command timeout (default 120)
   --dry-run                  Print what would happen without side effects
+  --orphans                  With cleanup: stop daemons under verification/.run that no live run record owns
+  --older-than <seconds>     With cleanup --orphans: minimum process age before it counts as abandoned (default 120)
   --keep                     Keep the run directory after verify
   --json                     JSON output (default)
 
@@ -98,7 +100,7 @@ type flags struct {
 func parseFlags(args []string, extraBoolFlags ...string) flags {
 	flags := flags{values: map[string]string{}, lists: map[string][]string{}, bools: map[string]bool{}}
 	bools := map[string]bool{}
-	for _, flagName := range []string{"dry-run", "all", "keep", "json", "text", "quiet", "full", "attach", "seed", "rebuild"} {
+	for _, flagName := range []string{"dry-run", "all", "keep", "json", "text", "quiet", "full", "attach", "seed", "rebuild", "orphans"} {
 		bools[flagName] = true
 	}
 	for _, flagName := range extraBoolFlags {

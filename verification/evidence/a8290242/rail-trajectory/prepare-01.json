@@ -1,0 +1,19 @@
+{
+  "body": {
+    "conversationId": "7cf94071-87d7-4bbe-81b3-043a1c244f2f",
+    "projectId": "verify",
+    "role": "project",
+    "taskId": "6577850a-cae7-4d0d-ad16-0c630b834c12"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/projects/verify/thread",
+    "body": {
+      "requestId": "vg-trajectory-thread",
+      "text": "trajectory seed"
+    },
+    "expectStatus": 200,
+    "id": "trajectory.prepare-thread"
+  },
+  "status": 200
+}

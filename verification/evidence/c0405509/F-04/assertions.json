@@ -1,0 +1,23 @@
+[
+  {
+    "id": "seed.conversation",
+    "ok": true,
+    "expected": "one project conversation whose assistant turn completed with tokens: 请用一句话说明你已就绪。",
+    "actual": "conversation=44d6a9ff-e657-4a3c-bc4a-08554effde3a messages=2 turns=1 tokens=40/10 elapsed=305ms assistant=\"已就绪。这条回答来自验证用的替身模型，不消耗真实额度。\"",
+    "evidence": "/Users/macmini/workspace/13-Graph/verification/evidence/c0405509/F-04/seed.json"
+  },
+  {
+    "id": "conversation.instance",
+    "ok": true,
+    "expected": "status 200; mode contains \"execute\"",
+    "actual": "status 200",
+    "evidence": "/Users/macmini/workspace/13-Graph/verification/evidence/c0405509/F-04/check-01.json"
+  },
+  {
+    "id": "conversation.health",
+    "ok": true,
+    "expected": "status 200; ok contains true",
+    "actual": "status 200",
+    "evidence": "/Users/macmini/workspace/13-Graph/verification/evidence/c0405509/F-04/check-02.json"
+  }
+]

@@ -10,14 +10,26 @@ import (
 )
 
 func LiveCommands(skillDir string) ([]string, error) {
-	entry := filepath.Join(filepath.Dir(skillDir), "verify-graph")
-	command := exec.Command(entry, "help", "--json")
-	command.Dir = filepath.Dir(skillDir)
-	output, err := command.Output()
-	if err != nil {
-		return nil, fmt.Errorf("skilldoc: %s help --json failed: %w", entry, err)
+	// The skill directory is <verification>/skills/verify-graph and the wrapper
+	// lives two levels up at <verification>/verify-graph. Looking only one level
+	// up pointed at <verification>/skills/verify-graph, so the repository test
+	// silently skipped instead of proving the documented command surface.
+	candidates := []string{
+		filepath.Join(filepath.Dir(filepath.Dir(skillDir)), "verify-graph"),
+		filepath.Join(filepath.Dir(skillDir), "verify-graph"),
 	}
-	return parseCommandSurface(output)
+	var last error
+	for _, entry := range candidates {
+		command := exec.Command(entry, "help", "--json")
+		command.Dir = filepath.Dir(entry)
+		output, err := command.Output()
+		if err != nil {
+			last = fmt.Errorf("skilldoc: %s help --json failed: %w", entry, err)
+			continue
+		}
+		return parseCommandSurface(output)
+	}
+	return nil, last
 }
 
 func parseCommandSurface(payload []byte) ([]string, error) {

@@ -39,12 +39,17 @@ func verifyCommand(p paths, args []string) int {
 		return failEnvelope("verify", "", codeUsage, "no journey selected",
 			"run: verify-graph verify --all, or verify-graph verify --journey rail-settings").print()
 	}
+	if lane := strings.ToLower(strings.TrimSpace(flags.value("lane", "headless"))); lane == "window" {
+		return verifyWindowLane(p, flags, references)
+	} else if lane != "headless" {
+		return failEnvelope("verify", lane, codeUsage, "unknown lane "+lane,
+			"use --lane headless (view code + interaction state machine) or --lane window (the real window through accessibility)").print()
+	}
 	started := time.Now()
+	values := []journey{}
 	summaries := []map[string]any{}
 	failures := []string{}
-	notes := []string{}
-	artifacts := []artifact{}
-	runID := flags.value("run", "")
+	failureViews := []map[string]any{}
 	for _, reference := range references {
 		value, err := resolveJourney(p, reference)
 		if err != nil {
@@ -52,68 +57,118 @@ func verifyCommand(p paths, args []string) int {
 			summaries = append(summaries, map[string]any{"journey": reference, "ok": false, "error": err.Error()})
 			continue
 		}
-		meta, err := ensureRunForVerify(p, runID, flags.has("dry-run"))
+		values = append(values, value)
+	}
+	order := []string{}
+	groups := map[string][]journey{}
+	for _, value := range values {
+		mode := value.mode()
+		if _, seen := groups[mode]; !seen {
+			order = append(order, mode)
+		}
+		groups[mode] = append(groups[mode], value)
+	}
+	notes := []string{}
+	artifacts := []artifact{}
+	pinned := flags.value("run", "")
+	runIDs := []string{}
+	runViews := []map[string]any{}
+	for _, mode := range order {
+		meta, err := ensureRunForMode(p, pinned, mode, flags.has("dry-run"))
 		if err != nil {
-			return failEnvelope("verify", "headless", codeDaemonDown, err.Error(), "run: verify-graph launch").print()
+			return failEnvelope("verify", "headless", codeDaemonDown, err.Error(), "run: verify-graph launch --mode "+mode).print()
 		}
-		if runID == meta.RunID && !meta.isZero() && !runAlive(meta) {
-			meta, err = ensureRunForVerify(p, "", false)
+		if pinned == meta.RunID && !meta.isZero() && !runAlive(meta) {
+			meta, err = ensureRunForMode(p, "", mode, false)
 			if err != nil {
-				return failEnvelope("verify", "headless", codeDaemonDown, "the run died and could not be replaced: "+err.Error(), "run: verify-graph launch").print()
+				return failEnvelope("verify", "headless", codeDaemonDown, "the run died and could not be replaced: "+err.Error(), "run: verify-graph launch --mode "+mode).print()
 			}
-			notes = append(notes, fmt.Sprintf("%s: the previous instance was stopped by another process; relaunched as %s", value.ID, meta.RunID))
+			notes = append(notes, fmt.Sprintf("%s lane: the previous instance was stopped by another process; relaunched as %s", mode, meta.RunID))
 		}
-		runID = meta.RunID
-		outDir := filepath.Join(p.EvidenceRoot, meta.RunID, value.Feature)
-		assertions := runPrepares(p, meta, value, outDir)
-		result := runJourneyHeadless(p, meta, value, outDir)
-		assertions = append(assertions, runChecks(p, meta, value, outDir)...)
-		for _, item := range assertions[:len(value.Prepare)] {
-			if !item.OK {
+		runIDs = append(runIDs, meta.RunID)
+		groupPassed := 0
+		for _, value := range groups[mode] {
+			outDir := filepath.Join(p.EvidenceRoot, meta.RunID, value.Feature)
+			assertions, seeded := prepareJourney(p, meta, value, outDir)
+			result := journeyResult{OK: true}
+			if seeded {
+				if value.Surface != "" {
+					result = runJourneySurface(p, meta, value, outDir, nil)
+				} else {
+					result = runJourneyHeadless(p, meta, value, outDir)
+				}
+			} else {
 				result.OK = false
-				result.Error = firstNonEmpty(result.Error, "prepare step failed: "+item.ID)
+				result.Error = "the seeded conversation failed before the UI could be driven"
 			}
-		}
-		_, written := writeEvidence(p, meta, value, result, assertions, outDir, started)
-		artifacts = append(artifacts, written...)
-		ok := result.OK
-		for _, item := range assertions {
-			if !item.OK {
-				ok = false
+			assertions = append(assertions, runChecks(p, meta, value, outDir)...)
+			for _, item := range assertions[:len(value.Prepare)] {
+				if !item.OK {
+					result.OK = false
+					result.Error = firstNonEmpty(result.Error, "prepare step failed: "+item.ID)
+				}
 			}
+			_, written := writeEvidence(p, meta, value, result, assertions, outDir, started)
+			artifacts = append(artifacts, written...)
+			ok := result.OK
+			for _, item := range assertions {
+				if !item.OK {
+					ok = false
+				}
+			}
+			summary := map[string]any{
+				"journey": value.ID, "feature": value.Feature, "ok": ok, "instance": mode,
+				"steps": len(result.Steps), "checks": len(assertions),
+				"error": result.Error, "evidence": outDir,
+			}
+			if ok {
+				groupPassed++
+			} else {
+				failure := describeFailure(meta, value, result, assertions, outDir)
+				summary["failure"] = failure
+				failureViews = append(failureViews, failure)
+				failures = append(failures, failure["message"].(string))
+			}
+			summaries = append(summaries, summary)
 		}
-		summaries = append(summaries, map[string]any{
-			"journey": value.ID, "feature": value.Feature, "ok": ok,
-			"steps": len(result.Steps), "checks": len(assertions),
-			"error": result.Error, "evidence": outDir,
+		runViews = append(runViews, map[string]any{
+			"runId": meta.RunID, "mode": mode, "journeys": len(groups[mode]),
+			"passed": groupPassed, "evidence": filepath.Join(p.EvidenceRoot, meta.RunID),
 		})
-		if !ok {
-			failures = append(failures, fmt.Sprintf("%s: %s", value.ID, firstNonEmpty(result.Error, "an API check failed")))
-		}
+	}
+	primary := ""
+	if len(runIDs) > 0 {
+		primary = runIDs[0]
 	}
 	envelopeResult := okEnvelope("verify", "headless", map[string]any{
 		"journeys": summaries, "passed": countTrue(summaries), "failed": len(summaries) - countTrue(summaries),
-		"evidenceRoot": filepath.Join(p.EvidenceRoot, runID), "durationMs": time.Since(started).Milliseconds(),
-		"relaunches": notes,
+		"evidenceRoot": filepath.Join(p.EvidenceRoot, primary), "durationMs": time.Since(started).Milliseconds(),
+		"relaunches": notes, "runs": runViews, "failures": failureViews,
 	})
 	for _, note := range notes {
 		envelopeResult.warn("%s", note)
 	}
-	envelopeResult.RunID = runID
+	envelopeResult.RunID = primary
 	for _, item := range artifacts {
 		envelopeResult.add(item)
 	}
 	if len(failures) > 0 {
 		envelopeResult.OK = false
+		hint := "read data.failures: each entry names the journey, expected, actual, evidence and the exact nextCommand"
+		if next, ok := failureViews[0]["nextCommand"].(string); ok && next != "" {
+			hint = "rerun one path with: " + next + "; read data.failures for expected/actual/evidence"
+		}
 		envelopeResult.Error = &cliError{
 			Code:    codeScenarioFailed,
 			Message: strings.Join(failures, "; "),
-			Hint:    "open the evidence directory above: summary.json names the failed assertion, assertions.json carries expected/actual",
+			Hint:    hint,
 		}
 	}
 	code := envelopeResult.print()
-	if !flags.has("keep") && !flags.has("run") {
-		stopRunQuietly(p, runID)
+	if !flags.has("keep") && pinned == "" {
+		for _, id := range runIDs {
+			stopRunQuietly(p, id)
+		}
 	}
 	return code
 }
@@ -149,6 +204,45 @@ func ensureRunForVerify(p paths, runID string, dryRun bool) (runMeta, error) {
 	return readRunMeta(p, result.RunID)
 }
 
+// ensureRunForMode picks the instance a journey group needs. A pinned --run is
+// always honoured; otherwise the execute lane gets its own isolated daemon with
+// the stub model attached, so seeded journeys never touch real credentials.
+func ensureRunForMode(p paths, runID, mode string, dryRun bool) (runMeta, error) {
+	if mode != "execute" || runID != "" {
+		return ensureRunForVerify(p, runID, dryRun)
+	}
+	result, err := launch(p, launchOptions{Mode: "execute", Seed: true, Timeout: 40 * time.Second, DryRun: dryRun})
+	if err != nil {
+		return runMeta{}, err
+	}
+	if !result.OK {
+		return runMeta{}, fmt.Errorf("%s", result.Error.Message)
+	}
+	return readRunMeta(p, result.RunID)
+}
+
+// prepareJourney runs the journey's API fixtures and, when the journey asks for
+// one, seeds a real conversation through the stub model. It reports whether the
+// UI lane may run: a failed seed means there is nothing to render.
+func prepareJourney(p paths, meta runMeta, value journey, outDir string) ([]assertion, bool) {
+	assertions := runPrepares(p, meta, value, outDir)
+	if value.Seed == nil {
+		return assertions, true
+	}
+	outcome, seedErr := seedConversation(meta, *value.Seed)
+	path, writeErr := writeSeedEvidence(outDir, outcome, *value.Seed, seedErr)
+	if writeErr != nil && seedErr == nil {
+		seedErr = writeErr
+	}
+	item := seedAssertion(outcome, *value.Seed, path)
+	if seedErr != nil {
+		item.OK = false
+		item.Actual = seedErr.Error()
+	}
+	assertions = append(assertions, item)
+	return assertions, item.OK
+}
+
 func runOneJourney(p paths, flags flags, reference, command string) int {
 	meta, err := readRunMeta(p, flags.value("run", ""))
 	if err != nil {
@@ -163,8 +257,18 @@ func runOneJourney(p paths, flags flags, reference, command string) int {
 	}
 	started := time.Now()
 	outDir := filepath.Join(p.EvidenceRoot, meta.RunID, value.Feature)
-	assertions := runPrepares(p, meta, value, outDir)
-	result := runJourneyHeadless(p, meta, value, outDir)
+	assertions, seeded := prepareJourney(p, meta, value, outDir)
+	result := journeyResult{OK: true}
+	if seeded {
+		if value.Surface != "" {
+			result = runJourneySurface(p, meta, value, outDir, nil)
+		} else {
+			result = runJourneyHeadless(p, meta, value, outDir)
+		}
+	} else {
+		result.OK = false
+		result.Error = "the seeded conversation failed before the UI could be driven"
+	}
 	assertions = append(assertions, runChecks(p, meta, value, outDir)...)
 	_, written := writeEvidence(p, meta, value, result, assertions, outDir, started)
 	envelopeResult := okEnvelope(command, "headless", map[string]any{
@@ -196,6 +300,9 @@ func stopRunQuietly(p paths, runID string) {
 	if err != nil {
 		return
 	}
+	// The stub model is a child of this CLI, not of the daemon: stopping the
+	// daemon alone would leave a loopback listener behind after `verify --all`.
+	_ = stopSeed(meta)
 	_ = stopRun(p, meta)
 }
 
@@ -282,6 +389,19 @@ func evidenceCommand(p paths, args []string) int {
 func cleanupCommand(p paths, args []string) int {
 	flags := parseFlags(args)
 	dryRun := flags.has("dry-run")
+	if flags.has("orphans") && !flags.has("all") && flags.value("run", "") == "" {
+		minAge := time.Duration(flags.number("older-than", 120)) * time.Second
+		report, failures := cleanupOrphansReliable(p, dryRun, minAge)
+		result := okEnvelope("cleanup", "", map[string]any{
+			"orphans": report, "olderThanSeconds": int(minAge.Seconds()), "evidenceKept": p.EvidenceRoot,
+		})
+		if len(failures) > 0 {
+			result.OK = false
+			result.Error = &cliError{Code: "cleanup-failed", Message: strings.Join(failures, "; "),
+				Hint: "a pid may have been reused; confirm with: ps -o pid,lstart,command -p <pid>"}
+		}
+		return result.print()
+	}
 	targets := []runMeta{}
 	if flags.has("all") {
 		runs, err := listRuns(p)
@@ -318,12 +438,15 @@ func cleanupCommand(p paths, args []string) int {
 			report = append(report, entry)
 			continue
 		}
-		base := filepath.Dir(meta.StateDir)
-		for _, name := range []string{"state", "graph-home", "home", "tmp", "runtime", "bin", "logs", "overlay", "project", "graph.config.json"} {
-			_ = os.RemoveAll(filepath.Join(base, name))
+		if notes := stopRunExtras(p, meta); len(notes) > 0 {
+			entry["stoppedProcesses"] = notes
 		}
-		_ = os.Remove(filepath.Join(base, "run.json"))
-		_ = os.Remove(filepath.Join(base, seedRecordName))
+		if err := removeRunDir(p, meta.RunID); err != nil {
+			failures = append(failures, err.Error())
+			entry["error"] = err.Error()
+			report = append(report, entry)
+			continue
+		}
 		entry["removed"] = true
 		report = append(report, entry)
 	}

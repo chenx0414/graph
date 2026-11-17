@@ -1,0 +1,584 @@
+{
+  "ok": true,
+  "lane": "window",
+  "steps": [
+    {
+      "index": 1,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 编队"
+    },
+    {
+      "index": 2,
+      "verb": "click",
+      "ok": true,
+      "detail": "clicked: 编队"
+    },
+    {
+      "index": 3,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 标签页 编队"
+    },
+    {
+      "index": 4,
+      "verb": "assertText",
+      "ok": true,
+      "detail": "visible: 编队"
+    },
+    {
+      "index": 5,
+      "verb": "screenshot",
+      "ok": true,
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/6473fb09/F-10/fleet.png"
+    }
+  ],
+  "texts": [
+    "Graph",
+    "轨迹",
+    "洞察",
+    "编队",
+    "供应商",
+    "资源",
+    "装配",
+    "设置",
+    "会话列表标题",
+    "对话标题",
+    "对话标题名",
+    "白板标题",
+    "标签页 白板",
+    "标签页 洞察概览",
+    "标签页 供应商",
+    "标签页 资源库",
+    "标签页 能力装配",
+    "标签页 运行设置",
+    "标签页 编队",
+    "标签页 轨迹量化",
+    "主区域卡片",
+    "main agent 会话",
+    "verify",
+    "verify",
+    "还没有对话",
+    "在下面输入第一条消息",
+    "这个会话还没有可显示的对话。",
+    "消息",
+    "附件",
+    "模型",
+    "语音",
+    "发送",
+    "编队总览窗口",
+    "编队总览窗口",
+    "编队总览",
+    "在新标签页打开",
+    "移除",
+    "1",
+    "Agent 数",
+    "0",
+    "运行中",
+    "0",
+    "工作项",
+    "0",
+    "消息数",
+    "0",
+    "Tokens",
+    "$0",
+    "成本",
+    "编队范围 · 共 1 个 Agent · 1 个项目分组",
+    "刷新编队",
+    "调整分区",
+    "Agent 网络窗口",
+    "Agent 网络窗口",
+    "Agent 网络",
+    "在新标签页打开",
+    "移除",
+    "编队还没有可展示的 Agent。",
+    "调整分区",
+    "跨 Agent 协作窗口",
+    "跨 Agent 协作窗口",
+    "跨 Agent 协作",
+    "在新标签页打开",
+    "移除",
+    "只看 全部",
+    "只看 verify",
+    "11-17 15:44",
+    "其他 · verify · conversation.created",
+    "调整分区",
+    "协作任务窗口",
+    "协作任务窗口",
+    "协作任务",
+    "在新标签页打开",
+    "移除",
+    "还没有协作任务。",
+    "调整分区",
+    "事件检查窗口",
+    "事件检查窗口",
+    "事件检查",
+    "在新标签页打开",
+    "移除",
+    "筛选 全部",
+    "筛选 委派",
+    "筛选 派生",
+    "筛选 投递",
+    "筛选 结果",
+    "筛选 问题",
+    "筛选 其他",
+    "conversation.created",
+    "11-17 15:44",
+    "verify · conversation.created",
+    "调整分区",
+    "共享产物窗口",
+    "共享产物窗口",
+    "共享产物",
+    "在新标签页打开",
+    "移除",
+    "还没有共享产物。",
+    "Close",
+    "Full Screen",
+    "Minimize"
+  ],
+  "frames": [
+    "/Users/macmini/workspace/13-Graph/verification/evidence/6473fb09/F-10/fleet.png"
+  ],
+  "access": [
+    {
+      "name": "Graph",
+      "role": "window"
+    },
+    {
+      "name": "轨迹",
+      "role": "button"
+    },
+    {
+      "name": "洞察",
+      "role": "button"
+    },
+    {
+      "name": "编队",
+      "role": "button"
+    },
+    {
+      "name": "供应商",
+      "role": "button"
+    },
+    {
+      "name": "资源",
+      "role": "button"
+    },
+    {
+      "name": "装配",
+      "role": "button"
+    },
+    {
+      "name": "设置",
+      "role": "button"
+    },
+    {
+      "name": "会话列表标题",
+      "role": "group"
+    },
+    {
+      "name": "对话标题",
+      "role": "group"
+    },
+    {
+      "name": "对话标题名",
+      "role": "statictext",
+      "value": "对话标题名"
+    },
+    {
+      "name": "白板标题",
+      "role": "group"
+    },
+    {
+      "name": "标签页 白板",
+      "role": "button"
+    },
+    {
+      "name": "标签页 洞察概览",
+      "role": "button"
+    },
+    {
+      "name": "标签页 供应商",
+      "role": "button"
+    },
+    {
+      "name": "标签页 资源库",
+      "role": "button"
+    },
+    {
+      "name": "标签页 能力装配",
+      "role": "button"
+    },
+    {
+      "name": "标签页 运行设置",
+      "role": "button"
+    },
+    {
+      "name": "标签页 编队",
+      "role": "button"
+    },
+    {
+      "name": "标签页 轨迹量化",
+      "role": "button"
+    },
+    {
+      "name": "主区域卡片",
+      "role": "group"
+    },
+    {
+      "name": "main agent 会话",
+      "role": "button"
+    },
+    {
+      "name": "",
+      "role": "table"
+    },
+    {
+      "name": "verify",
+      "role": "row"
+    },
+    {
+      "name": "verify",
+      "role": "button"
+    },
+    {
+      "name": "还没有对话",
+      "role": "statictext",
+      "value": "还没有对话"
+    },
+    {
+      "name": "在下面输入第一条消息",
+      "role": "statictext",
+      "value": "在下面输入第一条消息"
+    },
+    {
+      "name": "这个会话还没有可显示的对话。",
+      "role": "statictext",
+      "value": "这个会话还没有可显示的对话。"
+    },
+    {
+      "name": "消息",
+      "role": "textfield",
+      "value": "验证用文本 verify-graph 123"
+    },
+    {
+      "name": "附件",
+      "role": "button"
+    },
+    {
+      "name": "模型",
+      "role": "button"
+    },
+    {
+      "name": "语音",
+      "role": "group"
+    },
+    {
+      "name": "发送",
+      "role": "button"
+    },
+    {
+      "name": "编队总览窗口",
+      "role": "group"
+    },
+    {
+      "name": "编队总览窗口",
+      "role": "group"
+    },
+    {
+      "name": "编队总览",
+      "role": "statictext",
+      "value": "编队总览"
+    },
+    {
+      "name": "在新标签页打开",
+      "role": "button"
+    },
+    {
+      "name": "移除",
+      "role": "button"
+    },
+    {
+      "name": "1",
+      "role": "statictext",
+      "value": "1"
+    },
+    {
+      "name": "Agent 数",
+      "role": "statictext",
+      "value": "Agent 数"
+    },
+    {
+      "name": "0",
+      "role": "statictext",
+      "value": "0"
+    },
+    {
+      "name": "运行中",
+      "role": "statictext",
+      "value": "运行中"
+    },
+    {
+      "name": "0",
+      "role": "statictext",
+      "value": "0"
+    },
+    {
+      "name": "工作项",
+      "role": "statictext",
+      "value": "工作项"
+    },
+    {
+      "name": "0",
+      "role": "statictext",
+      "value": "0"
+    },
+    {
+      "name": "消息数",
+      "role": "statictext",
+      "value": "消息数"
+    },
+    {
+      "name": "0",
+      "role": "statictext",
+      "value": "0"
+    },
+    {
+      "name": "Tokens",
+      "role": "statictext",
+      "value": "Tokens"
+    },
+    {
+      "name": "$0",
+      "role": "statictext",
+      "value": "$0"
+    },
+    {
+      "name": "成本",
+      "role": "statictext",
+      "value": "成本"
+    },
+    {
+      "name": "编队范围 · 共 1 个 Agent · 1 个项目分组",
+      "role": "statictext",
+      "value": "编队范围 · 共 1 个 Agent · 1 个项目分组"
+    },
+    {
+      "name": "刷新编队",
+      "role": "button"
+    },
+    {
+      "name": "调整分区",
+      "role": "group"
+    },
+    {
+      "name": "Agent 网络窗口",
+      "role": "group"
+    },
+    {
+      "name": "Agent 网络窗口",
+      "role": "group"
+    },
+    {
+      "name": "Agent 网络",
+      "role": "statictext",
+      "value": "Agent 网络"
+    },
+    {
+      "name": "在新标签页打开",
+      "role": "button"
+    },
+    {
+      "name": "移除",
+      "role": "button"
+    },
+    {
+      "name": "编队还没有可展示的 Agent。",
+      "role": "statictext",
+      "value": "编队还没有可展示的 Agent。"
+    },
+    {
+      "name": "调整分区",
+      "role": "group"
+    },
+    {
+      "name": "跨 Agent 协作窗口",
+      "role": "group"
+    },
+    {
+      "name": "跨 Agent 协作窗口",
+      "role": "group"
+    },
+    {
+      "name": "跨 Agent 协作",
+      "role": "statictext",
+      "value": "跨 Agent 协作"
+    },
+    {
+      "name": "在新标签页打开",
+      "role": "button"
+    },
+    {
+      "name": "移除",
+      "role": "button"
+    },
+    {
+      "name": "只看 全部",
+      "role": "button"
+    },
+    {
+      "name": "只看 verify",
+      "role": "button"
+    },
+    {
+      "name": "11-17 15:44",
+      "role": "statictext",
+      "value": "11-17 15:44"
+    },
+    {
+      "name": "其他 · verify · conversation.created",
+      "role": "statictext",
+      "value": "其他 · verify · conversation.created"
+    },
+    {
+      "name": "调整分区",
+      "role": "group"
+    },
+    {
+      "name": "协作任务窗口",
+      "role": "group"
+    },
+    {
+      "name": "协作任务窗口",
+      "role": "group"
+    },
+    {
+      "name": "协作任务",
+      "role": "statictext",
+      "value": "协作任务"
+    },
+    {
+      "name": "在新标签页打开",
+      "role": "button"
+    },
+    {
+      "name": "移除",
+      "role": "button"
+    },
+    {
+      "name": "还没有协作任务。",
+      "role": "statictext",
+      "value": "还没有协作任务。"
+    },
+    {
+      "name": "调整分区",
+      "role": "group"
+    },
+    {
+      "name": "事件检查窗口",
+      "role": "group"
+    },
+    {
+      "name": "事件检查窗口",
+      "role": "group"
+    },
+    {
+      "name": "事件检查",
+      "role": "statictext",
+      "value": "事件检查"
+    },
+    {
+      "name": "在新标签页打开",
+      "role": "button"
+    },
+    {
+      "name": "移除",
+      "role": "button"
+    },
+    {
+      "name": "筛选 全部",
+      "role": "button"
+    },
+    {
+      "name": "筛选 委派",
+      "role": "button"
+    },
+    {
+      "name": "筛选 派生",
+      "role": "button"
+    },
+    {
+      "name": "筛选 投递",
+      "role": "button"
+    },
+    {
+      "name": "筛选 结果",
+      "role": "button"
+    },
+    {
+      "name": "筛选 问题",
+      "role": "button"
+    },
+    {
+      "name": "筛选 其他",
+      "role": "button"
+    },
+    {
+      "name": "conversation.created",
+      "role": "statictext",
+      "value": "conversation.created"
+    },
+    {
+      "name": "11-17 15:44",
+      "role": "statictext",
+      "value": "11-17 15:44"
+    },
+    {
+      "name": "verify · conversation.created",
+      "role": "statictext",
+      "value": "verify · conversation.created"
+    },
+    {
+      "name": "调整分区",
+      "role": "group"
+    },
+    {
+      "name": "共享产物窗口",
+      "role": "group"
+    },
+    {
+      "name": "共享产物窗口",
+      "role": "group"
+    },
+    {
+      "name": "共享产物",
+      "role": "statictext",
+      "value": "共享产物"
+    },
+    {
+      "name": "在新标签页打开",
+      "role": "button"
+    },
+    {
+      "name": "移除",
+      "role": "button"
+    },
+    {
+      "name": "还没有共享产物。",
+      "role": "statictext",
+      "value": "还没有共享产物。"
+    },
+    {
+      "name": "Close",
+      "role": "button"
+    },
+    {
+      "name": "Full Screen",
+      "role": "button"
+    },
+    {
+      "name": "Minimize",
+      "role": "button"
+    }
+  ]
+}

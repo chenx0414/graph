@@ -1,0 +1,26 @@
+{
+  "_graph": "graph:allow-large-file: raw daemon response kept as evidence; generated data, not source",
+  "body": {
+    "configured": true,
+    "effectiveRevision": 0,
+    "enabledModelCount": 1,
+    "mode": "execute",
+    "modelCount": 1,
+    "source": {
+      "branch": "main",
+      "commit": "4ff55e16cc6605753ecb58524e8df259ec11fa82",
+      "dirty": true,
+      "root": "/Users/macmini/workspace/13-Graph"
+    }
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/startup",
+    "expectStatus": 200,
+    "expect": {
+      "mode": "execute"
+    },
+    "id": "conversation.instance"
+  },
+  "status": 200
+}

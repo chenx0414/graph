@@ -1,0 +1,18 @@
+{
+  "id": "F-15-tray",
+  "feature": "F-15",
+  "description": "真实窗口进程的菜单栏 extras：托盘菜单里必须有 打开 Graph 与 退出 Graph。只读取和打开菜单，绝不点击那两个菜单项（退出会杀掉被测实例）。",
+  "instance": "view",
+  "surface": "menu-bar-extras",
+  "steps": [
+    { "verb": "open", "timeoutMs": 20000 },
+    { "verb": "assertText", "text": "打开 Graph" },
+    { "verb": "assertText", "text": "退出 Graph" },
+    { "verb": "screenshot", "path": "tray.png" },
+    { "verb": "assertAccess", "name": "打开 Graph", "role": "menuitem" },
+    { "verb": "assertAccess", "name": "退出 Graph", "role": "menuitem" }
+  ],
+  "checks": [
+    { "id": "check.tasks-source", "method": "GET", "path": "/api/tasks", "expectStatus": 200 }
+  ]
+}

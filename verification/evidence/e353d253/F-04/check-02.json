@@ -1,0 +1,15 @@
+{
+  "body": {
+    "ok": true
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/health",
+    "expectStatus": 200,
+    "expect": {
+      "ok": true
+    },
+    "id": "conversation.health"
+  },
+  "status": 200
+}

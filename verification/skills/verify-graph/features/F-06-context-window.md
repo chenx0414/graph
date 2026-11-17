@@ -20,13 +20,14 @@
 ## Driving it with verify-graph
 
 ```sh
-verification/verify-graph ui click --role button --label "System Prompt" --json
-verification/verify-graph ui expect --text "实际发出（最近一次模型请求）" --json
-verification/verify-graph ui screenshot --out evidence/<run>/F-06/system-prompt.png
-verification/verify-graph api --run <run> --get "/api/tasks/<task>/nodes/<node>/prompt" --save evidence/<run>/F-06/prompt.json
+verification/verify-graph verify --journey F-06
+verification/verify-graph verify --journey F-06 --lane window
+verification/verify-graph evidence verify --run <run>
 ```
 
-判过：AX 里 `System Prompt` 页签正文与 `prompt.json` 里对应字段逐字一致（取 sha256 比较，不落正文）；`工具声明` 页签条数 = API `tools[]` 长度。
+本 journey 实测覆盖：上下文窗口在默认白板上；三个页签按钮（上下文 / System Prompt / 工具声明）在可访问树里可点，内容来自当前会话。空实例没有会话时只显示窗口本身，这是预期空态。
+
+人工复核项（**尚未写进 journey**，不要当成已覆盖）：AX 里 `System Prompt` 页签正文与 `prompt.json` 里对应字段逐字一致（取 sha256 比较，不落正文）；`工具声明` 页签条数 = API `tools[]` 长度。
 
 ## Gotchas
 

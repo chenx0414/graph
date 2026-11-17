@@ -277,3 +277,39 @@ func TestStopRefusesAProcessItDidNotStart(t *testing.T) {
 		t.Fatal("stopping a process whose command line does not carry the run root must be refused")
 	}
 }
+
+func TestUnnamedInteractiveNodesStayClickableButNeverMatchText(t *testing.T) {
+	// A menu bar extra's root menuitem has a ref but no name; dropping it made
+	// F-15 impossible to drive. Empty names must still never satisfy Contains,
+	// because strings.Contains(name, "") is always true.
+	raw := []byte(`{"role":"menu","children":[
+		{"role":"menuitem","ref_id":"@x:e1","children":[
+			{"role":"menu","name":"Graph","children":[
+				{"role":"menuitem","name":"打开 Graph","ref_id":"@x:e2"}
+			]}
+		]}
+	]}`)
+	nodes := []Node{}
+	collectNodes(raw, &nodes)
+	foundUnnamed := false
+	for _, node := range nodes {
+		if node.Name == "" && node.Ref == "@x:e1" {
+			foundUnnamed = true
+		}
+	}
+	if !foundUnnamed {
+		t.Fatalf("the unnamed menu item was dropped: %+v", nodes)
+	}
+	snapshot := Snapshot{Nodes: nodes}
+	if snapshot.Contains("") {
+		t.Fatal("an empty needle must never match every node")
+	}
+	if !snapshot.Contains("打开 Graph") {
+		t.Fatal("named menu items are still searchable")
+	}
+	for _, name := range snapshot.Names() {
+		if name == "" {
+			t.Fatalf("Names() must not include empty entries: %+v", snapshot.Names())
+		}
+	}
+}

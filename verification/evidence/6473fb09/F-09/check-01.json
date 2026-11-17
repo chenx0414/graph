@@ -1,0 +1,39 @@
+{
+  "_graph": "graph:allow-large-file: raw daemon response kept as evidence; generated data, not source",
+  "body": {
+    "generatedAt": 1794901501693,
+    "models": [],
+    "overview": {
+      "costMicros": 0,
+      "steps": 0,
+      "toolCalls": 0,
+      "toolErrors": 0,
+      "turns": 0
+    },
+    "scope": {
+      "kind": "global"
+    },
+    "timing": {
+      "modelCalls": 0,
+      "modelMs": 0,
+      "toolCalls": 0,
+      "toolMs": 0
+    },
+    "tokens": {
+      "cacheHitRate": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0,
+      "total": 0
+    },
+    "tools": []
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/insights",
+    "expectStatus": 200,
+    "id": "insights.readable"
+  },
+  "status": 200
+}

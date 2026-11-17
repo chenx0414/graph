@@ -1,9 +1,10 @@
 {
+  "_graph": "graph:allow-large-file: the Feature Map is one machine-readable index; every consumer looks up a feature by id and splits would break that contract. The bulk is one row per user-visible feature (drive/evidence/api/measured), not prose that can be moved into its own document.",
   "schema": 1,
   "app": "Graph",
   "surface": "native window (Go + MyGo), daemon HTTP on 127.0.0.1",
   "cli": "verification/verify-graph",
-  "commandsRef": "coordination/CONTRACT.md#命令面（只增不删）",
+  "commandsRef": "../../SKILL.md#drive",
   "evidenceRoot": "verification/evidence/<run>",
   "runRoot": "verification/.run/<run>",
   "proofStandard": "每条 feature 的答案要用三件套：AX 快照（界面）+ daemon API/文件回读（状态）+ PNG 截图（人可复核）；缺一件记 evidence_partial，不得判 pass。",
@@ -22,6 +23,21 @@
     "questions",
     "tasks"
   ],
+  "uncoveredReasons": {
+    "overview": "概览面板不在默认白板上，必须用户手动开面板；F-07 已证明页签/面板的开关与布局，app/board_view_test.go 证明卡片内容；没有稳定的用户入口能只靠 headless 断言它的业务文案，故不把「打开一个用户没默认打开的面板」冒充功能验证。",
+    "conversation": "对话信息面板（/api/conversations/{id} 的侧栏视图）不在默认白板上；F-04 已逐字证明消息流与 token，F-03 已回读会话列表，这个面板只是同一份数据的另一种投影，所以未单列 journey。",
+    "history": "向上滚动分页（GET /history?before=）需要 1500+ 条消息才会触发；生成这么多消息会让每次 verify 变成几分钟并且只证明分页器，app/history_test.go 已覆盖 loader 的去重与边界，故不放进快速套件。",
+    "trajectory-request-detail": "需要轨迹页里选中一次请求并展开详情；F-04 的替身模型只产生一轮、且默认轨迹页不选请求。真窗口里点选深层面板属于探索而非稳定用户路径，app/trajectory_*_test.go 覆盖渲染。",
+    "trajectory-composition": "轨迹构成需要真实的工具调用/上下文分段；替身模型只回文本、不调工具，空态断言不能证明构成图正确。app/trajectory_context_overview_test.go 覆盖数据映射。",
+    "trajectory-events": "事件面板需要真实运行事件流；替身模型一轮对话只产生少量事件，无法稳定断言事件种类，空态也不算证明。",
+    "trajectory-commands": "命令面板需要 agent 真的执行过命令；验证实例被设计为不跑真实命令（安全边界），所以只能单测覆盖渲染。",
+    "trajectory-files": "文件面板需要 agent 真的读写文件；同上，验证实例不做真实写操作。",
+    "fleet-artifacts": "共享产物需要真实子 agent 产出的 artifact；替身模型一轮不会产生，app/artifacts_test.go 覆盖渲染与链接。",
+    "artifact": "artifact 查看器需要一条真实产物；没有确定性 fixture，且制造它意味着在隔离实例里跑真实工作。",
+    "models": "模型配置面板不在默认白板上；/api/startup 的 modelCount 与 /api/config 已由 F-14/F-04 回读，面板渲染由 app 单测覆盖。",
+    "questions": "待答问题面板需要 agent 真的停下来提问；替身模型不会提问，没有稳定、不打扰用户的方式制造一条待答问题，app 单测覆盖渲染。",
+    "tasks": "任务看板面板需要真实任务；F-15 已回读 /api/tasks 200，F-10 已覆盖编队任务数据；面板本身靠 app 单测，不在快速套件里制造真实任务。"
+  },
   "features": [
     {
       "id": "F-01",
@@ -34,10 +50,9 @@
       ],
       "entry": "verify-graph launch / doctor",
       "drive": [
-        "verification/verify-graph build",
-        "verification/verify-graph launch --json",
-        "verification/verify-graph status --run <run>",
-        "verification/verify-graph doctor --run <run>",
+        "verification/verify-graph doctor",
+        "verification/verify-graph launch",
+        "verification/verify-graph status",
         "verification/verify-graph cleanup --run <run>"
       ],
       "evidence": [
@@ -49,7 +64,10 @@
         "/api/health",
         "/api/startup",
         "/api/conversations"
-      ]
+      ],
+      "coverage": "cli-self-check",
+      "provenInJourney": true,
+      "measured": "doctor/launch/status/cleanup 自身被 acceptance 黑盒测试覆盖；每次 verify --all 也先经 launch 才可能开始"
     },
     {
       "id": "F-02",
@@ -63,8 +81,8 @@
       "entry": "左侧 rail 七个图标",
       "drive": [
         "verification/verify-graph verify --journey F-02-nav",
-        "verification/verify-graph ui render F-02-nav",
-        "verification/verify-graph evidence list --run <run>"
+        "verification/verify-graph verify --journey F-02-nav --lane window",
+        "verification/verify-graph evidence verify --run <run>"
       ],
       "evidence": [
         "evidence/<run>/F-02/*.png",
@@ -93,8 +111,10 @@
       ],
       "scenario": "scenarios/F-02-nav.json",
       "command": "verification/verify-graph verify --journey F-02-nav",
-      "measured": "32 steps pass：七个 rail 文字 + 每页页签/面板窗口；轨迹页是 12 个面板窗口 + `标签页 轨迹量化`",
-      "provenInJourney": true
+      "measured": "32 步：七个 rail 文字 + 每页自己的页签/面板窗口；无 API 检查",
+      "provenInJourney": true,
+      "windowCommand": "verification/verify-graph verify --journey F-02-nav --lane window",
+      "coverage": "headless+window"
     },
     {
       "id": "F-03",
@@ -109,8 +129,8 @@
       "entry": "左栏 main agent 会话卡片 + 会话行",
       "drive": [
         "verification/verify-graph verify --journey F-03-conversations",
-        "verification/verify-graph ui render F-03-conversations",
-        "verification/verify-graph evidence list --run <run>"
+        "verification/verify-graph verify --journey F-03-conversations --lane window",
+        "verification/verify-graph evidence verify --run <run>"
       ],
       "evidence": [
         "evidence/<run>/F-03/*.png",
@@ -127,8 +147,10 @@
       ],
       "scenario": "scenarios/F-03-conversations.json",
       "command": "verification/verify-graph verify --journey F-03-conversations",
-      "measured": "5 steps pass：会话列表标题 + main agent 卡片在无项目会话时仍渲染；/api/conversations 200",
-      "provenInJourney": true
+      "measured": "5 步 + 1 个 API 检查：会话列表标题 + main agent 卡片；/api/conversations 200",
+      "provenInJourney": true,
+      "windowCommand": "verification/verify-graph verify --journey F-03-conversations --lane window",
+      "coverage": "headless+window"
     },
     {
       "id": "F-04",
@@ -142,22 +164,31 @@
       ],
       "entry": "中栏消息流",
       "drive": [
-        "verification/verify-graph api --run <run> --get /api/conversations/<id> --save evidence/<run>/F-04/conversation.json",
-        "verification/verify-graph ui expect --text \"复制\" --role button --json"
+        "verification/verify-graph verify --journey F-04-conversation",
+        "verification/verify-graph verify --journey F-04-conversation --lane window",
+        "verification/verify-graph evidence verify --run <run>"
       ],
       "evidence": [
-        "evidence/<run>/F-04/conversation.json",
-        "evidence/<run>/F-04/messages.png"
+        "evidence/<run>/F-04/conversation.png",
+        "evidence/<run>/F-04/result.json",
+        "evidence/<run>/F-04/assertions.json"
       ],
       "api": [
         "/api/conversations/{id}",
-        "/api/conversations/{id}/history"
+        "/api/conversations/{id}/history",
+        "/api/startup"
       ],
       "existingTests": [
         "app/chat_activity_test.go",
         "app/chat_node_test.go",
         "app/background_notice_test.go"
-      ]
+      ],
+      "scenario": "scenarios/F-04-conversation.json",
+      "command": "verification/verify-graph verify --journey F-04-conversation",
+      "measured": "6 步 + 2 个 API 检查：execute 实例里替身模型真的跑完一轮，消息流出现用户句与 assistant 回答（逐字）",
+      "provenInJourney": true,
+      "windowCommand": "verification/verify-graph verify --journey F-04-conversation --lane window",
+      "coverage": "seeded-execute"
     },
     {
       "id": "F-05",
@@ -171,8 +202,8 @@
       "entry": "中栏底部 消息/附件/模型/暂停",
       "drive": [
         "verification/verify-graph verify --journey F-05-composer",
-        "verification/verify-graph ui render F-05-composer",
-        "verification/verify-graph evidence list --run <run>"
+        "verification/verify-graph verify --journey F-05-composer --lane window",
+        "verification/verify-graph evidence verify --run <run>"
       ],
       "evidence": [
         "evidence/<run>/F-05/*.png",
@@ -189,8 +220,10 @@
       ],
       "scenario": "scenarios/F-05-composer.json",
       "command": "verification/verify-graph verify --journey F-05-composer",
-      "measured": "5 steps pass：composer 出现（消息/模型），键入文本后 `消息` 的 AX value 逐字等于输入",
-      "provenInJourney": true
+      "measured": "6 步 + 2 个 prepare + 1 个 API 检查：composer 出现，键入后 `消息` 的 AX value 逐字等于输入，消息数不变",
+      "provenInJourney": true,
+      "windowCommand": "verification/verify-graph verify --journey F-05-composer --lane window",
+      "coverage": "headless+window"
     },
     {
       "id": "F-06",
@@ -204,8 +237,9 @@
       ],
       "entry": "底部 当前上下文窗口（上下文/System Prompt/工具声明）",
       "drive": [
-        "verification/verify-graph ui click --role button --label \"System Prompt\" --json",
-        "verification/verify-graph api --run <run> --get \"/api/tasks/<task>/nodes/<node>/prompt\" --save evidence/<run>/F-06/prompt.json"
+        "verification/verify-graph verify --journey F-06",
+        "verification/verify-graph verify --journey F-06 --lane window",
+        "verification/verify-graph evidence verify --run <run>"
       ],
       "evidence": [
         "evidence/<run>/F-06/prompt.json",
@@ -216,7 +250,13 @@
       ],
       "existingTests": [
         "app/prompt_record_test.go"
-      ]
+      ],
+      "scenario": "scenarios/F-06.json",
+      "command": "verification/verify-graph verify --journey F-06",
+      "windowCommand": "verification/verify-graph verify --journey F-06 --lane window",
+      "provenInJourney": true,
+      "coverage": "headless+window",
+      "measured": "10 步 + 1 个 API 检查：`当前上下文窗口` 与三个页签按钮；空态时页签可跳过"
     },
     {
       "id": "F-07",
@@ -230,10 +270,9 @@
       ],
       "entry": "主区页签栏 + 面板右上角 在新标签页打开/移除",
       "drive": [
-        "verification/verify-graph ui expect --name \"标签页 白板\" --role button --json",
-        "verification/verify-graph scenario run F-07 --json",
-        "verification/verify-graph evidence verify --run <run>",
-        "verification/verify-graph ui screenshot --out evidence/<run>/F-07/board.png"
+        "verification/verify-graph verify --journey F-07",
+        "verification/verify-graph verify --journey F-07 --lane window",
+        "verification/verify-graph evidence verify --run <run>"
       ],
       "evidence": [
         "evidence/<run>/F-07/whiteboard.json",
@@ -249,7 +288,13 @@
         "app/board_drag_test.go",
         "app/board_view_test.go",
         "app/shell_layout_test.go"
-      ]
+      ],
+      "scenario": "scenarios/F-07.json",
+      "command": "verification/verify-graph verify --journey F-07",
+      "windowCommand": "verification/verify-graph verify --journey F-07 --lane window",
+      "provenInJourney": true,
+      "coverage": "headless+window",
+      "measured": "7 步 + 1 个 API 检查：默认 `标签页 白板`、点侧栏开页签、页签切换与移除"
     },
     {
       "id": "F-08",
@@ -263,8 +308,9 @@
       ],
       "entry": "侧栏「轨迹」",
       "drive": [
-        "verification/verify-graph ui click --label \"轨迹\" --json",
-        "verification/verify-graph api --run <run> --get /api/conversations/<id>/trajectory --save evidence/<run>/F-08/trajectory.json"
+        "verification/verify-graph verify --journey F-08",
+        "verification/verify-graph verify --journey F-08 --lane window",
+        "verification/verify-graph evidence verify --run <run>"
       ],
       "evidence": [
         "evidence/<run>/F-08/trajectory.json",
@@ -290,7 +336,13 @@
       ],
       "existingTests": [
         "app/trajectory_context_overview_test.go"
-      ]
+      ],
+      "scenario": "scenarios/F-08.json",
+      "command": "verification/verify-graph verify --journey F-08",
+      "windowCommand": "verification/verify-graph verify --journey F-08 --lane window",
+      "provenInJourney": true,
+      "coverage": "headless+window",
+      "measured": "6 步 + 1 个 API 检查：`标签页 轨迹量化` + 量化面板；/api/trajectory/insights 200"
     },
     {
       "id": "F-09",
@@ -304,8 +356,9 @@
       ],
       "entry": "侧栏「洞察」",
       "drive": [
-        "verification/verify-graph ui click --label \"洞察\" --json",
-        "verification/verify-graph api --run <run> --get /api/usage --save evidence/<run>/F-09/usage.json"
+        "verification/verify-graph verify --journey F-09",
+        "verification/verify-graph verify --journey F-09 --lane window",
+        "verification/verify-graph evidence verify --run <run>"
       ],
       "evidence": [
         "evidence/<run>/F-09/usage.json",
@@ -323,7 +376,13 @@
       ],
       "existingTests": [
         "app/usage_test.go"
-      ]
+      ],
+      "scenario": "scenarios/F-09.json",
+      "command": "verification/verify-graph verify --journey F-09",
+      "windowCommand": "verification/verify-graph verify --journey F-09 --lane window",
+      "provenInJourney": true,
+      "coverage": "headless+window",
+      "measured": "6 步 + 2 个 API 检查：`洞察概览窗口` + 用量趋势 + 会话排行；/api/insights、/api/tool-stats 200"
     },
     {
       "id": "F-10",
@@ -337,8 +396,9 @@
       ],
       "entry": "侧栏「编队」",
       "drive": [
-        "verification/verify-graph ui click --label \"编队\" --json",
-        "verification/verify-graph api --run <run> --get /api/fleet --save evidence/<run>/F-10/fleet.json"
+        "verification/verify-graph verify --journey F-10",
+        "verification/verify-graph verify --journey F-10 --lane window",
+        "verification/verify-graph evidence verify --run <run>"
       ],
       "evidence": [
         "evidence/<run>/F-10/fleet.json",
@@ -363,7 +423,13 @@
         "app/fleet_detail_test.go",
         "app/fleet_graph_test.go",
         "app/fleet_view_test.go"
-      ]
+      ],
+      "scenario": "scenarios/F-10.json",
+      "command": "verification/verify-graph verify --journey F-10",
+      "windowCommand": "verification/verify-graph verify --journey F-10 --lane window",
+      "provenInJourney": true,
+      "coverage": "headless+window",
+      "measured": "5 步 + 1 个 API 检查：`标签页 编队` + 编队面板；/api/fleet 200（不断言随调度漂移的计数）"
     },
     {
       "id": "F-11",
@@ -377,8 +443,9 @@
       ],
       "entry": "侧栏「供应商」",
       "drive": [
-        "verification/verify-graph ui click --label \"供应商\" --json",
-        "verification/verify-graph api --run <run> --get /api/providers/magpie --save evidence/<run>/F-11/magpie.json"
+        "verification/verify-graph verify --journey F-11",
+        "verification/verify-graph verify --journey F-11 --lane window",
+        "verification/verify-graph evidence verify --run <run>"
       ],
       "evidence": [
         "evidence/<run>/F-11/magpie.json",
@@ -393,7 +460,13 @@
       ],
       "existingTests": [
         "app/providers_page_test.go"
-      ]
+      ],
+      "scenario": "scenarios/F-11.json",
+      "command": "verification/verify-graph verify --journey F-11",
+      "windowCommand": "verification/verify-graph verify --journey F-11 --lane window",
+      "provenInJourney": true,
+      "coverage": "headless+window",
+      "measured": "4 步 + 2 个 API 检查：`供应商窗口`；/api/providers、/api/providers/magpie 200"
     },
     {
       "id": "F-12",
@@ -407,8 +480,9 @@
       ],
       "entry": "侧栏「资源」",
       "drive": [
-        "verification/verify-graph ui click --label \"资源\" --json",
-        "verification/verify-graph api --run <run> --get /api/catalog --save evidence/<run>/F-12/catalog.json"
+        "verification/verify-graph verify --journey F-12",
+        "verification/verify-graph verify --journey F-12 --lane window",
+        "verification/verify-graph evidence verify --run <run>"
       ],
       "evidence": [
         "evidence/<run>/F-12/catalog.json",
@@ -420,7 +494,13 @@
       "api": [
         "/api/catalog",
         "/api/extensions/status"
-      ]
+      ],
+      "scenario": "scenarios/F-12.json",
+      "command": "verification/verify-graph verify --journey F-12",
+      "windowCommand": "verification/verify-graph verify --journey F-12 --lane window",
+      "provenInJourney": true,
+      "coverage": "headless+window",
+      "measured": "4 步 + 2 个 API 检查：`资源库窗口`；/api/catalog、/api/capabilities/config 200"
     },
     {
       "id": "F-13",
@@ -434,8 +514,9 @@
       ],
       "entry": "侧栏「装配」",
       "drive": [
-        "verification/verify-graph ui click --label \"装配\" --json",
-        "verification/verify-graph api --run <run> --get /api/catalog --save evidence/<run>/F-13/catalog.json"
+        "verification/verify-graph verify --journey F-13",
+        "verification/verify-graph verify --journey F-13 --lane window",
+        "verification/verify-graph evidence verify --run <run>"
       ],
       "evidence": [
         "evidence/<run>/F-13/catalog.json",
@@ -447,7 +528,13 @@
       "api": [
         "/api/catalog",
         "/api/catalog/combinations"
-      ]
+      ],
+      "scenario": "scenarios/F-13.json",
+      "command": "verification/verify-graph verify --journey F-13",
+      "windowCommand": "verification/verify-graph verify --journey F-13 --lane window",
+      "provenInJourney": true,
+      "coverage": "headless+window",
+      "measured": "4 步 + 1 个 API 检查：`能力装配窗口`；/api/catalog 200"
     },
     {
       "id": "F-14",
@@ -461,8 +548,9 @@
       ],
       "entry": "侧栏「设置」",
       "drive": [
-        "verification/verify-graph ui click --label \"设置\" --json",
-        "verification/verify-graph api --run <run> --get /api/config --save evidence/<run>/F-14/config.before.json"
+        "verification/verify-graph verify --journey F-14",
+        "verification/verify-graph verify --journey F-14 --lane window",
+        "verification/verify-graph evidence verify --run <run>"
       ],
       "evidence": [
         "evidence/<run>/F-14/config.before.json",
@@ -476,7 +564,13 @@
         "/api/config",
         "/api/startup",
         "/api/limits"
-      ]
+      ],
+      "scenario": "scenarios/F-14.json",
+      "command": "verification/verify-graph verify --journey F-14",
+      "windowCommand": "verification/verify-graph verify --journey F-14 --lane window",
+      "provenInJourney": true,
+      "coverage": "headless+window",
+      "measured": "5 步 + 3 个 API 检查：`标签页 运行设置` + `运行设置`；/api/config、/api/limits、/api/startup 200"
     },
     {
       "id": "F-15",
@@ -489,16 +583,24 @@
       ],
       "entry": "菜单栏 Graph 图标",
       "drive": [
-        "verification/verify-graph ui surface --surface menu-bar-extras --app Graph --json",
-        "verification/verify-graph ui expect --name \"打开 Graph\" --json"
+        "verification/verify-graph verify --journey F-15-tray",
+        "verification/verify-graph verify --journey F-15-tray --lane window",
+        "verification/verify-graph evidence verify --run <run>"
       ],
       "evidence": [
         "evidence/<run>/F-15/tray.png",
+        "evidence/<run>/F-15/surface.json",
         "evidence/<run>/F-15/notifications.json"
       ],
       "api": [
         "/api/tasks"
-      ]
+      ],
+      "scenario": "scenarios/F-15-tray.json",
+      "command": "verification/verify-graph verify --journey F-15-tray",
+      "measured": "6 步 + 1 个 API 检查：真实窗口进程的 menu-bar-extras 里出现 `打开 Graph` 与 `退出 Graph`（只读，绝不点这两个项）",
+      "provenInJourney": true,
+      "windowCommand": "verification/verify-graph verify --journey F-15-tray --lane window",
+      "coverage": "surface"
     },
     {
       "id": "F-16",
@@ -513,8 +615,8 @@
       "entry": "任意页面（停 daemon / 去 cookie / 空数据）",
       "drive": [
         "verification/verify-graph verify --journey F-16-empty-and-error",
-        "verification/verify-graph ui render F-16-empty-and-error",
-        "verification/verify-graph evidence list --run <run>"
+        "verification/verify-graph verify --journey F-16-empty-and-error --lane window",
+        "verification/verify-graph evidence verify --run <run>"
       ],
       "evidence": [
         "evidence/<run>/F-16/*.png",
@@ -531,10 +633,24 @@
       ],
       "scenario": "scenarios/F-16-empty-and-error.json",
       "command": "verification/verify-graph verify --journey F-16-empty-and-error",
-      "measured": "9 steps pass：编队/资源两页从无数据渲染出面板；/api/health、/api/startup、/api/fleet 全 200",
-      "provenInJourney": true
+      "measured": "9 步 + 3 个 API 检查：空实例下编队/资源页仍渲染面板；/api/health、/api/startup、/api/fleet 200",
+      "provenInJourney": true,
+      "windowCommand": "verification/verify-graph verify --journey F-16-empty-and-error --lane window",
+      "coverage": "headless+window"
     }
   ],
-  "verifiedAt": "2026-11-17T13:40+08:00",
-  "verifyAllCommand": "cd verification && ./verify-graph verify --all"
+  "verifiedAt": "2026-11-17T15:48+08:00",
+  "lastVerifiedRun": {
+    "at": "2026-11-17T15:47:58+08:00",
+    "headless": { "run": "a8290242", "executeRun": "e353d253", "passed": 23, "total": 23, "durationMs": 56000 },
+    "window": { "run": "6473fb09", "executeRun": "c0405509", "passed": 23, "total": 23, "durationMs": 274000 },
+    "evidenceVerify": "104 + 6 files, problems: []（headless）；104 + 6（window）"
+  },
+  "verifyAllCommand": "cd verification && ./verify-graph verify --all",
+  "lanes": {
+    "headless": "真实 app 视图代码经 MyGo tester 渲染，覆盖布局与交互状态机；不需要窗口权限",
+    "window": "同一 journey 在真实 Graph 窗口里由 agent-desktop 按 role+name 点击/键入，并留 AX dump + PNG",
+    "surface": "窗口看不到的 shell surface（F-15 menu-bar-extras）；只读并点未命名根，绝不点 退出 Graph",
+    "execute": "需要真实 dispatch 的 journey（F-04）用 launch --mode execute --seed 起本地替身模型；不耗真实额度"
+  }
 }

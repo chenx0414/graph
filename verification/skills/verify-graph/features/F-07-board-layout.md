@@ -22,20 +22,18 @@
 ## Driving it with verify-graph
 
 ```sh
-verification/verify-graph ui expect --name "标签页 白板" --role button --json
-verification/verify-graph ui click --label "洞察" --json
-verification/verify-graph ui expect --name "洞察概览" --role group --json
-verification/verify-graph ui click --name "移除" --role button --index 0 --json
-verification/verify-graph scenario run F-07 --json          # 步骤里读 <state-dir>/whiteboard.json，落证据并记 sha256
-verification/verify-graph evidence verify --run <run>        # 复核 whiteboard.json 与 manifest 里的 sha256 一致
-verification/verify-graph ui screenshot --out evidence/<run>/F-07/board.png
+verification/verify-graph verify --journey F-07
+verification/verify-graph verify --journey F-07 --lane window
+verification/verify-graph evidence verify --run <run>
 ```
 
-判过：每次操作后 `whiteboard.json` 的 `pages[].Panels[].Kind` 与 AX 里出现的 `…窗口` 分组名一一对应；`移除` 后文件里少一个面板且界面上对应分组消失（**文件 + 界面双向**）。
+本 journey 实测覆盖：白板：默认页签存在，点侧栏开新页签，页签切换与面板移除都反映在界面上。
+
+人工复核项（**尚未写进 journey**，不要当成已覆盖）：每次操作后 `whiteboard.json` 的 `pages[].Panels[].Kind` 与 AX 里出现的 `…窗口` 分组名一一对应；`移除` 后文件里少一个面板且界面上对应分组消失（**文件 + 界面双向**）。
 
 ## Gotchas
 
 - 白板状态是**用户数据**（`whiteboard.json`）：窗口车道的实例必须是隔离 state-dir，否则你在改用户的布局。
 - 拖拽是几何行为：headless 语义点击做不了拖拽，必须 `press/move/release` 或 headless overlay 车道；窗口车道里拖拽要 `--headed`（会动真光标）——默认不做，记 skip 并写理由，不要判 pass。
-- 页签标题重复时（例如 `共享产物` 在编队与轨迹里都有）`click --label` 会命中多个：必须用 `--index` 或先 `--window` + 顺序稳定化。
+- 页签标题重复时（例如 `共享产物` 在编队与轨迹里都有）同名元素会命中多个：用 `ui text` 先确认唯一名字；`ui click --name` 只按精确名点第一个可交互元素。
 - `boardPanelTitle` 对未知 kind 回落到 kind 本身：看到英文 kind 出现在界面上，是漏翻译，不是「布局没生效」。

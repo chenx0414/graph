@@ -8,14 +8,21 @@ import (
 	"graph/verification/internal/appinstance"
 )
 
+// windowInstance rebuilds the app instance for a run. The app's own record
+// (instance.json) is the single source of truth for appPid/daemonPid/url:
+// `ui window open` writes it, and every later verb (click/shot/close) reads
+// the same file. Reading run.json here was the old bug: it never carries the
+// window pid, so a second `ui window click` answered "this run has no window
+// process" while the window was in fact alive.
 func windowInstance(p paths, meta runMeta) (*appinstance.Instance, error) {
 	appBinary := filepath.Join(p.Repo, "dist", "app", "mac-arm64", "Graph.app", "Contents", "MacOS", "Graph")
 	if override := os.Getenv("VERIFY_GRAPH_APP_BINARY"); override != "" {
 		appBinary = override
 	}
-	return appinstance.New(appinstance.Options{
+	root := filepath.Join(p.RunRoot, meta.RunID)
+	instance, err := appinstance.New(appinstance.Options{
 		Repo:         p.Repo,
-		Root:         filepath.Join(p.RunRoot, meta.RunID),
+		Root:         root,
 		Mode:         firstNonEmpty(meta.Daemon.Mode, "view"),
 		AppBinary:    appBinary,
 		StateDirPath: meta.StateDir,
@@ -23,6 +30,18 @@ func windowInstance(p paths, meta runMeta) (*appinstance.Instance, error) {
 		TmpDirPath:   meta.Tmp,
 		ConfigFile:   meta.Config,
 	})
+	if err != nil {
+		return nil, err
+	}
+	if record, loadErr := appinstance.Load(root); loadErr == nil {
+		if appinstance.ProcessAlive(record.AppPID) {
+			instance.AppPID = record.AppPID
+		}
+		instance.DaemonPID = record.DaemonPID
+		instance.URL = record.URL
+		instance.StartedAt = record.StartedAt
+	}
+	return instance, nil
 }
 
 func uiWindowCommand(p paths, flags flags) int {
@@ -52,8 +71,8 @@ func uiWindowCommand(p paths, flags flags) int {
 	case "shot":
 		return uiWindowShot(meta, instance, flags)
 	case "close":
-		lines := instance.Stop()
-		result := okEnvelope("ui.window", "window", map[string]any{"closed": lines})
+		lines := instance.StopAppWindow()
+		result := okEnvelope("ui.window", "window", map[string]any{"closed": lines, "daemonKept": true})
 		result.RunID = meta.RunID
 		return result.print()
 	default:

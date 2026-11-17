@@ -21,14 +21,14 @@
 ## Driving it with verify-graph
 
 ```sh
-verification/verify-graph ui click --label "供应商" --json
-verification/verify-graph api --run <run> --get /api/providers/magpie --save evidence/<run>/F-11/magpie.json
-verification/verify-graph ui expect --text "供应商与账号都由 Magpie 管理" --json
-verification/verify-graph ui type --label "查找供应商" --text "deepseek" --json
-verification/verify-graph ui screenshot --out evidence/<run>/F-11/providers.png
+verification/verify-graph verify --journey F-11
+verification/verify-graph verify --journey F-11 --lane window
+verification/verify-graph evidence verify --run <run>
 ```
 
-判过：行数 = API 供应商数（或错误态文案存在）；搜索后可见行数 = 名称含关键字的 API 行数。
+本 journey 实测覆盖：供应商页：面板出现，供应商列表可读。
+
+人工复核项（**尚未写进 journey**，不要当成已覆盖）：行数 = API 供应商数（或错误态文案存在）；搜索后可见行数 = 名称含关键字的 API 行数。
 
 ## Gotchas
 

@@ -59,7 +59,9 @@ environment — do not record a product failure.
 
 ## Drive
 
-Three lanes, pick the one the feature needs. Each one asserts on the real thing.
+Four lanes, pick the one the feature needs. Each one asserts on the real thing. `verify --all` runs the headless
+lane for every journey and switches a journey to the surface lane when its file sets `surface`; `--lane window`
+runs the same journeys through the real window instead.
 
 **1. Headless render (real `app/` view code, no window, no screen permission).**
 The fastest lane and the one that works on any machine: it runs the app's own `shellState.view` through MyGo's
@@ -80,6 +82,18 @@ verification/verify-graph ui snapshot --run <run-id> --app Graph
 
 When the run has its own window process, `ui window open|click|shot|close` drives that window and captures it with
 `ui shot`; use it instead of the `--app Graph` selector whenever two Graph windows can be on screen at once.
+`ui window close` stops only the window; the daemon (and a seeded model) stays alive for the next command.
+
+When you are still finding the exact label, drive the same window one control at a time. These verbs reuse the
+run's own window process and write an AX JSON plus a PNG for each call, so what you learn is the same thing a
+journey will later assert:
+
+```sh
+verification/verify-graph ui text --run <run-id>                                  # every AX name, as JSON
+verification/verify-graph ui expect --run <run-id> --name 洞察概览窗口 --role group
+verification/verify-graph ui click --run <run-id> --name 洞察 --expect 洞察概览
+verification/verify-graph ui screenshot --run <run-id> --out evidence/<run>/manual/insights.png
+```
 
 Gotchas that cost runs: match on `role` + exact `name`, never substring (`find --text` also matches whole message
 bodies); always scope to our own window (`--window-id`) because the user's Graph window has the same title and
@@ -129,10 +143,17 @@ and a `POST /api/conversations` leaves a `role:legacy` conversation with no assi
 **Whole journeys.** A journey file pins one feature to its assertions and its evidence:
 
 ```sh
-verification/verify-graph scenario <journey> --run <run-id>
+verification/verify-graph scenario run <journey> --run <run-id>
 verification/verify-graph verify --run <run-id> --journey <id>
 verification/verify-graph verify --all
+verification/verify-graph verify --all --lane window
 ```
+
+Journey file fields that change the lane: `instance: "execute"` (or a `seed` block) gets an execute-capable daemon
+with the stub model, `surface: "menu-bar-extras"` drives a shell surface (F-15's tray), and everything else runs
+headless on a view-only instance. `prepare`/`checks` are API reads: `expect` matches a **subset** of the JSON
+value at a dotted path (extra fields on the response are ignored), `expectExact` requires the value to match
+exactly. Use `expect` for live responses whose other fields move between runs.
 
 ## Evidence
 
@@ -180,7 +201,9 @@ Cleanup only signals pids recorded in that run's `run.json`, after checking the 
 `verification/evidence` — the proof outlives the instance. After stopping, it re-checks the launchd fingerprint and
 the user's `console.json`; a change is reported as `isolation-violation`, not swallowed.
 
-Orphans from abandoned runs are reported by `status` and left alone; they are not yours to kill.
+Orphans from abandoned runs are reported by `status`; `cleanup --orphans` stops only a daemon whose own
+`--state-dir` is under `verification/.run/` and which no live run record owns, after re-checking its command line
+and age (`--older-than`, default 120s). Review first with `--orphans --dry-run`.
 
 ## Helpers
 

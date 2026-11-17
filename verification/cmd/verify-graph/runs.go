@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -282,7 +281,20 @@ func launch(p paths, options launchOptions) (envelope, error) {
 	} else {
 		args = append(args, "--execute", "--dynamic")
 	}
-	command := exec.Command(binary, args...)
+	// Keep the daemon under a live keeper shell instead of spawning it directly.
+	// This CLI exits right after `launch`, so a direct child is reparented to pid
+	// 1; the app treats any daemon whose ppid is 1 as launchd-supervised
+	// (app/launchd.go:daemonSupervised) and its window refresh path bootouts and
+	// stops it before the window can attach. With a keeper parent the window
+	// adopts the daemon untouched, which is what makes a multi-step window
+	// journey possible (AppPID + daemon both stay alive).
+	keeperPath := filepath.Join(filepath.Dir(meta.StateDir), "keeper.sh")
+	if err := os.WriteFile(keeperPath, []byte(keeperSource), 0o755); err != nil {
+		return failEnvelope("launch", "api", codeUsage, err.Error(), "check permissions on verification/.run"), nil
+	}
+	pidPath := filepath.Join(filepath.Dir(meta.StateDir), "daemon.pid")
+	_ = os.Remove(pidPath)
+	command := exec.Command("/bin/sh", append([]string{keeperPath, binary}, args...)...)
 	command.Dir = p.Repo
 	command.Stdout = logFile
 	command.Stderr = logFile
@@ -294,6 +306,7 @@ func launch(p paths, options launchOptions) (envelope, error) {
 		"GRAPH_CONFIG="+meta.Config,
 		"GRAPH_HOME="+meta.GraphHome,
 		"GRAPH_RSI_ROOT="+p.Repo,
+		"VG_DAEMON_PIDFILE="+pidPath,
 	)
 	if seeded.BaseURL != "" {
 		environment = append(environment, seedEnv(seeded)...)
@@ -303,7 +316,8 @@ func launch(p paths, options launchOptions) (envelope, error) {
 	if err := command.Start(); err != nil {
 		return failEnvelope("launch", "api", codeDaemonDown, err.Error(), "run: verify-graph doctor"), nil
 	}
-	startedPID := command.Process.Pid
+	keeperPID := command.Process.Pid
+	startedPID := waitForDaemonPID(pidPath, keeperPID, 5*time.Second)
 	meta.Daemon = daemonMeta{PID: startedPID, Start: lstart(startedPID), Log: logPath, Mode: mode}
 	timeout := options.Timeout
 	if timeout <= 0 {
@@ -328,6 +342,7 @@ func launch(p paths, options launchOptions) (envelope, error) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	if !ready {
+		_ = syscall.Kill(keeperPID, syscall.SIGTERM)
 		_ = syscall.Kill(startedPID, syscall.SIGTERM)
 		failure := failEnvelope("launch", "api", codeDaemonDown,
 			"the isolated daemon did not become ready within "+timeout.String(),
@@ -340,7 +355,7 @@ func launch(p paths, options launchOptions) (envelope, error) {
 		return failEnvelope("launch", "api", codeUsage, err.Error(), "check permissions on verification/.run"), nil
 	}
 	data := map[string]any{
-		"runId": meta.RunID, "url": console.URL, "pid": startedPID, "mode": console.Mode,
+		"runId": meta.RunID, "url": console.URL, "pid": startedPID, "keeperPid": keeperPID, "mode": console.Mode,
 		"stateDir": meta.StateDir, "graphHome": meta.GraphHome, "config": meta.Config,
 		"log": logPath, "expiresAt": meta.ExpiresAt,
 	}
@@ -454,6 +469,12 @@ func scanDaemons(p paths) []daemonProcess {
 		if !strings.Contains(line, "graphd") || !strings.Contains(line, p.Verification) {
 			continue
 		}
+		// The daemon keeper shell has the daemon's whole command line in its
+		// argv, so it would otherwise look like a second daemon. It is a parent
+		// of a live run, never an orphan.
+		if strings.Contains(line, "keeper.sh") {
+			continue
+		}
 		fields := strings.Fields(line)
 		if len(fields) < 3 {
 			continue
@@ -471,21 +492,3 @@ func scanDaemons(p paths) []daemonProcess {
 	return found
 }
 
-func tailFile(path string, lines int) string {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	parts := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
-	if len(parts) > lines {
-		parts = parts[len(parts)-lines:]
-	}
-	return strings.Join(parts, "\n")
-}
-
-func contextWithTimeout(seconds int) (context.Context, context.CancelFunc) {
-	if seconds <= 0 {
-		seconds = 120
-	}
-	return context.WithTimeout(context.Background(), time.Duration(seconds)*time.Second)
-}

@@ -21,14 +21,14 @@
 ## Driving it with verify-graph
 
 ```sh
-verification/verify-graph ui click --label "设置" --json
-verification/verify-graph api --run <run> --get /api/config --save evidence/<run>/F-14/config.before.json
-verification/verify-graph api --run <run> --post /api/config --body evidence/<run>/F-14/config.patch.json --save evidence/<run>/F-14/config.after.json
-verification/verify-graph ui expect --text "凭据在「供应商」页管理" --json
-verification/verify-graph ui screenshot --out evidence/<run>/F-14/settings.png
+verification/verify-graph verify --journey F-14
+verification/verify-graph verify --journey F-14 --lane window
+verification/verify-graph evidence verify --run <run>
 ```
 
-判过：POST 后 `GET /api/config` 的 `revision` 严格递增且目标字段变成新值；界面显示的值与回读一致（双证据）。
+本 journey 实测覆盖：设置页：点侧栏「设置」后出现运行设置页签与面板，配置、限额、启动模式都能从 daemon 回读。
+
+人工复核项（**尚未写进 journey**，不要当成已覆盖）：POST 后 `GET /api/config` 的 `revision` 严格递增且目标字段变成新值；界面显示的值与回读一致（双证据）。
 
 ## Gotchas
 

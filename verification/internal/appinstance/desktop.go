@@ -37,10 +37,11 @@ type Match struct {
 }
 
 type Node struct {
-	Ref   string `json:"ref_id"`
-	Role  string `json:"role"`
-	Name  string `json:"name"`
-	Value string `json:"value"`
+	Ref    string `json:"ref_id"`
+	Role   string `json:"role"`
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+	Bounds Rect   `json:"bounds"`
 }
 
 type Snapshot struct {
@@ -271,17 +272,18 @@ func collectNodes(raw json.RawMessage, out *[]Node) {
 		Role     string            `json:"role"`
 		Name     string            `json:"name"`
 		Value    any               `json:"value"`
+		Bounds   Rect              `json:"bounds"`
 		Children []json.RawMessage `json:"children"`
 	}
 	if err := json.Unmarshal(raw, &node); err != nil {
 		return
 	}
-	if node.Name != "" {
+	if node.Name != "" || node.Ref != "" {
 		value := ""
 		if text, ok := node.Value.(string); ok {
 			value = text
 		}
-		*out = append(*out, Node{Ref: node.Ref, Role: node.Role, Name: node.Name, Value: value})
+		*out = append(*out, Node{Ref: node.Ref, Role: node.Role, Name: node.Name, Value: value, Bounds: node.Bounds})
 	}
 	for _, child := range node.Children {
 		collectNodes(child, out)
@@ -291,12 +293,18 @@ func collectNodes(raw json.RawMessage, out *[]Node) {
 func (s Snapshot) Names() []string {
 	names := make([]string, 0, len(s.Nodes))
 	for _, node := range s.Nodes {
+		if node.Name == "" {
+			continue
+		}
 		names = append(names, node.Name)
 	}
 	return names
 }
 
 func (s Snapshot) Contains(name string) bool {
+	if name == "" {
+		return false
+	}
 	for _, node := range s.Nodes {
 		if strings.Contains(node.Name, name) {
 			return true

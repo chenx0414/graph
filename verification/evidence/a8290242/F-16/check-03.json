@@ -1,0 +1,94 @@
+{
+  "body": {
+    "agents": [
+      {
+        "activity": "",
+        "conversationId": "a1c72d60-648e-4211-b0eb-9825fd6115c3",
+        "cost": 0,
+        "createdAt": 1794897976524,
+        "currentOperationId": "",
+        "id": "a1c72d60-648e-4211-b0eb-9825fd6115c3",
+        "kind": "global",
+        "messages": 0,
+        "model": "",
+        "name": "Main",
+        "nodeId": "",
+        "parentId": "",
+        "projectId": "",
+        "requests": 0,
+        "role": "global",
+        "status": "idle",
+        "taskId": "f9894f59-47bc-44d7-80be-59224e86f018",
+        "tokens": 0,
+        "updatedAt": 0
+      },
+      {
+        "activity": "",
+        "conversationId": "7cf94071-87d7-4bbe-81b3-043a1c244f2f",
+        "cost": 0,
+        "createdAt": 1794897976525,
+        "currentOperationId": "",
+        "id": "7cf94071-87d7-4bbe-81b3-043a1c244f2f",
+        "kind": "project",
+        "messages": 0,
+        "model": "",
+        "name": "verify",
+        "nodeId": "",
+        "parentId": "a1c72d60-648e-4211-b0eb-9825fd6115c3",
+        "projectId": "verify",
+        "requests": 0,
+        "role": "project",
+        "status": "idle",
+        "taskId": "6577850a-cae7-4d0d-ad16-0c630b834c12",
+        "tokens": 0,
+        "updatedAt": 0
+      }
+    ],
+    "artifacts": [],
+    "events": [
+      {
+        "agentId": "7cf94071-87d7-4bbe-81b3-043a1c244f2f",
+        "at": 1794897976525,
+        "id": "2",
+        "targetAgentId": "",
+        "taskId": "6577850a-cae7-4d0d-ad16-0c630b834c12",
+        "text": "",
+        "type": "conversation.created"
+      },
+      {
+        "agentId": "a1c72d60-648e-4211-b0eb-9825fd6115c3",
+        "at": 1794897976524,
+        "id": "1",
+        "targetAgentId": "",
+        "taskId": "f9894f59-47bc-44d7-80be-59224e86f018",
+        "text": "",
+        "type": "conversation.created"
+      }
+    ],
+    "links": [
+      {
+        "from": "a1c72d60-648e-4211-b0eb-9825fd6115c3",
+        "kind": "parent",
+        "to": "7cf94071-87d7-4bbe-81b3-043a1c244f2f"
+      }
+    ],
+    "rootId": "a1c72d60-648e-4211-b0eb-9825fd6115c3",
+    "stats": {
+      "agents": 2,
+      "cost": 0,
+      "messages": 0,
+      "running": 0,
+      "tasks": 0,
+      "tokens": 0
+    },
+    "tasks": [],
+    "truncated": false
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/fleet",
+    "expectStatus": 200,
+    "id": "check.fleet-empty"
+  },
+  "status": 200
+}
