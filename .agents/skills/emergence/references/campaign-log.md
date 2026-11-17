@@ -27,3 +27,23 @@ skill body owns the general rules; this file owns the evidence behind them.
 - Captain lesson: do not prescribe architecture or copy skill libraries into the
   world. State the outcome, acceptance, boundaries, and freedom. The population
   supplied the architecture.
+
+## 2026-11-17 · Magpie provider models into Graph
+
+- Population: 5 agents, watch mode; task asked to expose Magpie gateway
+  `/v1/models` through Graph's model picker and route selected models through
+  the gateway.
+- Converged: agents invented a dynamic model catalog, provider-aware picker
+  filtering, gateway credential binding, and 12 tests. `FINAL` said 12/12;
+  app/backend tests and `graphcheck all` passed; the installed app returned
+  251 model entries including Magpie providers.
+- Did not stop: at 17:53 they wrote `FINAL`; at 17:54 all five were still
+  `running: true`. They were re-running tests and generating build/verification
+  artifacts (`dist/graphd`, `verification/**`), each of which woke the other
+  four. `FINAL` is only a file; it is not a terminal event.
+- Stop required: captain killed the tmux runner; coordinator went false and no
+  pi processes remained. The `running` flags in status were stale until then.
+- Task wording gap: `FINAL` was requested but the wish did not say "after
+  FINAL, make no more edits and run no more commands; FINAL is your last
+  action". Even that may not be enough without a hard stop; treat it as a
+  boundary, not a scheduler feature.

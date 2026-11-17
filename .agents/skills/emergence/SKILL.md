@@ -245,7 +245,11 @@ The captain enforces the box. The population will not.
 - **Local escalation.** Agents may start real daemons, windows, or launchd
   services. Require isolation in the wish; verify the user's instance before
   and after.
-- **Premature FINAL.** Treat FINAL as a claim. Run the acceptance command.
+- **FINAL does not stop the population.** Agents treat every new file
+  difference as work. After FINAL they may keep testing, building, or writing
+  evidence, and those outputs wake the other agents. The runner has no
+  terminal event: the captain must stop it. Write "after FINAL make no more
+  edits and run no commands" into the wish, but keep the hard stop.
 - **Do not use `--once` to "wait for done".** It exits at quiescence, which
   only means no agent currently perceives a changed file.
 
