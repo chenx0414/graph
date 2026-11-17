@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,6 +39,7 @@ type shellState struct {
 	contextTab       int
 	boardNet         netPanelState
 	conversations    []conversationSummary
+	rowsVersion      string
 	supervisorID     string
 	broken           bool
 	board            boardState
@@ -99,6 +101,20 @@ func (s *shellState) adoptConsole(paths Paths) bool {
 	s.api = newAPIClient(info.URL, paths.SessionToken())
 	s.broken = true
 	return true
+}
+
+func (s *shellState) probeRowsVersion() string {
+	payload, err := s.api.get("/api/conversations/version")
+	if err != nil {
+		return ""
+	}
+	parsed := struct {
+		Version string `json:"version"`
+	}{}
+	if err := json.Unmarshal(payload, &parsed); err != nil {
+		return ""
+	}
+	return parsed.Version
 }
 
 func (s *shellState) loadRows() bool {
@@ -276,6 +292,10 @@ func (s *shellState) refresh() bool {
 		reload = s.broken || len(s.conversations) == 0
 		s.refreshVisibleWorkspace()
 	})
+	version := s.probeRowsVersion()
+	if version != "" && version != s.rowsVersion {
+		reload = true
+	}
 	if active != nil && !active.loading {
 		changed = active.poll()
 		if changed || active.artifacts == nil {
@@ -286,6 +306,7 @@ func (s *shellState) refresh() bool {
 		onUI(s.window, func() { s.refreshTrajectory() })
 	}
 	if reload && s.loadRows() {
+		s.rowsVersion = version
 		changed = true
 	}
 	return changed

@@ -96,6 +96,10 @@ func (app *GraphApp) serveConversation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, view)
 }
 
+func (app *GraphApp) serveConversationsVersion(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"version": conversationsVersion(app.runtime.store)})
+}
+
 func (app *GraphApp) serveConversationVersion(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	writeJSON(w, http.StatusOK, map[string]any{"version": conversationVersion(app.runtime.store, conversationID)})
