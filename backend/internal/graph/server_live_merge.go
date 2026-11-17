@@ -2,6 +2,7 @@ package graph
 
 import (
 	"sort"
+	"strings"
 )
 
 func liveMergeValue(config GraphConfig, env, secrets map[string]string, revoked map[string]bool, credentialID string) *liveMerged {
@@ -152,11 +153,18 @@ func liveCompute(config GraphConfig, revision int, env, secrets map[string]strin
 			GroupLimit:    identity.groupLimit,
 		}
 	}
-	master := ""
-	for _, entry := range entries {
-		if _, ok := credentials[entry.Id]; ok {
-			master = entry.Id
-			break
+	master := strings.TrimSpace(config.MasterModel)
+	if master != "" {
+		if _, ok := credentials[master]; !ok {
+			master = ""
+		}
+	}
+	if master == "" {
+		for _, entry := range entries {
+			if _, ok := credentials[entry.Id]; ok {
+				master = entry.Id
+				break
+			}
 		}
 	}
 	aliases := map[string]string{}

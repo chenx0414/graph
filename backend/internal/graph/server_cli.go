@@ -38,6 +38,8 @@ func runCLI(args []string) (code int) {
 		return runReviewModule(args[1:], cwd)
 	case len(args) > 0 && args[0] == "assemble-team":
 		return runAssembleTeam(args[1:], cwd)
+	case len(args) > 0 && args[0] == "default-model":
+		return runDefaultModel(args[1:], cwd, env)
 	}
 	opts := parseCLI(args, env, cwd)
 	if opts.help {

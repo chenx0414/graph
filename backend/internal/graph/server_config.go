@@ -52,6 +52,7 @@ type GraphConfig struct {
 	Models                *GraphModels                `json:"models"`
 	Credentials           map[string]CredentialConfig `json:"credentials"`
 	Limits                LimitsConfig                `json:"limits"`
+	MasterModel           string                      `json:"masterModel"`
 	PiExtensionAutoUpdate bool                        `json:"piExtensionAutoUpdate"`
 	Codemode              GraphCodemode               `json:"codemode"`
 }

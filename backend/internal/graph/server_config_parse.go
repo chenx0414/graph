@@ -228,6 +228,12 @@ func ParseGraphConfig(raw any, configPath string) GraphConfig {
 			}
 			return true
 		}(),
+		MasterModel: func() string {
+			if !mapHas(root, "masterModel") {
+				return ""
+			}
+			return configAsString(root["masterModel"], "masterModel")
+		}(),
 		Codemode: configParseCodemode(root["codemode"]),
 	}
 }
