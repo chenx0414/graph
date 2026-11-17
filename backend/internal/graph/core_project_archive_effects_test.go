@@ -112,3 +112,17 @@ func TestArchivingUnassignedChildSessions(t *testing.T) {
 		}
 	}
 }
+
+func TestFleetHidesTerminalUnassignedGraphAgents(t *testing.T) {
+	fixture := seedFleetFixture(t)
+	fixture.exec(t, `INSERT INTO tasks(id,project_id,request,created_seq,phase,conversation_id)
+		VALUES('t-orphan','global-workspace','probe',90,'completed','c-global')`)
+	RegisterNodeAgent(fixture.store, "t-orphan", "probe", "worker", "global-workspace")
+	fleetSnapshotsForget(fixture.store)
+	view := fixture.fleet(t, "")
+	for _, agent := range view.Agents {
+		if agent.TaskId == "t-orphan" {
+			t.Fatalf("a terminal unassigned graph stays hidden: %+v", agent)
+		}
+	}
+}

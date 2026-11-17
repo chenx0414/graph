@@ -194,11 +194,13 @@ func fleetProjection(store *TaskStore, conversationId string) FleetView {
 	ledger := loadFleetLedger(store)
 	archived := archivedProjectSet(store)
 	archivedConversations := archivedConversationSet(store)
-	scoped := agentRecords(store)
+	allAgents := agentRecords(store)
+	scoped := allAgents
 	if scope.rootId != "" {
 		scoped = agentSubtreeOf(scoped, scope.rootId)
 	}
 	scoped = fleetActiveAgents(scoped, archived, archivedConversations)
+	scoped = fleetVisibleAgents(scoped, allAgents, ledger)
 	sort.SliceStable(scoped, func(left, right int) bool {
 		if leftRank, rightRank := fleetAgentRank(scoped[left].Kind), fleetAgentRank(scoped[right].Kind); leftRank != rightRank {
 			return leftRank < rightRank
@@ -346,6 +348,47 @@ func fleetActiveAgents(records []AgentRecord, archived map[string]bool, archived
 		active = append(active, record)
 	}
 	return active
+}
+
+func fleetVisibleAgents(records []AgentRecord, all []AgentRecord, ledger *fleetLedger) []AgentRecord {
+	byID := map[string]AgentRecord{}
+	for _, record := range all {
+		byID[record.Id] = record
+	}
+	visible := make([]AgentRecord, 0, len(records))
+	for _, record := range records {
+		if record.Kind != "node" && record.Kind != "child" {
+			visible = append(visible, record)
+			continue
+		}
+		if agentUnderProject(byID, record) {
+			visible = append(visible, record)
+			continue
+		}
+		status := ledger.agentStatus(record)
+		if status == "done" || status == "stopped" {
+			continue
+		}
+		visible = append(visible, record)
+	}
+	return visible
+}
+
+func agentUnderProject(byID map[string]AgentRecord, agent AgentRecord) bool {
+	seen := map[string]bool{}
+	current := agent
+	for current.ParentId != "" && !seen[current.ParentId] {
+		seen[current.ParentId] = true
+		parent, ok := byID[current.ParentId]
+		if !ok {
+			return false
+		}
+		if parent.Kind == "project" {
+			return true
+		}
+		current = parent
+	}
+	return false
 }
 
 func fleetActiveTasks(tasks []FleetTask, archived map[string]bool) []FleetTask {
