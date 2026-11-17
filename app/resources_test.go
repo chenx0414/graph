@@ -176,3 +176,26 @@ func TestTheAgentSectionShowsFiveThenExpands(t *testing.T) {
 func itoa(v int) string {
 	return strconv.Itoa(v)
 }
+
+func TestTheResourceSearchFieldHasAStableAccessibleName(t *testing.T) {
+	server := resourceServer(t, nil)
+	defer server.Close()
+
+	state := newResourceState(server.URL, "tok")
+	state.load()
+	tester := ui.NewTester(state.view, 1200, 820)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if _, ok := tester.AccessByRole(ui.RoleTextField, "查找资源"); !ok {
+		t.Fatalf("assistive tech cannot name the resource search field; texts %q", tester.Texts())
+	}
+	if err := tester.Click("查找资源"); err != nil {
+		t.Fatalf("the search field cannot be focused by its accessible name: %v", err)
+	}
+	tester.Type("web-search")
+	tester.Frame()
+	if info, ok := tester.Access("查找资源"); !ok || info.Value != "web-search" {
+		t.Fatalf("typing does not land in the named field: %+v ok=%v", info, ok)
+	}
+}

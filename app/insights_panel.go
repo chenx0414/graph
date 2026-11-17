@@ -43,10 +43,14 @@ func (s *shellState) insightsKPICard(ctx *ui.Context) {
 			}
 			return "○ " + strconv.Itoa(days) + " 天"
 		}
-		if kit.Button(ctx, label(7), kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
+		seven := kit.Button(ctx, label(7), kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm})
+		seven.Label("7 天").AccessSelected(s.insightsDays() == 7)
+		if seven.Clicked() {
 			s.setInsightsDays(7)
 		}
-		if kit.Button(ctx, label(30), kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
+		thirty := kit.Button(ctx, label(30), kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm})
+		thirty.Label("30 天").AccessSelected(s.insightsDays() == 30)
+		if thirty.Clicked() {
 			s.setInsightsDays(30)
 		}
 	})

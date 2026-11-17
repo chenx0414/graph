@@ -113,7 +113,7 @@ func (s *resourceState) resourceSearch(ctx *ui.Context, t gwtheme.Tokens) {
 	bar.Children(func() {
 		ui.Icon(ctx, iconSearch).Size(14, 14).TextColor(t.Muted)
 		field := kit.Input(ctx, &s.search, kit.InputOpts{Bare: true, Placeholder: "owner/repo、GitHub 或 GitLab 链接，或本机上的文件夹"})
-		field.Grow(1).FontSize(t.Text.Sm)
+		field.Grow(1).FontSize(t.Text.Sm).Label("查找资源")
 	})
 	if strings.TrimSpace(s.search) != "" {
 		if kit.Button(ctx, "清除", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeXs}).Clicked() {

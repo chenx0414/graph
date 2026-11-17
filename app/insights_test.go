@@ -51,3 +51,40 @@ func TestInsightsModuleSummarizesTheLastSevenDays(t *testing.T) {
 		t.Fatalf("insights page %+v", page)
 	}
 }
+
+func TestTheInsightsWindowButtonsHaveStableNamesAndExposeTheirState(t *testing.T) {
+	payload := `{"days":[{"date":"2026-11-06","requests":10,"tokens":1000,"cost":0.01,"cacheHitRate":0.9}],
+	"totals":{"requests":10,"tokens":1000,"cost":0.01,"cacheHitRate":0.9,"sessions":1},"sessions":[]}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/trajectory/insights" {
+			w.Write([]byte(payload))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	shell := newShellState(server.URL, "tok")
+	shell.ensureInsights()
+	deadline := time.Now().Add(2 * time.Second)
+	for shell.insights.data == nil && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	shell.openModule("insights")
+	tester := frames(ui.NewTester(shell.view, 1440, 900))
+
+	seven, ok := tester.AccessByRole(ui.RoleButton, "7 天")
+	if !ok || !seven.Checked {
+		t.Fatalf("the 7-day window must keep the stable name 7 天 and read as selected: %+v ok=%v", seven, ok)
+	}
+	if err := tester.Click("30 天"); err != nil {
+		t.Fatalf("the 30-day window is not reachable by its stable name: %v", err)
+	}
+	tester = frames(tester)
+	if !tester.HasText("● 30 天") {
+		t.Fatalf("choosing 30 days does not move the visible marker, texts %q", tester.Texts())
+	}
+	thirty, ok := tester.AccessByRole(ui.RoleButton, "30 天")
+	if !ok || !thirty.Checked {
+		t.Fatalf("the 30-day window must read as selected after the click: %+v ok=%v", thirty, ok)
+	}
+}
