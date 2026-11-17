@@ -3,13 +3,63 @@
   "feature": "F-12",
   "description": "资源页：资源库面板出现，能力目录可读。",
   "steps": [
-    { "verb": "waitText", "text": "资源", "timeoutMs": 20000 },
-    { "verb": "click", "name": "资源" },
-    { "verb": "waitText", "text": "资源库窗口", "timeoutMs": 15000 },
-    { "verb": "screenshot", "path": "capabilities.png" }
+    {
+      "verb": "waitText",
+      "text": "资源",
+      "timeoutMs": 20000
+    },
+    {
+      "verb": "click",
+      "name": "资源"
+    },
+    {
+      "verb": "waitText",
+      "text": "资源库窗口",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "waitText",
+      "text": "发现",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "click",
+      "name": "刷新资源库"
+    },
+    {
+      "verb": "waitText",
+      "text": "资源库窗口",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "type",
+      "name": "查找资源",
+      "text": "zzz-no-resource",
+      "skipInWindow": true
+    },
+    {
+      "verb": "assertAccess",
+      "name": "查找资源",
+      "value": "zzz-no-resource",
+      "skipInWindow": true
+    },
+    {
+      "verb": "screenshot",
+      "path": "capabilities.png"
+    }
   ],
   "checks": [
-    { "id": "capabilities.catalog", "method": "GET", "path": "/api/catalog", "expectStatus": 200 },
-    { "id": "capabilities.config", "method": "GET", "path": "/api/capabilities/config", "expectStatus": 200 }
+    {
+      "id": "capabilities.catalog",
+      "method": "GET",
+      "path": "/api/catalog",
+      "expectStatus": 200
+    },
+    {
+      "id": "capabilities.config",
+      "method": "GET",
+      "path": "/api/capabilities/config",
+      "expectStatus": 200
+    }
   ]
 }

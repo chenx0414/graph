@@ -1,0 +1,129 @@
+{
+  "ok": true,
+  "steps": [
+    {
+      "index": 1,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 供应商"
+    },
+    {
+      "index": 2,
+      "verb": "click",
+      "ok": true
+    },
+    {
+      "index": 3,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 供应商窗口"
+    },
+    {
+      "index": 4,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 刷新供应商"
+    },
+    {
+      "index": 5,
+      "verb": "type",
+      "ok": true
+    },
+    {
+      "index": 6,
+      "verb": "assertAccess",
+      "ok": true,
+      "detail": "exposed as any with value \"zzz-no-provider\""
+    },
+    {
+      "index": 7,
+      "verb": "click",
+      "ok": true
+    },
+    {
+      "index": 8,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 供应商与账号都由 Magpie 管理 · 这里只读"
+    },
+    {
+      "index": 9,
+      "verb": "click",
+      "ok": true
+    },
+    {
+      "index": 10,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 读不到供应商"
+    },
+    {
+      "index": 11,
+      "verb": "screenshot",
+      "ok": true,
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/240cc14b/F-11/providers.png"
+    }
+  ],
+  "texts": [
+    "轨迹",
+    "洞察",
+    "编队",
+    "供应商",
+    "资源",
+    "装配",
+    "设置",
+    "会话列表标题",
+    "对话标题",
+    "对话标题名",
+    "白板标题",
+    "标签页 白板",
+    "白板",
+    "标签页 供应商",
+    "供应商",
+    "关闭 供应商",
+    "主区域卡片",
+    "main agent 会话",
+    "章鱼",
+    "main agent 名称",
+    "Main Agent",
+    "verify",
+    "verify",
+    "还没有对话",
+    "在下面输入第一条消息",
+    "这个会话还没有可显示的对话。",
+    "消息",
+    "附件",
+    "模型",
+    "模型",
+    "语音",
+    "发送",
+    "供应商窗口",
+    "供应商窗口",
+    "供应商",
+    "模型",
+    "/",
+    "供应商",
+    "查找供应商",
+    "在 Magpie 里添加账号",
+    "打开 Magpie 配置",
+    "打开 Magpie 配置",
+    "刷新供应商",
+    "数据源 · Magpie · /Users/macmini/workspace/13-Graph/verification/.run/240cc14b/home/.config/magpie",
+    "开关在 Magpie 里 · 改完点右上刷新",
+    "读不到供应商：服务端拒绝：读不到 magpie 的配置目录 …fication/.run/240cc14b/home/.config/magpie",
+    "重试供应商",
+    "重试供应商",
+    "供应商与账号都由 Magpie 管理 · 这里只读"
+  ],
+  "frames": [
+    "/Users/macmini/workspace/13-Graph/verification/evidence/240cc14b/F-11/providers.png"
+  ],
+  "access": [
+    {
+      "name": "查找供应商",
+      "role": "any",
+      "value": "zzz-no-provider",
+      "focusable": true
+    }
+  ]
+}

@@ -3,15 +3,61 @@
   "feature": "F-09",
   "description": "洞察页：总览、用量趋势、会话排行三块都在，数据来自 /api/insights。",
   "steps": [
-    { "verb": "waitText", "text": "洞察", "timeoutMs": 20000 },
-    { "verb": "click", "name": "洞察" },
-    { "verb": "waitText", "text": "洞察概览窗口", "timeoutMs": 15000 },
-    { "verb": "assertText", "text": "用量趋势窗口" },
-    { "verb": "assertText", "text": "会话排行窗口" },
-    { "verb": "screenshot", "path": "insights.png" }
+    {
+      "verb": "waitText",
+      "text": "洞察",
+      "timeoutMs": 20000
+    },
+    {
+      "verb": "click",
+      "name": "洞察"
+    },
+    {
+      "verb": "waitText",
+      "text": "洞察概览窗口",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "assertText",
+      "text": "用量趋势窗口"
+    },
+    {
+      "verb": "assertText",
+      "text": "会话排行窗口"
+    },
+    {
+      "verb": "click",
+      "name": "30 天"
+    },
+    {
+      "verb": "assertText",
+      "text": "● 30 天"
+    },
+    {
+      "verb": "click",
+      "name": "7 天"
+    },
+    {
+      "verb": "assertText",
+      "text": "● 7 天"
+    },
+    {
+      "verb": "screenshot",
+      "path": "insights.png"
+    }
   ],
   "checks": [
-    { "id": "insights.readable", "method": "GET", "path": "/api/insights", "expectStatus": 200 },
-    { "id": "insights.tool-stats", "method": "GET", "path": "/api/tool-stats", "expectStatus": 200 }
+    {
+      "id": "insights.readable",
+      "method": "GET",
+      "path": "/api/insights",
+      "expectStatus": 200
+    },
+    {
+      "id": "insights.tool-stats",
+      "method": "GET",
+      "path": "/api/tool-stats",
+      "expectStatus": 200
+    }
   ]
 }

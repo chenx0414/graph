@@ -1,0 +1,23 @@
+[
+  {
+    "id": "workspace.health",
+    "ok": true,
+    "expected": "status 200; ok contains true",
+    "actual": "status 200",
+    "evidence": "/Users/macmini/workspace/13-Graph/verification/evidence/be16cc49/shell-workspace/check-01.json"
+  },
+  {
+    "id": "workspace.startup-is-isolated",
+    "ok": true,
+    "expected": "status 200",
+    "actual": "status 200",
+    "evidence": "/Users/macmini/workspace/13-Graph/verification/evidence/be16cc49/shell-workspace/check-02.json"
+  },
+  {
+    "id": "workspace.conversations-readable",
+    "ok": true,
+    "expected": "status 200",
+    "actual": "status 200",
+    "evidence": "/Users/macmini/workspace/13-Graph/verification/evidence/be16cc49/shell-workspace/check-03.json"
+  }
+]

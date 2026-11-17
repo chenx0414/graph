@@ -1,0 +1,466 @@
+{
+  "_graph": "graph:allow-large-file: generated journey evidence kept verbatim; generated data, not source",
+  "access": [
+    {
+      "name": "消息",
+      "role": "textfield",
+      "value": "验证用文本 verify-graph 456"
+    },
+    {
+      "name": "Graph",
+      "role": "window"
+    },
+    {
+      "name": "轨迹",
+      "role": "button"
+    },
+    {
+      "name": "洞察",
+      "role": "button"
+    },
+    {
+      "name": "编队",
+      "role": "button"
+    },
+    {
+      "name": "供应商",
+      "role": "button"
+    },
+    {
+      "name": "资源",
+      "role": "button"
+    },
+    {
+      "name": "装配",
+      "role": "button"
+    },
+    {
+      "name": "设置",
+      "role": "button"
+    },
+    {
+      "name": "会话列表标题",
+      "role": "group"
+    },
+    {
+      "name": "对话标题",
+      "role": "group"
+    },
+    {
+      "name": "对话标题名",
+      "role": "statictext",
+      "value": "对话标题名"
+    },
+    {
+      "name": "白板标题",
+      "role": "group"
+    },
+    {
+      "name": "标签页 白板",
+      "role": "button"
+    },
+    {
+      "name": "标签页 洞察概览",
+      "role": "button"
+    },
+    {
+      "name": "标签页 供应商",
+      "role": "button"
+    },
+    {
+      "name": "标签页 资源库",
+      "role": "button"
+    },
+    {
+      "name": "标签页 能力装配",
+      "role": "button"
+    },
+    {
+      "name": "标签页 运行设置",
+      "role": "button"
+    },
+    {
+      "name": "标签页 编队",
+      "role": "button"
+    },
+    {
+      "name": "标签页 轨迹量化",
+      "role": "button"
+    },
+    {
+      "name": "标签页 编队总览",
+      "role": "button"
+    },
+    {
+      "name": "主区域卡片",
+      "role": "group"
+    },
+    {
+      "name": "main agent 会话",
+      "role": "button"
+    },
+    {
+      "name": "verify",
+      "role": "row"
+    },
+    {
+      "name": "verify",
+      "role": "button"
+    },
+    {
+      "name": "还没有对话",
+      "role": "statictext",
+      "value": "还没有对话"
+    },
+    {
+      "name": "在下面输入第一条消息",
+      "role": "statictext",
+      "value": "在下面输入第一条消息"
+    },
+    {
+      "name": "这个会话还没有可显示的对话。",
+      "role": "statictext",
+      "value": "这个会话还没有可显示的对话。"
+    },
+    {
+      "name": "模型选择器",
+      "role": "group"
+    },
+    {
+      "name": "全部供应商",
+      "role": "group"
+    },
+    {
+      "name": "全",
+      "role": "statictext",
+      "value": "全"
+    },
+    {
+      "name": "Search models...",
+      "role": "textfield"
+    },
+    {
+      "name": "Reasoning",
+      "role": "statictext",
+      "value": "Reasoning"
+    },
+    {
+      "name": "Default",
+      "role": "statictext",
+      "value": "Default"
+    },
+    {
+      "name": "理由 Default",
+      "role": "group"
+    },
+    {
+      "name": "附件",
+      "role": "button"
+    },
+    {
+      "name": "模型",
+      "role": "button"
+    },
+    {
+      "name": "语音",
+      "role": "group"
+    },
+    {
+      "name": "发送",
+      "role": "button"
+    },
+    {
+      "name": "Agent 网络窗口",
+      "role": "group"
+    },
+    {
+      "name": "Agent 网络",
+      "role": "statictext",
+      "value": "Agent 网络"
+    },
+    {
+      "name": "在新标签页打开",
+      "role": "button"
+    },
+    {
+      "name": "移除",
+      "role": "button"
+    },
+    {
+      "name": "编队还没有可展示的 Agent。",
+      "role": "statictext",
+      "value": "编队还没有可展示的 Agent。"
+    },
+    {
+      "name": "调整分区",
+      "role": "group"
+    },
+    {
+      "name": "跨 Agent 协作窗口",
+      "role": "group"
+    },
+    {
+      "name": "跨 Agent 协作",
+      "role": "statictext",
+      "value": "跨 Agent 协作"
+    },
+    {
+      "name": "只看 全部",
+      "role": "button"
+    },
+    {
+      "name": "只看 verify",
+      "role": "button"
+    },
+    {
+      "name": "11-17 18:59",
+      "role": "statictext",
+      "value": "11-17 18:59"
+    },
+    {
+      "name": "其他 · verify · conversation.created",
+      "role": "statictext",
+      "value": "其他 · verify · conversation.created"
+    },
+    {
+      "name": "协作任务窗口",
+      "role": "group"
+    },
+    {
+      "name": "协作任务",
+      "role": "statictext",
+      "value": "协作任务"
+    },
+    {
+      "name": "还没有协作任务。",
+      "role": "statictext",
+      "value": "还没有协作任务。"
+    },
+    {
+      "name": "事件检查窗口",
+      "role": "group"
+    },
+    {
+      "name": "事件检查",
+      "role": "statictext",
+      "value": "事件检查"
+    },
+    {
+      "name": "筛选 全部",
+      "role": "button"
+    },
+    {
+      "name": "筛选 委派",
+      "role": "button"
+    },
+    {
+      "name": "筛选 派生",
+      "role": "button"
+    },
+    {
+      "name": "筛选 投递",
+      "role": "button"
+    },
+    {
+      "name": "筛选 结果",
+      "role": "button"
+    },
+    {
+      "name": "筛选 问题",
+      "role": "button"
+    },
+    {
+      "name": "筛选 其他",
+      "role": "button"
+    },
+    {
+      "name": "conversation.created",
+      "role": "statictext",
+      "value": "conversation.created"
+    },
+    {
+      "name": "verify · conversation.created",
+      "role": "statictext",
+      "value": "verify · conversation.created"
+    },
+    {
+      "name": "共享产物窗口",
+      "role": "group"
+    },
+    {
+      "name": "共享产物",
+      "role": "statictext",
+      "value": "共享产物"
+    },
+    {
+      "name": "还没有共享产物。",
+      "role": "statictext",
+      "value": "还没有共享产物。"
+    },
+    {
+      "name": "Close",
+      "role": "button"
+    },
+    {
+      "name": "Full Screen",
+      "role": "button"
+    },
+    {
+      "name": "Minimize",
+      "role": "button"
+    }
+  ],
+  "frames": [
+    "/Users/macmini/workspace/13-Graph/verification/evidence/be16cc49/controls-model-picker/model-picker.png"
+  ],
+  "lane": "window",
+  "ok": true,
+  "steps": [
+    {
+      "detail": "visible: 白板标题",
+      "index": 1,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "detail": "visible: verify",
+      "index": 2,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "detail": "clicked: verify",
+      "index": 3,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 消息",
+      "index": 4,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "detail": "clicked: 模型",
+      "index": 5,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 模型选择器",
+      "index": 6,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "detail": "typed \"验证用文本 verify-graph 456\" into 消息",
+      "index": 7,
+      "ok": true,
+      "verb": "type"
+    },
+    {
+      "detail": "exposed as textfield with value \"验证用文本 verify-graph 456\"",
+      "index": 8,
+      "ok": true,
+      "verb": "assertAccess"
+    },
+    {
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/be16cc49/controls-model-picker/model-picker.png",
+      "index": 9,
+      "ok": true,
+      "verb": "screenshot"
+    }
+  ],
+  "texts": [
+    "Graph",
+    "轨迹",
+    "洞察",
+    "编队",
+    "供应商",
+    "资源",
+    "装配",
+    "设置",
+    "会话列表标题",
+    "对话标题",
+    "对话标题名",
+    "白板标题",
+    "标签页 白板",
+    "标签页 洞察概览",
+    "标签页 供应商",
+    "标签页 资源库",
+    "标签页 能力装配",
+    "标签页 运行设置",
+    "标签页 编队",
+    "标签页 轨迹量化",
+    "标签页 编队总览",
+    "主区域卡片",
+    "main agent 会话",
+    "verify",
+    "verify",
+    "还没有对话",
+    "在下面输入第一条消息",
+    "这个会话还没有可显示的对话。",
+    "模型选择器",
+    "全部供应商",
+    "全",
+    "Search models...",
+    "Reasoning",
+    "Default",
+    "理由 Default",
+    "Default",
+    "消息",
+    "附件",
+    "模型",
+    "语音",
+    "发送",
+    "Agent 网络窗口",
+    "Agent 网络窗口",
+    "Agent 网络",
+    "在新标签页打开",
+    "移除",
+    "编队还没有可展示的 Agent。",
+    "调整分区",
+    "跨 Agent 协作窗口",
+    "跨 Agent 协作窗口",
+    "跨 Agent 协作",
+    "在新标签页打开",
+    "移除",
+    "只看 全部",
+    "只看 verify",
+    "11-17 18:59",
+    "其他 · verify · conversation.created",
+    "调整分区",
+    "协作任务窗口",
+    "协作任务窗口",
+    "协作任务",
+    "在新标签页打开",
+    "移除",
+    "还没有协作任务。",
+    "调整分区",
+    "事件检查窗口",
+    "事件检查窗口",
+    "事件检查",
+    "在新标签页打开",
+    "移除",
+    "筛选 全部",
+    "筛选 委派",
+    "筛选 派生",
+    "筛选 投递",
+    "筛选 结果",
+    "筛选 问题",
+    "筛选 其他",
+    "conversation.created",
+    "11-17 18:59",
+    "verify · conversation.created",
+    "调整分区",
+    "共享产物窗口",
+    "共享产物窗口",
+    "共享产物",
+    "在新标签页打开",
+    "移除",
+    "还没有共享产物。",
+    "Close",
+    "Full Screen",
+    "Minimize"
+  ]
+}

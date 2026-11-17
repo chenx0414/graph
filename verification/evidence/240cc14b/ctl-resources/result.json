@@ -1,0 +1,234 @@
+{
+  "ok": true,
+  "steps": [
+    {
+      "index": 1,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 白板标题"
+    },
+    {
+      "index": 2,
+      "verb": "click",
+      "ok": true
+    },
+    {
+      "index": 3,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 资源库窗口"
+    },
+    {
+      "index": 4,
+      "verb": "assertAccess",
+      "ok": true,
+      "detail": "exposed as button"
+    },
+    {
+      "index": 5,
+      "verb": "assertAccess",
+      "ok": true,
+      "detail": "exposed as button"
+    },
+    {
+      "index": 6,
+      "verb": "assertAccess",
+      "ok": true,
+      "detail": "exposed as button"
+    },
+    {
+      "index": 7,
+      "verb": "assertAccess",
+      "ok": true,
+      "detail": "exposed as button"
+    },
+    {
+      "index": 8,
+      "verb": "assertAccess",
+      "ok": true,
+      "detail": "exposed as button"
+    },
+    {
+      "index": 9,
+      "verb": "assertAccess",
+      "ok": true,
+      "detail": "exposed as button"
+    },
+    {
+      "index": 10,
+      "verb": "assertAccess",
+      "ok": true,
+      "detail": "exposed as button"
+    },
+    {
+      "index": 11,
+      "verb": "click",
+      "ok": true
+    },
+    {
+      "index": 12,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 资源库窗口"
+    },
+    {
+      "index": 13,
+      "verb": "click",
+      "ok": true
+    },
+    {
+      "index": 14,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 资源库 · 0 个"
+    },
+    {
+      "index": 15,
+      "verb": "click",
+      "ok": true
+    },
+    {
+      "index": 16,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 资源库 · 0 个"
+    },
+    {
+      "index": 17,
+      "verb": "click",
+      "ok": true
+    },
+    {
+      "index": 18,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 资源库 · 0 个"
+    },
+    {
+      "index": 19,
+      "verb": "click",
+      "ok": true
+    },
+    {
+      "index": 20,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 资源库 · 0 个"
+    },
+    {
+      "index": 21,
+      "verb": "click",
+      "ok": true
+    },
+    {
+      "index": 22,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 资源库 · 0 个"
+    },
+    {
+      "index": 23,
+      "verb": "screenshot",
+      "ok": true,
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/240cc14b/ctl-resources/ctl-resources.png"
+    }
+  ],
+  "texts": [
+    "轨迹",
+    "洞察",
+    "编队",
+    "供应商",
+    "资源",
+    "装配",
+    "设置",
+    "会话列表标题",
+    "对话标题",
+    "对话标题名",
+    "白板标题",
+    "标签页 白板",
+    "白板",
+    "标签页 资源库",
+    "资源库",
+    "关闭 资源库",
+    "主区域卡片",
+    "main agent 会话",
+    "章鱼",
+    "main agent 名称",
+    "Main Agent",
+    "verify",
+    "verify",
+    "还没有对话",
+    "在下面输入第一条消息",
+    "这个会话还没有可显示的对话。",
+    "消息",
+    "附件",
+    "模型",
+    "模型",
+    "语音",
+    "发送",
+    "资源库窗口",
+    "资源库窗口",
+    "资源库",
+    "使用",
+    "/",
+    "资源库",
+    "/",
+    "全部",
+    "打开资源库文件夹",
+    "打开资源库文件夹",
+    "刷新资源库",
+    "查找资源",
+    "分类 全部",
+    "全部",
+    "分类 技能",
+    "技能 · 0",
+    "分类 指令",
+    "指令 · 0",
+    "分类 MCP 服务器",
+    "MCP 服务器 · 0",
+    "分类 Pi 扩展",
+    "Pi 扩展 · 0",
+    "发现",
+    "资源库 · 0 个"
+  ],
+  "frames": [
+    "/Users/macmini/workspace/13-Graph/verification/evidence/240cc14b/ctl-resources/ctl-resources.png"
+  ],
+  "access": [
+    {
+      "name": "打开资源库文件夹",
+      "role": "button",
+      "focusable": true
+    },
+    {
+      "name": "刷新资源库",
+      "role": "button",
+      "focusable": true
+    },
+    {
+      "name": "分类 全部",
+      "role": "button",
+      "focusable": true
+    },
+    {
+      "name": "分类 技能",
+      "role": "button",
+      "focusable": true
+    },
+    {
+      "name": "分类 指令",
+      "role": "button",
+      "focusable": true
+    },
+    {
+      "name": "分类 MCP 服务器",
+      "role": "button",
+      "focusable": true
+    },
+    {
+      "name": "分类 Pi 扩展",
+      "role": "button",
+      "focusable": true
+    }
+  ]
+}

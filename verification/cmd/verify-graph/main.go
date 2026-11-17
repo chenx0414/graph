@@ -22,6 +22,7 @@ Commands:
   scenario                   Run one journey file against an isolated instance
   verify                     Run journeys (--all or --journey) and write evidence
   evidence                   List or verify evidence manifests
+  cover                      Build the control inventory and audit control-level coverage
   cleanup                    Stop and remove a run, or --orphans for daemons left by abandoned runs (evidence is kept)
   help                       Print this help (--json for the command table)
   version                    Print the CLI version
@@ -81,6 +82,8 @@ func main() {
 		os.Exit(verifyCommand(p, args))
 	case "evidence":
 		os.Exit(evidenceCommand(p, args))
+	case "cover":
+		os.Exit(coverCommand(p, args))
 	case "cleanup":
 		os.Exit(cleanupCommand(p, args))
 	default:
@@ -166,6 +169,7 @@ func helpCommand(args []string) int {
 		{"name": "scenario", "summary": "scenario run <journey file>"},
 		{"name": "verify", "summary": "run journeys and write evidence"},
 		{"name": "evidence", "summary": "evidence list | evidence verify <run>"},
+		{"name": "cover", "summary": "cover inventory (build the control list) | cover audit (prove every control)"},
 		{"name": "cleanup", "summary": "stop a run and remove its state"},
 		{"name": "version", "summary": "print the CLI version"},
 	}

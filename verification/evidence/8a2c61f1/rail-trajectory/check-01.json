@@ -1,0 +1,42 @@
+{
+  "_graph": "graph:allow-large-file: raw daemon response kept as evidence; generated data, not source",
+  "body": [
+    {
+      "anchorTaskId": "77b0de17-a531-474d-8fbe-08d4c22ebd62",
+      "archivedAt": null,
+      "createdAt": 1794913052707,
+      "id": "c62f0ea6-d6cc-4ef7-8f75-a9cb1d3bb5fa",
+      "openQuestions": 0,
+      "projectArchivedAt": null,
+      "projectId": null,
+      "role": "global",
+      "status": "chatting",
+      "suspendedQuestions": 0,
+      "taskCount": 0,
+      "title": "Main",
+      "updatedAt": 1794913052708
+    },
+    {
+      "anchorTaskId": "082d0193-0049-4db3-95ed-1fee09fc27e7",
+      "archivedAt": null,
+      "createdAt": 1794913052708,
+      "id": "c65ba708-dcdf-4f26-a6b6-8a1fe6e5dfa8",
+      "openQuestions": 0,
+      "projectArchivedAt": null,
+      "projectId": "verify",
+      "role": "project",
+      "status": "chatting",
+      "suspendedQuestions": 0,
+      "taskCount": 0,
+      "title": "verify",
+      "updatedAt": 1794913052709
+    }
+  ],
+  "request": {
+    "method": "GET",
+    "path": "/api/conversations",
+    "expectStatus": 200,
+    "id": "trajectory.conversations-readable"
+  },
+  "status": 200
+}

@@ -218,6 +218,37 @@ func runJourneySurface(p paths, meta runMeta, value journey, outDir string, exis
 			}
 			result.Access = append(result.Access, accessDump{Name: node.Name, Role: node.Role, Value: node.Value})
 			outcome.Detail = "exposed as " + firstNonEmpty(node.Role, current.Role)
+		case "click":
+			if problem := refresh(); problem != "" {
+				return fail(index, current.Verb, "cannot read the surface: "+problem)
+			}
+			node, found := findAccess(snap.Snapshot, current.Name, current.Role)
+			if !found {
+				return fail(index, current.Verb, fmt.Sprintf("%q is not exposed with role %q on surface %s; the surface shows: %s", current.Name, current.Role, surface, strings.Join(snap.Names(), " | ")))
+			}
+			if node.Ref == "" {
+				return fail(index, current.Verb, fmt.Sprintf("%q has no ref on surface %s, so it cannot be pressed", current.Name, surface))
+			}
+			if _, clickErr := session.desktop.ClickRef(node.Ref); clickErr != nil {
+				return fail(index, current.Verb, fmt.Sprintf("cannot click %q on surface %s: %v", current.Name, surface, clickErr))
+			}
+			outcome.Detail = "clicked surface item " + current.Name
+		case "assertWindowVisible":
+			windows, windowsErr := session.desktop.Windows()
+			if windowsErr != nil {
+				return fail(index, current.Verb, "cannot list windows: "+windowsErr.Error())
+			}
+			visible := false
+			for _, window := range windows {
+				if window.ID == session.window.ID && window.Visible && window.Bounds.Width > 0 && window.Bounds.Height > 0 {
+					visible = true
+					outcome.Detail = fmt.Sprintf("%s is visible (%dx%d)", window.ID, int(window.Bounds.Width), int(window.Bounds.Height))
+					break
+				}
+			}
+			if !visible {
+				return fail(index, current.Verb, fmt.Sprintf("window %s is not visible after the surface action", session.window.ID))
+			}
 		case "screenshot":
 			name := current.Path
 			if name == "" {

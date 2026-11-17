@@ -45,3 +45,22 @@ func TestNamesSummaryKeepsBothEndsOfALongTree(t *testing.T) {
 		t.Fatalf("the summary grew without bound: %d chars", len(summary))
 	}
 }
+
+func TestMergeAccessKeepsAssertedValuesAndTheWholeFrame(t *testing.T) {
+	asserted := []accessDump{{Name: "消息", Role: "textfield", Value: "typed"}}
+	full := []accessDump{
+		{Name: "消息", Role: "textfield", Value: "typed"},
+		{Name: "洞察", Role: "button"},
+		{Name: "标签页 白板", Role: "button"},
+	}
+	merged := mergeAccess(asserted, full)
+	if len(merged) != 3 {
+		t.Fatalf("merged = %+v; the final frame must keep every named control", merged)
+	}
+	if merged[0].Name != "消息" || merged[0].Value != "typed" {
+		t.Fatalf("the asserted node must come first with its value, got %+v", merged[0])
+	}
+	if len(mergeAccess(nil, full)) != 3 {
+		t.Fatal("a journey without assertAccess must still record the full frame")
+	}
+}

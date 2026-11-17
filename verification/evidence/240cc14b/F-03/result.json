@@ -1,0 +1,84 @@
+{
+  "ok": true,
+  "steps": [
+    {
+      "index": 1,
+      "verb": "waitText",
+      "ok": true,
+      "detail": "visible: 白板标题"
+    },
+    {
+      "index": 2,
+      "verb": "clickIf",
+      "ok": true
+    },
+    {
+      "index": 3,
+      "verb": "assertText",
+      "ok": true
+    },
+    {
+      "index": 4,
+      "verb": "assertText",
+      "ok": true
+    },
+    {
+      "index": 5,
+      "verb": "screenshot",
+      "ok": true,
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/240cc14b/F-03/conversations.png"
+    }
+  ],
+  "texts": [
+    "轨迹",
+    "洞察",
+    "编队",
+    "供应商",
+    "资源",
+    "装配",
+    "设置",
+    "会话列表标题",
+    "对话标题",
+    "白板标题",
+    "标签页 白板",
+    "白板",
+    "主区域卡片",
+    "main agent 会话",
+    "章鱼",
+    "main agent 名称",
+    "Main Agent",
+    "还没有项目会话。",
+    "从左侧选择一个项目",
+    "当前上下文窗口",
+    "先打开一个会话",
+    "当前上下文窗口",
+    "当前上下文",
+    "在新标签页打开",
+    "移除",
+    "调整分区",
+    "Agent 网络窗口",
+    "先打开一个对话，这里会显示它所在的编队。",
+    "Agent 网络窗口",
+    "Agent 网络",
+    "在新标签页打开",
+    "移除",
+    "调整分区",
+    "Agent 面板窗口",
+    "先打开一个对话，这里会显示它对应的 Agent。",
+    "Agent 面板窗口",
+    "Agent 面板",
+    "在新标签页打开",
+    "移除",
+    "调整分区",
+    "轨迹量化窗口",
+    "",
+    "先打开一个会话",
+    "轨迹量化窗口",
+    "轨迹量化",
+    "在新标签页打开",
+    "移除"
+  ],
+  "frames": [
+    "/Users/macmini/workspace/13-Graph/verification/evidence/240cc14b/F-03/conversations.png"
+  ]
+}

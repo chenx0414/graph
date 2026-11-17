@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -48,5 +50,37 @@ func TestALargeCheckBodyStaysVerbatimBehindTheBudgetDirective(t *testing.T) {
 	}
 	if !strings.Contains(marker, "raw daemon response kept as evidence") {
 		t.Fatalf("the directive must say why the file cannot be split: %q", marker)
+	}
+}
+
+func TestAWrittenJourneyResultCarriesTheBudgetDirectiveAndStaysReadable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "result.json")
+	original := map[string]any{
+		"ok": true, "lane": "window",
+		"steps": []any{map[string]any{"index": 1, "verb": "click", "ok": true}},
+		"texts": []any{"白板标题", "洞察"},
+	}
+	raw, err := json.MarshalIndent(original, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	markEvidenceFile(path)
+	reRead, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var marked map[string]any
+	if err := json.Unmarshal(reRead, &marked); err != nil {
+		t.Fatalf("a marked result must stay valid JSON: %v", err)
+	}
+	marker, _ := marked["_graph"].(string)
+	if !strings.Contains(marker, "graph:allow-large-file:") || !strings.Contains(marker, "journey evidence") {
+		t.Fatalf("a journey result must carry its own budget directive, got %q", marker)
+	}
+	if marked["ok"] != true || marked["lane"] != "window" {
+		t.Fatalf("marking must not drop the evidence fields: %+v", marked)
 	}
 }

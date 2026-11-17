@@ -43,6 +43,9 @@ const (
 	codeNoRun             = "not-launched"
 	codeLabelNotFound     = "label-not-found"
 	codeJourneyFileBroken = "journey-invalid"
+	codeControlsInventory = "controls-inventory-missing"
+	codeControlsLedger    = "controls-ledger-missing"
+	codeControlsGap       = "controls-unproven"
 )
 
 func okEnvelope(command, lane string, data any) envelope {

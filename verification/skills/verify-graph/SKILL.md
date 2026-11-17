@@ -189,6 +189,36 @@ Rules that keep the evidence honest:
   PNG and `-R15,180,157,158` a 157×158 PNG of the app window. If the region capture fails too, mark the feature
   `evidence_partial` and say why; do not silently downgrade to an API-only pass.
 
+## Control coverage
+
+A journey proves that a feature works; a control witness proves that one button, tab, menu item or input was
+really pressed/typed and that something visible changed afterwards. `verification/controls/` holds the list, the
+witness ledger and the audited verdict. The rule is one conclusion per control: `covered`, `not-applicable` or
+`blocked`; `unknown` is a red audit.
+
+```sh
+verification/verify-graph cover inventory --run <run-id>   # AX dumps -> controls/inventory.json
+verification/verify-graph cover derive                     # green journey steps -> witnesses (never invents one)
+verification/verify-graph cover audit                      # re-check every claim against journeys + evidence
+```
+
+How to judge a control:
+
+- `covered` needs a real action step (`click`/`clickIf`/`type`/`key`) for that exact accessible name, an assertion
+after it that observes a different visible result (or the typed value read back from the field), and a recorded
+green run in a lane that can prove it. A screenshot, an `assertAccess` of the same label before the action, or a
+`waitText` for the control itself does not count.
+- `not-applicable` needs a concrete reason: one-off, external system, unreachable, or a dynamic label that cannot
+be located stably.
+- `blocked` needs the reason and the next step; record what was already tried under `attempts`.
+- Menus, tray items, popups, focus and keyboard-only controls need a window/surface witness; headless cannot
+pretend to prove them.
+
+How to add a witness: write a scenario step that drives the control and asserts the result, run
+`verification/verify-graph verify --journey <id>` (and `--lane window` when the control needs it), then run
+`cover derive` and `cover audit`. The audit re-reads the journey file and the recorded `result.json`, so editing
+the ledger alone cannot turn a control green. Full schema and a worked example: `skills/verify-graph/CONTROLS.md`.
+
 ## Cleanup
 
 ```sh
@@ -212,6 +242,8 @@ and age (`--older-than`, default 120s). Review first with `--orphans --dry-run`.
 - `verification/skills/verify-graph/features/` — the feature map: `index.json` plus one file per feature, each with
   `Sub-features`, `How to get to it (user POV)`, `Driving it with verify-graph`, `Gotchas`. Start here to find the
   journey for the feature you are checking.
+- `verification/controls/` — `inventory.json` (every stable control), `ledger.json` (witnesses/exclusions),
+  `coverage.json` and `COVERAGE.generated.md` (the audited verdict). Schema and worked example in `CONTROLS.md`.
 - `verification/internal/seed` — the stub model and the seeded conversation described under **Drive**.
 - `verification/evidence/<run-id>/` — what a previous run proved; `evidence verify` re-checks the hashes.
 

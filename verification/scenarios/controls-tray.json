@@ -1,0 +1,46 @@
+{
+  "id": "controls-tray",
+  "feature": "F-15",
+  "description": "托盘菜单项是真实控件：打开菜单后“打开 Graph”必须被按一次并让菜单收起；“退出 Graph”只断言存在、不按（按了会杀掉被测实例）。",
+  "instance": "view",
+  "surface": "menu-bar-extras",
+  "steps": [
+    {
+      "verb": "open",
+      "timeoutMs": 20000
+    },
+    {
+      "verb": "assertText",
+      "text": "打开 Graph"
+    },
+    {
+      "verb": "assertAccess",
+      "name": "打开 Graph",
+      "role": "menuitem"
+    },
+    {
+      "verb": "assertAccess",
+      "name": "退出 Graph",
+      "role": "menuitem"
+    },
+    {
+      "verb": "click",
+      "name": "打开 Graph",
+      "role": "menuitem"
+    },
+    {
+      "verb": "assertWindowVisible"
+    }
+  ],
+  "checks": [
+    {
+      "id": "controls-tray.health",
+      "method": "GET",
+      "path": "/api/health",
+      "expectStatus": 200,
+      "expect": {
+        "ok": true
+      }
+    }
+  ]
+}

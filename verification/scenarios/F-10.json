@@ -22,6 +22,14 @@
       "text": "编队"
     },
     {
+      "verb": "click",
+      "name": "刷新编队"
+    },
+    {
+      "verb": "assertText",
+      "text": "编队范围"
+    },
+    {
       "verb": "screenshot",
       "path": "fleet.png"
     }

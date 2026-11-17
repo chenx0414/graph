@@ -1,0 +1,107 @@
+{
+  "id": "ctl-board",
+  "feature": "ctl-board",
+  "description": "Control witness: the infinite canvas exposes 居中, + and − as buttons; pressing them changes the visible zoom/position readout on the board.",
+  "width": 1440,
+  "height": 900,
+  "prepare": [
+    {
+      "id": "ctl-board.thread",
+      "method": "POST",
+      "path": "/api/projects/verify/thread",
+      "body": {
+        "requestId": "ctl-board-thread",
+        "text": "ctl board"
+      },
+      "expectStatus": 200
+    }
+  ],
+  "steps": [
+    {
+      "verb": "waitText",
+      "text": "白板标题",
+      "timeoutMs": 25000
+    },
+    {
+      "verb": "clickIf",
+      "name": "标签页 白板"
+    },
+    {
+      "verb": "waitText",
+      "text": "verify",
+      "timeoutMs": 20000
+    },
+    {
+      "verb": "click",
+      "name": "verify"
+    },
+    {
+      "verb": "clickIf",
+      "name": "标签页 白板"
+    },
+    {
+      "verb": "waitText",
+      "text": "白板标题",
+      "timeoutMs": 20000
+    },
+    {
+      "verb": "waitText",
+      "text": "居中",
+      "timeoutMs": 20000
+    },
+    {
+      "verb": "assertAccess",
+      "name": "居中",
+      "role": "button"
+    },
+    {
+      "verb": "assertAccess",
+      "name": "+",
+      "role": "button"
+    },
+    {
+      "verb": "assertAccess",
+      "name": "−",
+      "role": "button"
+    },
+    {
+      "verb": "click",
+      "name": "+"
+    },
+    {
+      "verb": "waitText",
+      "text": "无限画布",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "click",
+      "name": "−"
+    },
+    {
+      "verb": "waitText",
+      "text": "无限画布",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "click",
+      "name": "居中"
+    },
+    {
+      "verb": "waitText",
+      "text": "无限画布",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "screenshot",
+      "path": "ctl-board.png"
+    }
+  ],
+  "checks": [
+    {
+      "id": "ctl-board.settings",
+      "method": "GET",
+      "path": "/api/settings",
+      "expectStatus": 200
+    }
+  ]
+}

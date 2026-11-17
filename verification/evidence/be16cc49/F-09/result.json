@@ -1,0 +1,418 @@
+{
+  "_graph": "graph:allow-large-file: generated journey evidence kept verbatim; generated data, not source",
+  "access": [
+    {
+      "name": "Graph",
+      "role": "window"
+    },
+    {
+      "name": "轨迹",
+      "role": "button"
+    },
+    {
+      "name": "洞察",
+      "role": "button"
+    },
+    {
+      "name": "编队",
+      "role": "button"
+    },
+    {
+      "name": "供应商",
+      "role": "button"
+    },
+    {
+      "name": "资源",
+      "role": "button"
+    },
+    {
+      "name": "装配",
+      "role": "button"
+    },
+    {
+      "name": "设置",
+      "role": "button"
+    },
+    {
+      "name": "会话列表标题",
+      "role": "group"
+    },
+    {
+      "name": "对话标题",
+      "role": "group"
+    },
+    {
+      "name": "对话标题名",
+      "role": "statictext",
+      "value": "对话标题名"
+    },
+    {
+      "name": "白板标题",
+      "role": "group"
+    },
+    {
+      "name": "标签页 白板",
+      "role": "button"
+    },
+    {
+      "name": "标签页 洞察概览",
+      "role": "button"
+    },
+    {
+      "name": "标签页 供应商",
+      "role": "button"
+    },
+    {
+      "name": "标签页 资源库",
+      "role": "button"
+    },
+    {
+      "name": "标签页 能力装配",
+      "role": "button"
+    },
+    {
+      "name": "标签页 运行设置",
+      "role": "button"
+    },
+    {
+      "name": "标签页 编队",
+      "role": "button"
+    },
+    {
+      "name": "标签页 轨迹量化",
+      "role": "button"
+    },
+    {
+      "name": "主区域卡片",
+      "role": "group"
+    },
+    {
+      "name": "main agent 会话",
+      "role": "button"
+    },
+    {
+      "name": "verify",
+      "role": "row"
+    },
+    {
+      "name": "verify",
+      "role": "button"
+    },
+    {
+      "name": "还没有对话",
+      "role": "statictext",
+      "value": "还没有对话"
+    },
+    {
+      "name": "在下面输入第一条消息",
+      "role": "statictext",
+      "value": "在下面输入第一条消息"
+    },
+    {
+      "name": "这个会话还没有可显示的对话。",
+      "role": "statictext",
+      "value": "这个会话还没有可显示的对话。"
+    },
+    {
+      "name": "消息",
+      "role": "textfield",
+      "value": "验证用文本 verify-graph 123"
+    },
+    {
+      "name": "附件",
+      "role": "button"
+    },
+    {
+      "name": "模型",
+      "role": "button"
+    },
+    {
+      "name": "语音",
+      "role": "group"
+    },
+    {
+      "name": "发送",
+      "role": "button"
+    },
+    {
+      "name": "洞察概览窗口",
+      "role": "group"
+    },
+    {
+      "name": "洞察概览",
+      "role": "statictext",
+      "value": "洞察概览"
+    },
+    {
+      "name": "● 7 天",
+      "role": "button"
+    },
+    {
+      "name": "○ 30 天",
+      "role": "button"
+    },
+    {
+      "name": "0",
+      "role": "statictext",
+      "value": "0"
+    },
+    {
+      "name": "总 tokens",
+      "role": "statictext",
+      "value": "总 tokens"
+    },
+    {
+      "name": "$0",
+      "role": "statictext",
+      "value": "$0"
+    },
+    {
+      "name": "成本",
+      "role": "statictext",
+      "value": "成本"
+    },
+    {
+      "name": "请求",
+      "role": "statictext",
+      "value": "请求"
+    },
+    {
+      "name": "0.0%",
+      "role": "statictext",
+      "value": "0.0%"
+    },
+    {
+      "name": "缓存命中",
+      "role": "statictext",
+      "value": "缓存命中"
+    },
+    {
+      "name": "会话",
+      "role": "statictext",
+      "value": "会话"
+    },
+    {
+      "name": "日均 tokens",
+      "role": "statictext",
+      "value": "日均 tokens"
+    },
+    {
+      "name": "用量趋势窗口",
+      "role": "group"
+    },
+    {
+      "name": "用量趋势",
+      "role": "statictext",
+      "value": "用量趋势"
+    },
+    {
+      "name": "11-11",
+      "role": "statictext",
+      "value": "11-11"
+    },
+    {
+      "name": "11-12",
+      "role": "statictext",
+      "value": "11-12"
+    },
+    {
+      "name": "11-13",
+      "role": "statictext",
+      "value": "11-13"
+    },
+    {
+      "name": "11-14",
+      "role": "statictext",
+      "value": "11-14"
+    },
+    {
+      "name": "11-15",
+      "role": "statictext",
+      "value": "11-15"
+    },
+    {
+      "name": "11-16",
+      "role": "statictext",
+      "value": "11-16"
+    },
+    {
+      "name": "11-17",
+      "role": "statictext",
+      "value": "11-17"
+    },
+    {
+      "name": "成本 $0 → $0",
+      "role": "statictext",
+      "value": "成本 $0 → $0"
+    },
+    {
+      "name": "会话排行窗口",
+      "role": "group"
+    },
+    {
+      "name": "会话排行",
+      "role": "statictext",
+      "value": "会话排行"
+    },
+    {
+      "name": "0 个会话",
+      "role": "statictext",
+      "value": "0 个会话"
+    },
+    {
+      "name": "近 7 天还没有会话用量。",
+      "role": "statictext",
+      "value": "近 7 天还没有会话用量。"
+    },
+    {
+      "name": "Close",
+      "role": "button"
+    },
+    {
+      "name": "Full Screen",
+      "role": "button"
+    },
+    {
+      "name": "Minimize",
+      "role": "button"
+    }
+  ],
+  "frames": [
+    "/Users/macmini/workspace/13-Graph/verification/evidence/be16cc49/F-09/insights.png"
+  ],
+  "lane": "window",
+  "ok": true,
+  "steps": [
+    {
+      "detail": "visible: 洞察",
+      "index": 1,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "detail": "clicked: 洞察",
+      "index": 2,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 洞察概览窗口",
+      "index": 3,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "detail": "visible: 用量趋势窗口",
+      "index": 4,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "detail": "visible: 会话排行窗口",
+      "index": 5,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "detail": "clicked: 30 天",
+      "index": 6,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: ● 30 天",
+      "index": 7,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "detail": "clicked: 7 天",
+      "index": 8,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: ● 7 天",
+      "index": 9,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/be16cc49/F-09/insights.png",
+      "index": 10,
+      "ok": true,
+      "verb": "screenshot"
+    }
+  ],
+  "texts": [
+    "Graph",
+    "轨迹",
+    "洞察",
+    "编队",
+    "供应商",
+    "资源",
+    "装配",
+    "设置",
+    "会话列表标题",
+    "对话标题",
+    "对话标题名",
+    "白板标题",
+    "标签页 白板",
+    "标签页 洞察概览",
+    "标签页 供应商",
+    "标签页 资源库",
+    "标签页 能力装配",
+    "标签页 运行设置",
+    "标签页 编队",
+    "标签页 轨迹量化",
+    "主区域卡片",
+    "main agent 会话",
+    "verify",
+    "verify",
+    "还没有对话",
+    "在下面输入第一条消息",
+    "这个会话还没有可显示的对话。",
+    "消息",
+    "附件",
+    "模型",
+    "语音",
+    "发送",
+    "洞察概览窗口",
+    "洞察概览窗口",
+    "洞察概览",
+    "● 7 天",
+    "○ 30 天",
+    "0",
+    "总 tokens",
+    "$0",
+    "成本",
+    "0",
+    "请求",
+    "0.0%",
+    "缓存命中",
+    "0",
+    "会话",
+    "0",
+    "日均 tokens",
+    "用量趋势窗口",
+    "用量趋势窗口",
+    "用量趋势",
+    "0",
+    "11-11",
+    "11-12",
+    "11-13",
+    "11-14",
+    "11-15",
+    "11-16",
+    "11-17",
+    "成本 $0 → $0",
+    "会话排行窗口",
+    "会话排行窗口",
+    "会话排行",
+    "0 个会话",
+    "近 7 天还没有会话用量。",
+    "Close",
+    "Full Screen",
+    "Minimize"
+  ]
+}

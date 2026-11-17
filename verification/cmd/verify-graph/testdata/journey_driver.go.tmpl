@@ -23,6 +23,7 @@ type vgStep struct {
 	Path      string  `json:"path,omitempty"`
 	TimeoutMs int     `json:"timeoutMs,omitempty"`
 	ScrollY   float32 `json:"scrollY,omitempty"`
+	SkipInHeadless bool `json:"skipInHeadless,omitempty"`
 }
 
 type vgJourney struct {
@@ -140,6 +141,12 @@ func TestVerifyGraphJourney(t *testing.T) {
 
 	for index, s := range spec.Steps {
 		outcome := vgOutcome{Index: index + 1, Verb: s.Verb, OK: true}
+		if s.SkipInHeadless {
+			outcome.Skipped = true
+			outcome.Detail = "skipped in the headless lane: only the real window exposes this observation"
+			out.Steps = append(out.Steps, outcome)
+			continue
+		}
 		fail := func(format string, args ...any) {
 			outcome.OK = false
 			outcome.Detail = fmt.Sprintf(format, args...)

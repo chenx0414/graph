@@ -1,0 +1,58 @@
+{
+  "id": "controls-fleet",
+  "feature": "F-10",
+  "description": "编队页卡片右上角的两个真实控件：在新标签页打开必须多出一个编队总览页签，回到原页签后移除必须让编队总览面板和它的刷新按钮消失。",
+  "width": 1440,
+  "height": 900,
+  "steps": [
+    {
+      "verb": "waitText",
+      "text": "白板标题",
+      "timeoutMs": 25000
+    },
+    {
+      "verb": "click",
+      "name": "编队"
+    },
+    {
+      "verb": "waitText",
+      "text": "编队总览窗口"
+    },
+    {
+      "verb": "assertText",
+      "text": "刷新编队"
+    },
+    {
+      "verb": "click",
+      "name": "在新标签页打开"
+    },
+    {
+      "verb": "waitText",
+      "text": "标签页 编队总览"
+    },
+    {
+      "verb": "assertText",
+      "text": "编队范围"
+    },
+    {
+      "verb": "click",
+      "name": "标签页 编队"
+    },
+    {
+      "verb": "waitText",
+      "text": "刷新编队"
+    },
+    {
+      "verb": "click",
+      "name": "移除"
+    },
+    {
+      "verb": "assertNoText",
+      "text": "刷新编队"
+    },
+    {
+      "verb": "screenshot",
+      "path": "fleet-new-tab-removed.png"
+    }
+  ]
+}

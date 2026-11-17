@@ -1,0 +1,80 @@
+{
+  "id": "controls-context-tabs",
+  "feature": "controls-context-tabs",
+  "description": "上下文窗口的三个页签是真实控件（先选中一个项目会话）：切到 System Prompt 与 工具声明 后 系统提示词 必须消失，切回 上下文 必须恢复它和工具定义。",
+  "width": 1440,
+  "height": 900,
+  "steps": [
+    {
+      "verb": "waitText",
+      "text": "白板标题",
+      "timeoutMs": 25000
+    },
+    {
+      "verb": "clickIf",
+      "name": "标签页 白板"
+    },
+    {
+      "verb": "waitText",
+      "text": "verify",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "click",
+      "name": "verify"
+    },
+    {
+      "verb": "waitText",
+      "text": "消息",
+      "timeoutMs": 12000
+    },
+    {
+      "verb": "click",
+      "name": "上下文"
+    },
+    {
+      "verb": "assertText",
+      "text": "系统提示词"
+    },
+    {
+      "verb": "click",
+      "name": "System Prompt"
+    },
+    {
+      "verb": "assertNoText",
+      "text": "系统提示词"
+    },
+    {
+      "verb": "click",
+      "name": "工具声明"
+    },
+    {
+      "verb": "assertNoText",
+      "text": "系统提示词"
+    },
+    {
+      "verb": "click",
+      "name": "上下文"
+    },
+    {
+      "verb": "assertText",
+      "text": "工具定义"
+    },
+    {
+      "verb": "screenshot",
+      "path": "context-tabs.png"
+    }
+  ],
+  "prepare": [
+    {
+      "id": "controls-context-tabs.thread",
+      "method": "POST",
+      "path": "/api/projects/verify/thread",
+      "body": {
+        "requestId": "vg-controls-context-thread",
+        "text": "controls-context-tabs 准备：建立项目会话"
+      },
+      "expectStatus": 200
+    }
+  ]
+}

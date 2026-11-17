@@ -1,0 +1,23 @@
+{
+  "_graph": "graph:allow-large-file: raw daemon response kept as evidence; generated data, not source",
+  "body": {
+    "configured": false,
+    "effectiveRevision": 0,
+    "enabledModelCount": 0,
+    "mode": "view",
+    "modelCount": 0,
+    "source": {
+      "branch": "main",
+      "commit": "924e6fbb770067bee6061e54e83b7de9d656f7f9",
+      "dirty": true,
+      "root": "/Users/macmini/workspace/13-Graph"
+    }
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/startup",
+    "expectStatus": 200,
+    "id": "workspace.startup-is-isolated"
+  },
+  "status": 200
+}

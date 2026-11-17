@@ -14,15 +14,17 @@ import (
 var driverSource string
 
 type step struct {
-	Verb      string  `json:"verb"`
-	Name      string  `json:"name,omitempty"`
-	Role      string  `json:"role,omitempty"`
-	Value     string  `json:"value,omitempty"`
-	Text      string  `json:"text,omitempty"`
-	Key       string  `json:"key,omitempty"`
-	Path      string  `json:"path,omitempty"`
-	TimeoutMs int     `json:"timeoutMs,omitempty"`
-	ScrollY   float32 `json:"scrollY,omitempty"`
+	Verb           string  `json:"verb"`
+	Name           string  `json:"name,omitempty"`
+	Role           string  `json:"role,omitempty"`
+	Value          string  `json:"value,omitempty"`
+	Text           string  `json:"text,omitempty"`
+	Key            string  `json:"key,omitempty"`
+	Path           string  `json:"path,omitempty"`
+	TimeoutMs      int     `json:"timeoutMs,omitempty"`
+	ScrollY        float32 `json:"scrollY,omitempty"`
+	SkipInWindow   bool    `json:"skipInWindow,omitempty"`
+	SkipInHeadless bool    `json:"skipInHeadless,omitempty"`
 }
 
 type apiCheck struct {

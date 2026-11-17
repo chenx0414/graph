@@ -1,0 +1,42 @@
+{
+  "_graph": "graph:allow-large-file: raw daemon response kept as evidence; generated data, not source",
+  "body": [
+    {
+      "anchorTaskId": "0922ad08-e06f-4faf-ad49-dc16210eea80",
+      "archivedAt": null,
+      "createdAt": 1794914369162,
+      "id": "7f1ff0de-09ef-4d23-8619-18521fc8fee1",
+      "openQuestions": 0,
+      "projectArchivedAt": null,
+      "projectId": null,
+      "role": "global",
+      "status": "chatting",
+      "suspendedQuestions": 0,
+      "taskCount": 0,
+      "title": "Main",
+      "updatedAt": 1794914369163
+    },
+    {
+      "anchorTaskId": "787d6eac-6da0-4769-8e48-f55ef58fb120",
+      "archivedAt": null,
+      "createdAt": 1794914369164,
+      "id": "bf194f7a-f07f-4b97-bdc5-fd8c4bb16086",
+      "openQuestions": 0,
+      "projectArchivedAt": null,
+      "projectId": "verify",
+      "role": "project",
+      "status": "chatting",
+      "suspendedQuestions": 0,
+      "taskCount": 0,
+      "title": "verify",
+      "updatedAt": 1794914372398
+    }
+  ],
+  "request": {
+    "method": "GET",
+    "path": "/api/conversations",
+    "expectStatus": 200,
+    "id": "controls-composer.conversations"
+  },
+  "status": 200
+}

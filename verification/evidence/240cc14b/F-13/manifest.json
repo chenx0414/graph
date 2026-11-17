@@ -1,0 +1,25 @@
+{
+  "createdAt": "2026-11-17T10:45:34Z",
+  "files": [
+    {
+      "bytes": 96632,
+      "path": "assemblies.png",
+      "sha256": "1c5bf2eccbd4326dfeba3bb6106e9fa1074de03d5559c9c831cf2b536d49c06c"
+    },
+    {
+      "bytes": 223,
+      "path": "assertions.json",
+      "sha256": "cb41397c32f0444a751ffecff9d54f83c47cd307e3621875db3e09db24358ecb"
+    },
+    {
+      "bytes": 1350,
+      "path": "check-01.json",
+      "sha256": "1fe70a7d561245fae57d7371b947269956a2d0e3ae6f016b1e6afef00fb8d007"
+    },
+    {
+      "bytes": 2794,
+      "path": "result.json",
+      "sha256": "66dd70f0e289bec1f7ad76aa4837744c4c22f681d9b1a54572001ec1c0c9c1d8"
+    }
+  ]
+}

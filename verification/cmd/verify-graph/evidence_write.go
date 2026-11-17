@@ -309,6 +309,30 @@ func countSkippedSteps(steps []stepOutcome) int {
 	return skipped
 }
 
+// markEvidenceFile adds the repository's file-budget directive to a generated
+// journey result. A result keeps the whole visible text of the final frame, and
+// that text is the proof a reviewer reads; it is not source that can be split.
+// The manifest is written after this call, so the hash covers the marked file.
+func markEvidenceFile(path string) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var document map[string]any
+	if json.Unmarshal(raw, &document) != nil {
+		return
+	}
+	if _, exists := document["_graph"]; exists {
+		return
+	}
+	document["_graph"] = "graph:allow-large-file: generated journey evidence kept verbatim; generated data, not source"
+	out, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(path, append(out, '\n'), 0o644)
+}
+
 func writeEvidence(p paths, meta runMeta, value journey, result journeyResult, assertions []assertion, outDir string, started time.Time) (string, []artifact) {
 	_ = os.MkdirAll(outDir, 0o755)
 	lane := firstNonEmpty(result.Lane, "headless")
@@ -321,6 +345,7 @@ func writeEvidence(p paths, meta runMeta, value journey, result journeyResult, a
 		raw, _ := json.MarshalIndent(result, "", "  ")
 		_ = os.WriteFile(driverResult, raw, 0o644)
 	}
+	markEvidenceFile(driverResult)
 	artifacts = append(artifacts, fileArtifact("json", driverResult, lane+" journey result"))
 	assertionPath := filepath.Join(outDir, "assertions.json")
 	assertionRaw, _ := json.MarshalIndent(assertions, "", "  ")

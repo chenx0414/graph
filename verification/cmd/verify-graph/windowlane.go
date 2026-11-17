@@ -119,6 +119,39 @@ func dumpAccess(snapshot appinstance.Snapshot) []accessDump {
 	return dumps
 }
 
+// mergeAccess keeps the nodes a journey asserted on (they carry the value the
+// assertion read) and adds every other named node of the final frame. The
+// inventory depends on the full tree: a journey with one assertAccess used to
+// record only that single node, which silently shrank the control list.
+func mergeAccess(asserted, full []accessDump) []accessDump {
+	merged := make([]accessDump, 0, len(full)+len(asserted))
+	seen := map[string]bool{}
+	key := func(node accessDump) string { return node.Role + "\x00" + node.Name + "\x00" + node.Value }
+	for _, node := range asserted {
+		if node.Name == "" {
+			continue
+		}
+		k := key(node)
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		merged = append(merged, node)
+	}
+	for _, node := range full {
+		if node.Name == "" {
+			continue
+		}
+		k := key(node)
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		merged = append(merged, node)
+	}
+	return merged
+}
+
 func findAccess(snapshot appinstance.Snapshot, name, role string) (appinstance.Node, bool) {
 	wantedRole := strings.ToLower(strings.TrimSpace(role))
 	for _, node := range snapshot.Nodes {
@@ -161,6 +194,12 @@ func runJourneyWindow(session *windowSession, value journey, outDir string) jour
 	}
 	for index, current := range value.Steps {
 		outcome := stepOutcome{Index: index + 1, Verb: current.Verb, OK: true}
+		if current.SkipInWindow {
+			outcome.Skipped = true
+			outcome.Detail = "skipped in the window lane: this observation is only exposed by the headless render"
+			result.Steps = append(result.Steps, outcome)
+			continue
+		}
 		timeout := 8 * time.Second
 		if current.TimeoutMs > 0 {
 			timeout = time.Duration(current.TimeoutMs) * time.Millisecond
@@ -270,9 +309,10 @@ func runJourneyWindow(session *windowSession, value journey, outDir string) jour
 	snapshot, snapshotErr := session.snapshot()
 	if snapshotErr == nil {
 		result.Texts = snapshot.Names()
-		if len(result.Access) == 0 {
-			result.Access = dumpAccess(snapshot)
-		}
+		// An occasional assertAccess must not shrink the evidence tree to the
+		// asserted nodes: the inventory reads this list, so it has to carry
+		// every named control of the final frame as well.
+		result.Access = mergeAccess(result.Access, dumpAccess(snapshot))
 	}
 	write()
 	return result

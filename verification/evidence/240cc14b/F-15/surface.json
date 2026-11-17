@@ -1,0 +1,80 @@
+{
+  "app": "Graph",
+  "elements": [
+    {
+      "ref_id": "@s3inccibolsaqn:e1",
+      "role": "menuitem",
+      "name": "",
+      "value": "",
+      "bounds": {
+        "x": 1390,
+        "y": 3,
+        "width": 36,
+        "height": 24
+      }
+    },
+    {
+      "ref_id": "",
+      "role": "menu",
+      "name": "Graph",
+      "value": "",
+      "bounds": {
+        "x": 0,
+        "y": 1080,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref_id": "@s3inccibolsaqn:e2",
+      "role": "menuitem",
+      "name": "打开 Graph",
+      "value": "",
+      "bounds": {
+        "x": 0,
+        "y": 1080,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref_id": "@s3inccibolsaqn:e3",
+      "role": "menuitem",
+      "name": "",
+      "value": "",
+      "bounds": {
+        "x": 0,
+        "y": 1080,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref_id": "@s3inccibolsaqn:e4",
+      "role": "menuitem",
+      "name": "退出 Graph",
+      "value": "",
+      "bounds": {
+        "x": 0,
+        "y": 1080,
+        "width": 0,
+        "height": 0
+      }
+    }
+  ],
+  "surface": "menu-bar-extras",
+  "window": {
+    "pid": 30292,
+    "id": "w-39892",
+    "app_name": "Graph",
+    "title": "Graph",
+    "visible": true,
+    "accessible": true,
+    "bounds": {
+      "x": 15,
+      "y": 638,
+      "width": 141,
+      "height": 140
+    }
+  }
+}

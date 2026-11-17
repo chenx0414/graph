@@ -1,0 +1,9 @@
+[
+  {
+    "id": "seed.conversation",
+    "ok": true,
+    "expected": "one project conversation whose assistant turn completed with tokens: 请用一句话说明你已就绪。",
+    "actual": "conversation=efe97875-8d3f-4b23-8e5f-c5ebf9531fdc messages=7 turns=4 tokens=120/30 elapsed=1ms assistant=\"已就绪。这条回答来自验证用的替身模型，不消耗真实额度。\"",
+    "evidence": "/Users/macmini/workspace/13-Graph/verification/evidence/02c670af/F-10/seed.json"
+  }
+]

@@ -1,0 +1,57 @@
+{
+  "ok": true,
+  "lane": "surface",
+  "steps": [
+    {
+      "index": 1,
+      "verb": "open",
+      "ok": true,
+      "detail": "clicked the menu bar extra of Graph"
+    },
+    {
+      "index": 2,
+      "verb": "assertText",
+      "ok": true,
+      "detail": "visible: 打开 Graph"
+    },
+    {
+      "index": 3,
+      "verb": "assertAccess",
+      "ok": true,
+      "detail": "exposed as menuitem"
+    },
+    {
+      "index": 4,
+      "verb": "assertAccess",
+      "ok": true,
+      "detail": "exposed as menuitem"
+    },
+    {
+      "index": 5,
+      "verb": "click",
+      "ok": true,
+      "detail": "clicked surface item 打开 Graph"
+    },
+    {
+      "index": 6,
+      "verb": "assertWindowVisible",
+      "ok": true,
+      "detail": "w-39892 is visible (1372x882)"
+    }
+  ],
+  "texts": [
+    "Graph",
+    "打开 Graph",
+    "退出 Graph"
+  ],
+  "access": [
+    {
+      "name": "打开 Graph",
+      "role": "menuitem"
+    },
+    {
+      "name": "退出 Graph",
+      "role": "menuitem"
+    }
+  ]
+}

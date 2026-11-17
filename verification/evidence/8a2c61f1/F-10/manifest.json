@@ -1,0 +1,30 @@
+{
+  "createdAt": "2026-11-17T10:58:13Z",
+  "files": [
+    {
+      "bytes": 2,
+      "path": "assertions.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "bytes": 2496,
+      "path": "check-01.json",
+      "sha256": "340aad4e7b05b2155c8d7cedbd7e3aad4feb6fd4be254e11283b27d5a39d680c"
+    },
+    {
+      "bytes": 114020,
+      "path": "fleet-new-tab-removed.png",
+      "sha256": "ea534ae1711d284f01d8495bfa46fe3d1fe0999a7ee94b404885a9f02ff3c855"
+    },
+    {
+      "bytes": 123196,
+      "path": "fleet.png",
+      "sha256": "bc41b1e523cea6da3ce04a63ad4c887fe9c3fdddf50a82baa846526bc9d64662"
+    },
+    {
+      "bytes": 3925,
+      "path": "result.json",
+      "sha256": "c5f4ebc1c6380feec7974e50ca84415b5917cbe6140aaffdd0ec5292034c8225"
+    }
+  ]
+}

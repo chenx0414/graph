@@ -12,7 +12,7 @@ import (
 
 var Commands = []string{
 	"doctor", "build", "launch", "status", "api", "ui",
-	"scenario", "verify", "evidence", "cleanup", "help", "version",
+	"scenario", "verify", "evidence", "cleanup", "help", "version", "cover",
 }
 
 var RequiredSkillSections = []string{"Launch", "Doctor", "Drive", "Evidence", "Cleanup"}

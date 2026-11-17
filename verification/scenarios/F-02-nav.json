@@ -1,7 +1,7 @@
 {
   "id": "F-02-nav",
   "feature": "F-02",
-  "description": "侧栏七项逐个点开，每一页必须出现它自己的面板窗口（不是上一页残留，也不是白屏）。",
+  "description": "侧栏七项逐个点开，每一页必须出现它自己的面板窗口（不是上一页残留，也不是白屏）；随后逐个点开白板页签，每个页签都必须显示它自己的面板。",
   "width": 1440,
   "height": 900,
   "steps": [
@@ -133,6 +133,78 @@
     {
       "verb": "screenshot",
       "path": "nav-trajectory.png"
+    },
+    {
+      "verb": "click",
+      "name": "标签页 洞察概览"
+    },
+    {
+      "verb": "waitText",
+      "text": "洞察概览窗口",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "click",
+      "name": "标签页 轨迹量化"
+    },
+    {
+      "verb": "waitText",
+      "text": "上下文统计窗口",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "click",
+      "name": "标签页 编队"
+    },
+    {
+      "verb": "waitText",
+      "text": "编队总览窗口",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "click",
+      "name": "标签页 供应商"
+    },
+    {
+      "verb": "waitText",
+      "text": "供应商窗口",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "click",
+      "name": "标签页 资源库"
+    },
+    {
+      "verb": "waitText",
+      "text": "资源库窗口",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "click",
+      "name": "标签页 能力装配"
+    },
+    {
+      "verb": "waitText",
+      "text": "能力装配窗口",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "click",
+      "name": "标签页 运行设置"
+    },
+    {
+      "verb": "waitText",
+      "text": "运行设置窗口",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "click",
+      "name": "标签页 白板"
+    },
+    {
+      "verb": "waitText",
+      "text": "白板标题",
+      "timeoutMs": 15000
     }
   ]
 }

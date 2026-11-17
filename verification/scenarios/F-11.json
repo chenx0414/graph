@@ -6,6 +6,13 @@
     { "verb": "waitText", "text": "供应商", "timeoutMs": 20000 },
     { "verb": "click", "name": "供应商" },
     { "verb": "waitText", "text": "供应商窗口", "timeoutMs": 15000 },
+    { "verb": "waitText", "text": "刷新供应商", "timeoutMs": 15000 },
+    { "verb": "type", "name": "查找供应商", "text": "zzz-no-provider" },
+    { "verb": "assertAccess", "name": "查找供应商", "value": "zzz-no-provider" },
+    { "verb": "click", "name": "刷新供应商" },
+    { "verb": "waitText", "text": "供应商与账号都由 Magpie 管理 · 这里只读", "timeoutMs": 15000 },
+    { "verb": "click", "name": "重试供应商" },
+    { "verb": "waitText", "text": "读不到供应商", "timeoutMs": 15000 },
     { "verb": "screenshot", "path": "providers.png" }
   ],
   "checks": [

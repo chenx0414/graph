@@ -1,0 +1,132 @@
+{
+  "_graph": "graph:allow-large-file: generated journey evidence kept verbatim; generated data, not source",
+  "frames": [
+    "/Users/macmini/workspace/13-Graph/verification/evidence/8a2c61f1/F-09/insights.png"
+  ],
+  "ok": true,
+  "steps": [
+    {
+      "detail": "visible: 洞察",
+      "index": 1,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 2,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 洞察概览窗口",
+      "index": 3,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 4,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "index": 5,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "index": 6,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "index": 7,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "index": 8,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "index": 9,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/8a2c61f1/F-09/insights.png",
+      "index": 10,
+      "ok": true,
+      "verb": "screenshot"
+    }
+  ],
+  "texts": [
+    "轨迹",
+    "洞察",
+    "编队",
+    "供应商",
+    "资源",
+    "装配",
+    "设置",
+    "会话列表标题",
+    "对话标题",
+    "对话标题名",
+    "白板标题",
+    "标签页 白板",
+    "白板",
+    "标签页 洞察概览",
+    "洞察概览",
+    "关闭 洞察概览",
+    "主区域卡片",
+    "main agent 会话",
+    "章鱼",
+    "main agent 名称",
+    "Main Agent",
+    "verify",
+    "verify",
+    "还没有对话",
+    "在下面输入第一条消息",
+    "这个会话还没有可显示的对话。",
+    "消息",
+    "附件",
+    "模型",
+    "模型",
+    "语音",
+    "发送",
+    "洞察概览窗口",
+    "洞察概览窗口",
+    "洞察概览",
+    "7 天",
+    "● 7 天",
+    "30 天",
+    "○ 30 天",
+    "0",
+    "总 tokens",
+    "$0",
+    "成本",
+    "0",
+    "请求",
+    "0.0%",
+    "缓存命中",
+    "0",
+    "会话",
+    "0",
+    "日均 tokens",
+    "用量趋势窗口",
+    "用量趋势窗口",
+    "用量趋势",
+    "0",
+    "11-11",
+    "11-12",
+    "11-13",
+    "11-14",
+    "11-15",
+    "11-16",
+    "11-17",
+    "成本 $0 → $0",
+    "会话排行窗口",
+    "会话排行窗口",
+    "会话排行",
+    "0 个会话",
+    "近 7 天还没有会话用量。"
+  ]
+}

@@ -1,0 +1,120 @@
+{
+  "id": "controls-fleet-filters",
+  "feature": "F-10",
+  "instance": "execute",
+  "seed": {
+    "prompt": "请用一句话说明你已就绪。",
+    "expect": "已就绪。这条回答来自验证用的替身模型，不消耗真实额度。",
+    "requestId": "vg-fleet-filters",
+    "projectId": "verify"
+  },
+  "steps": [
+    {
+      "verb": "waitText",
+      "text": "白板标题",
+      "timeoutMs": 30000
+    },
+    {
+      "verb": "click",
+      "name": "verify"
+    },
+    {
+      "verb": "waitText",
+      "text": "已就绪。这条回答来自验证用的替身模型，不消耗真实额度。",
+      "timeoutMs": 30000
+    },
+    {
+      "verb": "click",
+      "name": "编队"
+    },
+    {
+      "verb": "waitText",
+      "text": "编队总览窗口",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "clickIf",
+      "name": "只看 verify"
+    },
+    {
+      "verb": "waitText",
+      "text": "编队范围",
+      "timeoutMs": 10000
+    },
+    {
+      "verb": "clickIf",
+      "name": "只看 全部"
+    },
+    {
+      "verb": "waitText",
+      "text": "编队范围",
+      "timeoutMs": 10000
+    },
+    {
+      "verb": "clickIf",
+      "name": "筛选 全部"
+    },
+    {
+      "verb": "waitText",
+      "text": "编队范围",
+      "timeoutMs": 10000
+    },
+    {
+      "verb": "clickIf",
+      "name": "筛选 委派"
+    },
+    {
+      "verb": "assertText",
+      "text": "事件检查窗口"
+    },
+    {
+      "verb": "clickIf",
+      "name": "筛选 派生"
+    },
+    {
+      "verb": "assertText",
+      "text": "事件检查窗口"
+    },
+    {
+      "verb": "clickIf",
+      "name": "筛选 投递"
+    },
+    {
+      "verb": "assertText",
+      "text": "事件检查窗口"
+    },
+    {
+      "verb": "clickIf",
+      "name": "筛选 结果"
+    },
+    {
+      "verb": "assertText",
+      "text": "事件检查窗口"
+    },
+    {
+      "verb": "clickIf",
+      "name": "筛选 问题"
+    },
+    {
+      "verb": "assertText",
+      "text": "事件检查窗口"
+    },
+    {
+      "verb": "clickIf",
+      "name": "筛选 其他"
+    },
+    {
+      "verb": "assertText",
+      "text": "事件检查窗口"
+    },
+    {
+      "verb": "clickIf",
+      "name": "筛选 全部"
+    },
+    {
+      "verb": "screenshot",
+      "path": "fleet-filters.png"
+    }
+  ],
+  "description": "编队页的筛选控件：只看某个 Agent 与事件分类都是真实按钮，每按一次都要重新渲染事件检查面板；空分类也要显示明确文案而不是白屏。"
+}

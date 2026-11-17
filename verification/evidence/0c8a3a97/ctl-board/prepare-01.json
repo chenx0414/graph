@@ -1,0 +1,20 @@
+{
+  "_graph": "graph:allow-large-file: raw daemon response kept as evidence; generated data, not source",
+  "body": {
+    "conversationId": "e7c98eca-d818-4bf8-8a0b-a3af815efe0e",
+    "projectId": "verify",
+    "role": "project",
+    "taskId": "35207afa-2794-4cb6-86a5-e91745ef2c9e"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/projects/verify/thread",
+    "body": {
+      "requestId": "ctl-board-thread",
+      "text": "ctl board"
+    },
+    "expectStatus": 200,
+    "id": "ctl-board.thread"
+  },
+  "status": 200
+}

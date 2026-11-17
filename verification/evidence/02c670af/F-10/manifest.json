@@ -1,0 +1,25 @@
+{
+  "createdAt": "2026-11-17T10:58:59Z",
+  "files": [
+    {
+      "bytes": 489,
+      "path": "assertions.json",
+      "sha256": "f0628b583402b4a3a43a692690a2c81aa5bbcd6142fa127218d48f70a4264205"
+    },
+    {
+      "bytes": 182130,
+      "path": "fleet-filters.png",
+      "sha256": "be4f55a8bb0c15ac647ca9868827ebb837e6de4e0994138a955d3816b2473c08"
+    },
+    {
+      "bytes": 8021,
+      "path": "result.json",
+      "sha256": "fc6f6cb9afd5cd4bab4289cc259395596e04b0a632d8548abfec5bb3fdcfeb2e"
+    },
+    {
+      "bytes": 609,
+      "path": "seed.json",
+      "sha256": "b7ee38f0e72bac22804e19a1927a51636517b281d24efa9e082ddc7eb8a20a6e"
+    }
+  ]
+}

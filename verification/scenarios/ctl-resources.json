@@ -1,0 +1,124 @@
+{
+  "id": "ctl-resources",
+  "feature": "ctl-resources",
+  "description": "Control witness: the resource library refresh and every kind filter are real buttons; each press re-renders the library without losing the page. The Finder action is exposed but not pressed because it opens an external app.",
+  "width": 1440,
+  "height": 900,
+  "steps": [
+    {
+      "verb": "waitText",
+      "text": "白板标题",
+      "timeoutMs": 25000
+    },
+    {
+      "verb": "click",
+      "name": "资源"
+    },
+    {
+      "verb": "waitText",
+      "text": "资源库窗口",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "assertAccess",
+      "name": "打开资源库文件夹",
+      "role": "button"
+    },
+    {
+      "verb": "assertAccess",
+      "name": "刷新资源库",
+      "role": "button"
+    },
+    {
+      "verb": "assertAccess",
+      "name": "分类 全部",
+      "role": "button"
+    },
+    {
+      "verb": "assertAccess",
+      "name": "分类 技能",
+      "role": "button"
+    },
+    {
+      "verb": "assertAccess",
+      "name": "分类 指令",
+      "role": "button"
+    },
+    {
+      "verb": "assertAccess",
+      "name": "分类 MCP 服务器",
+      "role": "button"
+    },
+    {
+      "verb": "assertAccess",
+      "name": "分类 Pi 扩展",
+      "role": "button"
+    },
+    {
+      "verb": "click",
+      "name": "刷新资源库"
+    },
+    {
+      "verb": "waitText",
+      "text": "资源库窗口",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "click",
+      "name": "分类 技能"
+    },
+    {
+      "verb": "waitText",
+      "text": "资源库 · 0 个",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "click",
+      "name": "分类 指令"
+    },
+    {
+      "verb": "waitText",
+      "text": "资源库 · 0 个",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "click",
+      "name": "分类 MCP 服务器"
+    },
+    {
+      "verb": "waitText",
+      "text": "资源库 · 0 个",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "click",
+      "name": "分类 Pi 扩展"
+    },
+    {
+      "verb": "waitText",
+      "text": "资源库 · 0 个",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "click",
+      "name": "分类 全部"
+    },
+    {
+      "verb": "waitText",
+      "text": "资源库 · 0 个",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "screenshot",
+      "path": "ctl-resources.png"
+    }
+  ],
+  "checks": [
+    {
+      "id": "ctl-resources.catalog",
+      "method": "GET",
+      "path": "/api/catalog",
+      "expectStatus": 200
+    }
+  ]
+}

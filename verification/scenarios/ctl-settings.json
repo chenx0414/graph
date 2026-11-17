@@ -1,0 +1,35 @@
+{
+  "id": "ctl-settings",
+  "feature": "ctl-settings",
+  "description": "Control witness: the settings project row's archive action really toggles the project state — pressing 归档 verify replaces it with 恢复 verify and the archived marker, pressing 恢复 verify brings the original action back.",
+  "width": 1440,
+  "height": 900,
+  "prepare": [
+    {
+      "id": "ctl-settings.thread",
+      "method": "POST",
+      "path": "/api/projects/verify/thread",
+      "body": {
+        "requestId": "ctl-settings-thread",
+        "text": "ctl settings：建立项目会话"
+      },
+      "expectStatus": 200
+    }
+  ],
+  "steps": [
+    { "verb": "waitText", "text": "白板标题", "timeoutMs": 25000 },
+    { "verb": "click", "name": "设置" },
+    { "verb": "waitText", "text": "运行设置", "timeoutMs": 15000 },
+    { "verb": "waitText", "text": "归档 verify", "timeoutMs": 15000 },
+    { "verb": "assertAccess", "name": "归档 verify", "role": "button" },
+    { "verb": "click", "name": "归档 verify" },
+    { "verb": "waitText", "text": "恢复 verify", "timeoutMs": 15000 },
+    { "verb": "assertText", "text": "已归档" },
+    { "verb": "click", "name": "恢复 verify" },
+    { "verb": "waitText", "text": "归档 verify", "timeoutMs": 15000 },
+    { "verb": "screenshot", "path": "ctl-settings.png" }
+  ],
+  "checks": [
+    { "id": "ctl-settings.settings", "method": "GET", "path": "/api/settings", "expectStatus": 200 }
+  ]
+}

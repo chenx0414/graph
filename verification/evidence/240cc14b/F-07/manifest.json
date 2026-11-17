@@ -1,0 +1,30 @@
+{
+  "createdAt": "2026-11-17T10:45:25Z",
+  "files": [
+    {
+      "bytes": 215,
+      "path": "assertions.json",
+      "sha256": "3a18bb46c44ccc0ae141a7ac27b79673ba294ae0f2c60bdb4bff1da23dffab1a"
+    },
+    {
+      "bytes": 131945,
+      "path": "board-default-tab.png",
+      "sha256": "e79d2ca988ec3a3f4f0861248221565e6704f5ec6226c6a3a9b8414c5cd56a49"
+    },
+    {
+      "bytes": 79486,
+      "path": "board-insights-tab.png",
+      "sha256": "4adbb1eff8620f35ca9403bf9a2376efc38892a6d98ae0d2a47e1d962a987d0d"
+    },
+    {
+      "bytes": 1704,
+      "path": "check-01.json",
+      "sha256": "d10fa0faafa8ba012ecbe63eb7065b71f2f330d70eaa4ef6e75cabbcefbd5b4a"
+    },
+    {
+      "bytes": 3872,
+      "path": "result.json",
+      "sha256": "0e33e7a93ce0549864dde211cfb6caca5a5767ba2445ce18b25da953f92982d6"
+    }
+  ]
+}

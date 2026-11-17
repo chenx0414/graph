@@ -1,0 +1,15 @@
+{
+  "commit": "924e6fbb770067bee6061e54e83b7de9d656f7f9",
+  "endedAt": "2026-11-17T10:46:44Z",
+  "error": "",
+  "failed": 0,
+  "feature": "rail-trajectory",
+  "lane": "headless",
+  "ok": true,
+  "passed": 3,
+  "run": "240cc14b",
+  "scenario": "rail-trajectory",
+  "skippedSteps": 0,
+  "startedAt": "2026-11-17T10:45:18Z",
+  "steps": 10
+}

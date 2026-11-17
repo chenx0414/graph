@@ -1,0 +1,55 @@
+{
+  "_graph": "graph:allow-large-file: raw daemon response kept as evidence; generated data, not source",
+  "body": {
+    "agentCombinationError": null,
+    "agentCombinationFile": "/Users/macmini/workspace/13-Graph/verification/.run/8a2c61f1/graph-home/agent-combinations.json",
+    "agentCombinations": [
+      {
+        "description": "持续面对用户、规划任务、设计并监控 Graph，并在确认范围内组装和调用 subagents。",
+        "id": "main",
+        "issues": [],
+        "mode": "main",
+        "name": "Atlas_main",
+        "resolved": [],
+        "resources": [],
+        "review": false,
+        "status": "valid",
+        "tags": [
+          "main",
+          "system"
+        ]
+      }
+    ],
+    "capabilities": [],
+    "capabilityRoot": "/Users/macmini/workspace/13-Graph/verification/.run/8a2c61f1/graph-home/capabilities",
+    "definitions": [
+      {
+        "id": "coder",
+        "version": 1
+      },
+      {
+        "id": "main",
+        "version": 1
+      },
+      {
+        "id": "master",
+        "version": 1
+      },
+      {
+        "id": "reviewer",
+        "version": 1
+      },
+      {
+        "id": "tester",
+        "version": 1
+      }
+    ]
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/catalog",
+    "expectStatus": 200,
+    "id": "ctl-resources.catalog"
+  },
+  "status": 200
+}

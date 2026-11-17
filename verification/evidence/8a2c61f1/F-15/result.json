@@ -1,0 +1,58 @@
+{
+  "_graph": "graph:allow-large-file: generated journey evidence kept verbatim; generated data, not source",
+  "access": [
+    {
+      "name": "打开 Graph",
+      "role": "menuitem"
+    },
+    {
+      "name": "退出 Graph",
+      "role": "menuitem"
+    }
+  ],
+  "lane": "surface",
+  "ok": true,
+  "output": "notification center read skipped: POLICY_DENIED: Notification Center is closed and observation cannot open it in headless mode",
+  "steps": [
+    {
+      "detail": "clicked the menu bar extra of Graph",
+      "index": 1,
+      "ok": true,
+      "verb": "open"
+    },
+    {
+      "detail": "visible: 打开 Graph",
+      "index": 2,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "detail": "exposed as menuitem",
+      "index": 3,
+      "ok": true,
+      "verb": "assertAccess"
+    },
+    {
+      "detail": "exposed as menuitem",
+      "index": 4,
+      "ok": true,
+      "verb": "assertAccess"
+    },
+    {
+      "detail": "clicked surface item 打开 Graph",
+      "index": 5,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "w-40122 is visible (1440x900)",
+      "index": 6,
+      "ok": true,
+      "verb": "assertWindowVisible"
+    }
+  ],
+  "texts": [
+    "打开 Graph",
+    "退出 Graph"
+  ]
+}

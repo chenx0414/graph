@@ -1,0 +1,14 @@
+{
+  "_graph": "graph:allow-large-file: raw daemon response kept as evidence; generated data, not source",
+  "body": {
+    "Active": {},
+    "Queued": {}
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/limits",
+    "expectStatus": 200,
+    "id": "settings.limits"
+  },
+  "status": 200
+}

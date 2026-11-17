@@ -1,0 +1,17 @@
+{
+  "_graph": "graph:allow-large-file: raw daemon response kept as evidence; generated data, not source",
+  "body": {
+    "available": false,
+    "dir": "/Users/macmini/workspace/13-Graph/verification/.run/240cc14b/home/.config/magpie",
+    "error": "读不到 magpie 的配置目录 …fication/.run/240cc14b/home/.config/magpie",
+    "models": {},
+    "providers": []
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/providers/magpie",
+    "expectStatus": 200,
+    "id": "providers.magpie"
+  },
+  "status": 200
+}

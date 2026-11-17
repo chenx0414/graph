@@ -1,0 +1,105 @@
+{
+  "id": "controls-composer",
+  "feature": "F-05",
+  "description": "输入区控件：模型 chip 真的打开选择器，供应商过滤真的切换，消息框真的接收键入，发送按钮真的把这一轮交给替身模型并渲染出回答。附件/语音打开系统对话框或尚未接线，不在本 journey 里冒充。",
+  "width": 1440,
+  "height": 900,
+  "instance": "execute",
+  "seed": {
+    "prompt": "请用一句话说明你已就绪。",
+    "expect": "已就绪。这条回答来自验证用的替身模型，不消耗真实额度。",
+    "requestId": "vg-controls-composer",
+    "projectId": "verify"
+  },
+  "steps": [
+    {
+      "verb": "waitText",
+      "text": "白板标题",
+      "timeoutMs": 25000
+    },
+    {
+      "verb": "click",
+      "name": "verify"
+    },
+    {
+      "verb": "waitText",
+      "text": "已就绪。这条回答来自验证用的替身模型，不消耗真实额度。",
+      "timeoutMs": 30000
+    },
+    {
+      "verb": "assertAccess",
+      "name": "消息"
+    },
+    {
+      "verb": "click",
+      "name": "模型"
+    },
+    {
+      "verb": "waitText",
+      "text": "模型选择器",
+      "timeoutMs": 12000
+    },
+    {
+      "verb": "assertText",
+      "text": "全部供应商"
+    },
+    {
+      "verb": "click",
+      "name": "全部供应商"
+    },
+    {
+      "verb": "waitText",
+      "text": "模型选择器",
+      "timeoutMs": 5000
+    },
+    {
+      "verb": "key",
+      "key": "escape"
+    },
+    {
+      "verb": "type",
+      "name": "消息",
+      "text": "控制级验证：这条消息由点击发送按钮发出。"
+    },
+    {
+      "verb": "assertAccess",
+      "name": "消息",
+      "value": "控制级验证：这条消息由点击发送按钮发出。"
+    },
+    {
+      "verb": "click",
+      "name": "发送"
+    },
+    {
+      "verb": "waitText",
+      "text": "控制级验证：这条消息由点击发送按钮发出。",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "waitText",
+      "text": "已就绪。这条回答来自验证用的替身模型，不消耗真实额度。",
+      "timeoutMs": 30000
+    },
+    {
+      "verb": "screenshot",
+      "path": "composer-send.png"
+    }
+  ],
+  "checks": [
+    {
+      "id": "controls-composer.startup",
+      "method": "GET",
+      "path": "/api/startup",
+      "expectStatus": 200,
+      "expect": {
+        "mode": "execute"
+      }
+    },
+    {
+      "id": "controls-composer.conversations",
+      "method": "GET",
+      "path": "/api/conversations",
+      "expectStatus": 200
+    }
+  ]
+}

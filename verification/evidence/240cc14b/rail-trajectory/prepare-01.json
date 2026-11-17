@@ -1,0 +1,20 @@
+{
+  "_graph": "graph:allow-large-file: raw daemon response kept as evidence; generated data, not source",
+  "body": {
+    "conversationId": "ed9320b5-c10c-4901-be1d-8dc7549c6467",
+    "projectId": "verify",
+    "role": "project",
+    "taskId": "0998fe8b-2e90-4b7b-97dc-217374edbe6a"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/projects/verify/thread",
+    "body": {
+      "requestId": "vg-trajectory-thread",
+      "text": "trajectory seed"
+    },
+    "expectStatus": 200,
+    "id": "trajectory.prepare-thread"
+  },
+  "status": 200
+}

@@ -1,0 +1,62 @@
+{
+  "id": "controls-model-picker",
+  "feature": "controls-model-picker",
+  "description": "输入区的模型按钮是真实控件（先选中一个项目会话）：按下必须打开模型选择器；输入框接受文本且 AX value 逐字回读。",
+  "width": 1440,
+  "height": 900,
+  "steps": [
+    {
+      "verb": "waitText",
+      "text": "白板标题",
+      "timeoutMs": 25000
+    },
+    {
+      "verb": "waitText",
+      "text": "verify",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "click",
+      "name": "verify"
+    },
+    {
+      "verb": "waitText",
+      "text": "消息",
+      "timeoutMs": 12000
+    },
+    {
+      "verb": "click",
+      "name": "模型"
+    },
+    {
+      "verb": "assertText",
+      "text": "模型选择器"
+    },
+    {
+      "verb": "type",
+      "name": "消息",
+      "text": "验证用文本 verify-graph 456"
+    },
+    {
+      "verb": "assertAccess",
+      "name": "消息",
+      "value": "验证用文本 verify-graph 456"
+    },
+    {
+      "verb": "screenshot",
+      "path": "model-picker.png"
+    }
+  ],
+  "prepare": [
+    {
+      "id": "controls-model-picker.thread",
+      "method": "POST",
+      "path": "/api/projects/verify/thread",
+      "body": {
+        "requestId": "vg-controls-model-thread",
+        "text": "controls-model-picker 准备：建立项目会话"
+      },
+      "expectStatus": 200
+    }
+  ]
+}

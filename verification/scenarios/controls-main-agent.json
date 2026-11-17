@@ -1,0 +1,60 @@
+{
+  "id": "controls-main-agent",
+  "feature": "F-02",
+  "description": "外壳的 main agent 卡片是真实控件：在真实窗口里按它必须把中部切到 Main Agent 会话并露出消息输入区。",
+  "width": 1440,
+  "height": 900,
+  "steps": [
+    {
+      "verb": "waitText",
+      "text": "白板标题",
+      "timeoutMs": 25000
+    },
+    {
+      "verb": "assertAccess",
+      "name": "main agent 会话",
+      "role": "button",
+      "skipInHeadless": true
+    },
+    {
+      "verb": "click",
+      "name": "main agent 会话",
+      "skipInHeadless": true
+    },
+    {
+      "verb": "waitText",
+      "text": "消息",
+      "timeoutMs": 15000,
+      "skipInHeadless": true
+    },
+    {
+      "verb": "assertAccess",
+      "name": "main agent 会话",
+      "role": "button",
+      "skipInHeadless": true
+    },
+    {
+      "verb": "screenshot",
+      "path": "main-agent-selected.png",
+      "skipInHeadless": true
+    }
+  ],
+  "checks": [
+    {
+      "id": "controls-main-agent.health",
+      "method": "GET",
+      "path": "/api/health",
+      "expectStatus": 200,
+      "expect": {
+        "ok": true
+      }
+    }
+  ],
+  "instance": "execute",
+  "seed": {
+    "prompt": "请用一句话说明你已就绪。",
+    "expect": "已就绪。这条回答来自验证用的替身模型，不消耗真实额度。",
+    "requestId": "vg-controls-main-agent",
+    "projectId": "verify"
+  }
+}
