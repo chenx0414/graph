@@ -245,6 +245,7 @@ func (s *shellState) openModuleWithScope(kind, scope string) {
 	if kind == fleetPageID {
 		s.board.pages = append(s.board.pages, defaultFleetPage())
 		s.board.active = len(s.board.pages) - 1
+		s.boardScrollTop = true
 		s.ensureBoardPageData()
 		s.saveBoard()
 		s.frame()
@@ -287,6 +288,7 @@ func (s *shellState) openModuleWithScope(kind, scope string) {
 	}
 	s.board.pages = append(s.board.pages, page)
 	s.board.active = len(s.board.pages) - 1
+	s.boardScrollTop = true
 	s.ensureBoardPageData()
 	s.saveBoard()
 	s.frame()
@@ -298,6 +300,7 @@ func (s *shellState) selectBoardPage(index int) {
 		return
 	}
 	s.board.active = index
+	s.boardScrollTop = true
 	s.ensureBoardPageData()
 	s.saveBoard()
 	s.frame()

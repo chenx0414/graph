@@ -36,6 +36,7 @@ type boardState struct {
 	pressX      float32
 	pressY      float32
 	hoverSince  map[string]time.Time
+	paneH       float32
 	pendingDrop func()
 }
 
@@ -122,9 +123,7 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 			return
 		}
 		if page.Kind == fleetPageID {
-			ui.Column(ctx).Fill().Padding(10).Children(func() {
-				s.boardNodeView(ctx, &page.Layout, "root", true, false)
-			})
+			s.boardColumnPageView(ctx, page, true)
 			return
 		}
 		if page.Kind != "" {
@@ -157,10 +156,7 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 				TextColor(t.Muted).Padding(24, 24, 24, 24)
 			return
 		}
-		freeform := page.Kind == ""
-		ui.Column(ctx).Fill().Padding(10).Children(func() {
-			s.boardNodeView(ctx, &page.Layout, "root", freeform, page.Kind == "")
-		})
+		s.boardColumnPageView(ctx, page, true)
 	})
 }
 

@@ -205,9 +205,15 @@ func TestTheFleetPageUsesTheFreeformBoardLayout(t *testing.T) {
 	if leaves := boardLeafIDs(&page.Layout); !sameStrings(leaves, want) {
 		t.Fatalf("the fleet page is a freeform board over its layout, leaves %v", leaves)
 	}
-	if len(state.board.rects) < len(want) {
-		t.Fatalf("the freeform pictures every panel for dragging, rects %+v", state.board.rects)
+	labels := make([]string, 0, len(want))
+	for _, kind := range want {
+		labels = append(labels, boardPanelTitle(kind)+"窗口")
 	}
+	if rects := boardContentRects(t, tester, state, labels); len(rects) < len(want) {
+		t.Fatalf("the freeform pictures every panel for dragging, rects %+v", rects)
+	}
+	state.boardScroll.Y = 0
+	frames(tester)
 	network, ok := state.board.rects["fleet-network"]
 	if !ok {
 		t.Fatalf("the network panel never laid out, rects %+v", state.board.rects)
@@ -317,6 +323,7 @@ func TestTheFleetCardsCarryTheAgentMetrics(t *testing.T) {
 func TestClickingAFleetArtifactOpensTheSharedArtifactsPanel(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
 	tester := openFleetTester(t, state)
+	boardReveal(t, tester, state, "共享产物 docs/spec.md · v2 · 2.0 KB")
 	if err := tester.Click("共享产物 docs/spec.md · v2 · 2.0 KB"); err != nil {
 		t.Fatalf("click the artifact row: %v", err)
 	}
@@ -354,6 +361,7 @@ func TestTheFleetEventsFilterByCategory(t *testing.T) {
 	if !tester.HasText("about.result") || !tester.HasText("link.delegation") {
 		t.Fatalf("the event check lists the recent events, texts %q", tester.Texts())
 	}
+	boardReveal(t, tester, state, "筛选 委派")
 	if err := tester.Click("筛选 委派"); err != nil {
 		t.Fatalf("filter the events: %v", err)
 	}

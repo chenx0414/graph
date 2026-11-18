@@ -87,6 +87,7 @@ func TestFleetArtifactOpensTheSelectedVersionOutsideTheCurrentConversation(t *te
 	state.fleet.conversationID = "g1"
 	state.openModule("fleet")
 	tester := frames(ui.NewTester(state.view, 1440, 900))
+	boardReveal(t, tester, state, "共享产物 docs/spec.md · v2 · 2.0 KB")
 	if err := tester.Click("共享产物 docs/spec.md · v2 · 2.0 KB"); err != nil {
 		t.Fatal(err)
 	}

@@ -118,6 +118,7 @@ func (s *shellState) openFleetHistoryPage(projectID string) {
 		Layout: boardNode{Kind: "panel", PanelID: "fleet-history-list"},
 	})
 	s.board.active = len(s.board.pages) - 1
+	s.boardScrollTop = true
 	s.ensureBoardPageData()
 	s.saveBoard()
 	s.frame()

@@ -60,6 +60,7 @@ func TestTheBoardKeepsFixedNonOverlappingPartitions(t *testing.T) {
 func TestDraggingAPanelBodySwapsItsPartition(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
+	boardReveal(t, tester, state, boardPanelTitle("agent")+"窗口")
 	tasks := state.board.rects["agent"]
 	artifacts := state.board.rects["trajectory"]
 	if tasks.W <= 0 || artifacts.W <= 0 {
@@ -83,6 +84,7 @@ func TestDraggingAPanelBodySwapsItsPartition(t *testing.T) {
 func TestDraggingToAPartitionEdgeSplitsIt(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
+	boardReveal(t, tester, state, boardPanelTitle("agent")+"窗口")
 	tasks := state.board.rects["agent"]
 	artifacts := state.board.rects["trajectory"]
 	if tasks.W <= 0 || artifacts.W <= 0 {

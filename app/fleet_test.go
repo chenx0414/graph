@@ -189,20 +189,23 @@ func openFleetTester(t *testing.T, state *shellState) *ui.Tester {
 func TestTheFleetPageUsesItsDashboardLayout(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
 	tester := openFleetTester(t, state)
-	rects := map[string]ui.Rect{}
+	labels := make([]string, 0, len(fleetPanelKinds))
 	for _, kind := range fleetPanelKinds {
-		rect, ok := tester.Find(boardPanelTitle(kind) + "窗口")
-		if !ok {
+		labels = append(labels, boardPanelTitle(kind)+"窗口")
+	}
+	rects := boardContentRects(t, tester, state, labels)
+	for _, kind := range fleetPanelKinds {
+		if _, ok := rects[boardPanelTitle(kind)+"窗口"]; !ok {
 			t.Fatalf("the fleet page misses the %s panel, texts %q", kind, tester.Texts())
 		}
-		rects[kind] = rect
 	}
-	kpi := rects["fleet-kpi"]
-	network := rects["fleet-network"]
-	collaboration := rects["fleet-collaboration"]
-	tasks := rects["fleet-tasks"]
-	events := rects["fleet-events"]
-	artifacts := rects["fleet-artifacts"]
+	byKind := func(kind string) ui.Rect { return rects[boardPanelTitle(kind)+"窗口"] }
+	kpi := byKind("fleet-kpi")
+	network := byKind("fleet-network")
+	collaboration := byKind("fleet-collaboration")
+	tasks := byKind("fleet-tasks")
+	events := byKind("fleet-events")
+	artifacts := byKind("fleet-artifacts")
 	if delta := kpi.X - network.X; delta < -1 || delta > 1 {
 		t.Fatalf("the KPI strip starts where the dashboard starts: kpi %+v network %+v", kpi, network)
 	}

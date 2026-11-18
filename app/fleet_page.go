@@ -82,6 +82,7 @@ func (s *shellState) pinBoardPages() {
 	pages = append(pages, modules...)
 	s.board.pages = pages
 	s.board.active = 0
+	s.boardScrollTop = true
 	for index := range pages {
 		if activeID != "" && pages[index].ID == activeID {
 			s.board.active = index
