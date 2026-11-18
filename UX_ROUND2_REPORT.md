@@ -118,8 +118,8 @@ Agent 消息既不进对话流也不进聊天窗；协作信息只在编队页�
    → 按 captain 口径统一为「真实占用下的等比分摊」（图例之和 = 卡片报告的 120.0k，即 `≈8.0k`）。
 3. `TestFleetHistoryPageListsAllTasksAndOpensGraph` — 目标行渲染在窗口外 `y≈1371` 致点击越界
    → 测试尺寸调整为 1280×800 并点最顶部最新任务，验证「全部 15 个历史图」而非靠缩小窗口硬塞。
-4. `TestTheCollaborationCardListsTheAgentMessages` — 新泳道卡把发送方显示成裸 id `p1`
-   → `collabSwimlaneEvent` 增 `FromLabel`，沿用既有 `collabMessageText` 的「项目主管通知」标签（未重复造轮子）。
+4. 聊天内泳道卡的旧测试（`TestTheSwimlaneCard*` / `TestTheCollaborationCardListsTheAgentMessages`）随卡片移出聊天窗口一并删除；
+   替换为编队页的 `app/fleet_swimlane_test.go`，并让 `TestAgentMessagesStayOutOfTheChatFlow` 断言聊天窗口没有协作卡片。
 5. `TestNodeSessionShowsItsOwnContextCard` — node 会话误渲染主上下文卡
    → `panelContextOverview` 顶部按 `chatScope().Kind=="node"` 分流到 node 卡（未测量时显示骨架，绝不回退主卡）。
 
@@ -127,9 +127,11 @@ Agent 消息既不进对话流也不进聊天窗；协作信息只在编队页�
 
 - **测试器（ui.NewTester）**：各实现测试全部为用户可见文本断言——node 卡断言「研究员 · deepseek-v4.1-flash / 120.0k / 1.0M tokens / 12.0% / 各组成项」；
   历史图断言「共 15 个历史图（含已完成、已停止）」并能点击「打开图/打开会话」；
-  泳道卡断言「3 泳道」「1 任务 / 2 事件」「协作连线」「p1 → self」「1970年1月1日」；折叠栏断言「思考与工具调用 · 用时 12s」；
+  泳道卡断言「3/3 条记录 · 4 条泳道」、每个泳道的模型/tokens/成本/任务与事件数、点开 marker 后的「planner → worker · 正文」；
+  聊天窗口断言**没有**「跨 Agent 协作」卡片；折叠栏断言「思考与工具调用 · 用时 12s」；
   时间断言覆盖今天/昨天/前天/同年/跨年与 DST。全部通过。
-- **真机**：captain 13:31 执行 `graphbuild app` + install 成功，**App health 200**，即安装后的真实 Graph 实例可正常启动。
+- **真机**：captain 15:39 执行 `graphbuild app` + install 成功，**App health 200**；打开「编队」页可见通栏泳道卡
+  （真实数据 200/200 条记录 · 3 条泳道，三条泳道各自显示模型/tokens·成本/任务·事件数，右侧时间列与 marker 正常）。
 
 ## DSH 偏差（第 3 条，如实列出）
 
