@@ -82,6 +82,8 @@ func (s *shellState) boardPanelBody(ctx *ui.Context, panel *boardPanel) {
 		s.panelFleetEvents(ctx)
 	case "fleet-artifacts":
 		s.panelFleetArtifacts(ctx)
+	case "fleet-history-list":
+		s.panelFleetHistory(ctx)
 	case "agent-detail":
 		s.panelAgentDetail(ctx)
 	case "graph-dag":

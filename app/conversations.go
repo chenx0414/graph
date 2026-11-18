@@ -305,7 +305,10 @@ func (c *chatState) transcript(ctx *ui.Context) {
 }
 
 func messageClock(millis int64) string {
-	return time.UnixMilli(millis).Format("15:04")
+	// All chat timestamps share the one relative-date formatter: assistant and
+	// user bubbles, notices and collaboration events call this helper. The
+	// formatter owns the calendar rules and the empty state for missing data.
+	return relativeTimeFromMillis(millis, time.Now())
 }
 
 func copyMessage(text string) {

@@ -28,6 +28,7 @@ type shellState struct {
 	trajectory        trajectoryState
 	insights          insightsState
 	fleet             fleetState
+	fleetHistory      fleetHistoryState
 	graph             fleetGraphView
 	modelMeta         map[string]modelMeta
 	modelMetaResolved map[string]modelMeta

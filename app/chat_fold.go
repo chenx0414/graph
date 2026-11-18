@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	"graph/app/gwui/kit"
@@ -76,10 +77,40 @@ func chatFoldRows(runs []transcriptRun) []chatRow {
 	return rows
 }
 
+func foldDuration(row chatRow, now time.Time) (time.Duration, bool) {
+	var first, last int64
+	for _, step := range row.steps {
+		for _, message := range step.messages {
+			if message.CreatedAt <= 0 {
+				continue
+			}
+			if first == 0 || message.CreatedAt < first {
+				first = message.CreatedAt
+			}
+			if message.CreatedAt > last {
+				last = message.CreatedAt
+			}
+		}
+	}
+	if first == 0 || last <= first {
+		return 0, false
+	}
+	if now.Sub(time.UnixMilli(first)) > runClockWindow {
+		return 0, false
+	}
+	return time.Duration(last-first) * time.Millisecond, true
+}
+
 func (c *chatState) foldRow(ctx *ui.Context, row chatRow) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	open := c.expanded[row.foldKey]
+	// The row keeps its short label so the fold stays addressable by its
+	// stable name; the rendered text carries the extra timing reading.
 	const label = "思考与工具调用"
+	shown := label
+	if elapsed, ok := foldDuration(row, ctx.Now()); ok {
+		shown = label + " · 用时 " + codexWorkedFor(elapsed)
+	}
 	header := ui.Row(ctx).FillWidth().Height(th.Space(7)).Gap(th.Space(1.5)).AlignItems(ui.Center).
 		Label(label).Focusable()
 	header.OnClick(func() {
@@ -91,7 +122,7 @@ func (c *chatState) foldRow(ctx *ui.Context, row chatRow) {
 		if open {
 			chevron.Rotate(180)
 		}
-		kit.Text(ctx, label, t.Text.Xs).TextColor(t.Muted).SingleLine()
+		kit.Text(ctx, shown, t.Text.Xs).TextColor(t.Muted).SingleLine()
 	})
 	kit.Separator(ctx, false)
 	if !open {

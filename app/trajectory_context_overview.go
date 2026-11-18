@@ -152,6 +152,12 @@ func (s *shellState) contextOverviewSubtitle(model string) string {
 }
 
 func (s *shellState) panelContextOverview(ctx *ui.Context) {
+	// A node Agent session shows its own context, never the main
+	// conversation's: route the panel to the node card.
+	if s.chatScope().Kind == "node" {
+		s.panelNodeContext(ctx)
+		return
+	}
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	data := s.trajectoryData(ctx)
 	if data == nil {

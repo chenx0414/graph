@@ -76,6 +76,9 @@ func (s *shellState) panelFleetKPI(ctx *ui.Context) {
 	}
 	ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center).Children(func() {
 		kit.Text(ctx, caption, t.Text.Xs).TextColor(t.Muted).Grow(1).SingleLine().Ellipsis("…")
+		kit.Button(ctx, "历史图", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeXs}).Label("浏览历史图").OnClick(func() {
+			s.openFleetHistoryPage("")
+		})
 		kit.Button(ctx, "刷新", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeXs}).Label("刷新编队").OnClick(func() {
 			s.refreshFleet()
 		})

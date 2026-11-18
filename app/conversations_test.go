@@ -356,7 +356,10 @@ func TestTheQuestionModuleShowsTheQuestionAndAnswersIt(t *testing.T) {
 func TestChatBubblesCarryATimeAndACopyButton(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
 	state.status = ""
-	stamp := time.Date(2026, 11, 11, 9, 5, 0, 0, time.Local).UnixMilli()
+	// A message from today shows only its clock time under the shared
+	// relative-date rule; a fixed old date would carry a date prefix here.
+	today := time.Now()
+	stamp := time.Date(today.Year(), today.Month(), today.Day(), 9, 5, 0, 0, time.Local).UnixMilli()
 	state.messages = []transcriptMessage{
 		{Role: "assistant", Text: "一句回答", CreatedAt: stamp},
 		{Role: "user", Text: "一句提问", CreatedAt: stamp},

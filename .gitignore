@@ -75,3 +75,5 @@ dist/app-mygo/
 
 # 多 Agent 协调状态（会话日志与对象，机器相关，不入库）
 .emergence/
+# Agent-population working ledger; not product code.
+coordination/

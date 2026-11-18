@@ -119,6 +119,11 @@ type chatState struct {
 	pagedHistory    bool
 	fingerprint     string
 	expanded        map[string]bool
+	// collabQuery and collabEventID hold the swimlane card's search box and
+	// the event whose detail is open. They live on chatState so a redraw or a
+	// scroll keeps the card stable, like the rest of the chat state.
+	collabQuery   string
+	collabEventID string
 	window          *mygo.Window
 	api             apiClient
 	draft           string

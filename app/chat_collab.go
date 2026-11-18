@@ -1,17 +1,10 @@
 package main
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
-	"graph/app/gwui/kit"
-	gwtheme "graph/app/gwui/theme"
 )
-
-// collabCardLimit bounds how many agent messages the collaboration card lists
-// at once; the count above the list tells how many are still waiting.
-const collabCardLimit = 6
 
 // collabMessage reports whether the message comes from another agent (a project
 // supervisor, a peer or a sub-agent) rather than from the user. Those messages
@@ -90,51 +83,10 @@ func collabMessageMeta(message transcriptMessage, label string) string {
 	return strings.Join(meta, " · ")
 }
 
+// collabCard draws the cross-agents conversation as the DSH-style swimlane
+// card (see chat_collab_swimlane.go): one lane per agent, time-ordered events,
+// sender -> receiver links and the header stats. It keeps the "跨 Agent 协作"
+// label and the expanded["collab"] toggle the chat already used.
 func (c *chatState) collabCard(ctx *ui.Context, messages []transcriptMessage) {
-	t, th := gwtheme.Of(ctx), ctx.Theme()
-	open := c.expanded["collab"]
-	card := ui.Column(ctx).FillWidth().Padding(th.Space(1.5), th.Space(2)).Radius(t.Radius.Md).
-		Border(gwtheme.Hairline, t.Border).Background(t.Card).Gap(th.Space(1))
-	card.Children(func() {
-		header := ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center).Label("跨 Agent 协作").Focusable()
-		header.OnClick(func() {
-			c.expanded["collab"] = !open
-			c.frame()
-		})
-		header.Children(func() {
-			chevron := ui.Icon(ctx, iconChevron).Size(gwtheme.IconXs, gwtheme.IconXs).TextColor(t.Muted)
-			if open {
-				chevron.Rotate(180)
-			}
-			ui.Icon(ctx, iconNetwork).Size(gwtheme.IconXs, gwtheme.IconXs).TextColor(t.Muted)
-			kit.Text(ctx, "跨 Agent 协作", t.Text.Xs).TextColor(t.Muted).SingleLine()
-			kit.Text(ctx, strconv.Itoa(len(messages))+" 条", t.Text.Xs).TextColor(t.Muted).SingleLine()
-		})
-		if !open {
-			return
-		}
-		shown := messages
-		if len(shown) > collabCardLimit {
-			shown = shown[len(shown)-collabCardLimit:]
-		}
-		for _, message := range shown {
-			row := message
-			label, detail := collabMessageText(row)
-			line := ui.Column(ctx).FillWidth().Gap(th.Space(0.25)).Children(func() {
-				ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center).Children(func() {
-					kit.Text(ctx, collabMessageMeta(row, label), t.Text.Xs).TextColor(t.Muted).Grow(1).SingleLine().Ellipsis("…")
-					if row.CreatedAt > 0 {
-						kit.Text(ctx, messageClock(row.CreatedAt), t.Text.Xs).TextColor(t.Muted)
-					}
-				})
-				if detail != "" {
-					kit.Text(ctx, detail, t.Text.Sm).TextColor(t.Foreground).SingleLine().Ellipsis("…")
-				}
-			})
-			_ = line
-		}
-		if hidden := len(messages) - len(shown); hidden > 0 {
-			kit.Text(ctx, "还有 "+strconv.Itoa(hidden)+" 条协作消息未列出", t.Text.Xs).TextColor(t.Muted).SingleLine()
-		}
-	})
+	c.renderCollabSwimlane(ctx, messages)
 }
