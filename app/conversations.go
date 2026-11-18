@@ -244,19 +244,13 @@ func (c *chatState) view(ctx *ui.Context) {
 
 func (c *chatState) transcript(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
-	spoken, collab := splitCollabMessages(c.messages)
-	if len(collab) > 0 {
-		c.collabCard(ctx, collab)
-	}
+	spoken, _ := splitCollabMessages(c.messages)
 	if len(spoken) == 0 {
 		if c.loading {
 			skeletonChatTranscript(ctx)
 			return
 		}
 		message, hint := "还没有对话", "在下面输入第一条消息"
-		if len(collab) > 0 {
-			message, hint = "还没有和你说话的记录", "Agent 之间的协作在上面的卡片里"
-		}
 		ui.Column(ctx).Grow(1).Center().Children(func() {
 			kit.Text(ctx, message, t.Text.Base).TextColor(t.Muted)
 			kit.Text(ctx, hint, t.Text.Sm).TextColor(t.Muted)

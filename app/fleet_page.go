@@ -20,14 +20,12 @@ func defaultFleetPanels() []boardPanel {
 
 func defaultFleetLayout() boardNode {
 	network := boardSlot{Weight: 3, Node: boardNode{Kind: "panel", PanelID: "fleet-network"}}
-	right := boardSlot{Weight: 2, Node: boardNode{Kind: "split", Axis: "column", Children: []boardSlot{
-		{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "fleet-collaboration"}},
-		{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "fleet-tasks"}},
-	}}}
+	tasks := boardSlot{Weight: 2, Node: boardNode{Kind: "panel", PanelID: "fleet-tasks"}}
 	return boardNode{Kind: "split", Axis: "column", Children: []boardSlot{
-		{Weight: 1.15, Node: boardNode{Kind: "panel", PanelID: "fleet-kpi"}},
-		{Weight: 4.2, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{network, right}}},
-		{Weight: 2.4, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
+		{Weight: 2.0, Node: boardNode{Kind: "panel", PanelID: "fleet-kpi"}},
+		{Weight: 3.0, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{network, tasks}}},
+		{Weight: 7.4, Node: boardNode{Kind: "panel", PanelID: "fleet-collaboration"}},
+		{Weight: 2.0, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
 			{Weight: 3, Node: boardNode{Kind: "panel", PanelID: "fleet-events"}},
 			{Weight: 2, Node: boardNode{Kind: "panel", PanelID: "fleet-artifacts"}},
 		}}},

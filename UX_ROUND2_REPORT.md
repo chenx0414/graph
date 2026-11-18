@@ -112,6 +112,10 @@
 另有 5 路 agent 独立复现同一结论（agent-0003 app 15.201s / agent-0008 app 15.726s / agent-0010 app 14.057s+backend /
 agent-0016 app 14.97s+check-queue 全绿），交叉印证非单点巧合。
 
+**跨 Agent 协作卡片（第 3 条）的最终实现**：captain 自己重写。旧的聊天内卡片被删除，
+新的泳道卡落在编队页通栏面板，测试文件 `app/fleet_swimlane_test.go` 覆盖泳道、计数、时间列顺序、
+发送→接收连线、搜索与空态；布局改动由 `app/fleet_test.go` 的编队仪表盘断言守护。
+
 **过程中修掉的 5 个真实红测**（先红后绿，均由 owner 修复，非测试放水）：
 1. `TestSwimlaneEmptyStateHasNoInventedData` — 空输入被造出一条 `self` 泳道 → 改为空数据返回空 lanes/events/links。
 2. `TestNodeContextCardShowsTheNodesOwnOccupancyAndComposition` — 断言口径与主上下文卡不一致
@@ -172,6 +176,21 @@ agent-0016 app 14.97s+check-queue 全绿），交叉印证非单点巧合。
   泳道卡断言「3 泳道」「1 任务 / 2 事件」「协作连线」「p1 → self」「1970年1月1日」；折叠栏断言「思考与工具调用 · 用时 12s」；
   时间断言覆盖今天/昨天/前天/同年/跨年与 DST。全部通过。
 - **真机**：captain 13:31 执行 `graphbuild app` + install 成功，**App health 200**，即安装后的真实 Graph 实例可正常启动。
+
+## DSH 偏差（第 3 条，如实列出）
+
+- DSH 里没有单一「泳道 + 时间列 + 箭头」组件：它是 TeamBoard（Agent/任务行）与 stats 表格（固定列宽、
+  tabular-nums 时钟、计数列）合成的。我们按这个合成结构还原，不是 import 现成组件。
+- 泳道卡：DSH `TeamBoard` 是 13px 标题 + 12px 详情、`padding:8px 7px`；我们等价采用 12px/11px 文本、
+  4~8px 内距、圆角 8px，因 Graph 的 `gwtheme` 字号刻度而有 1px 级差异。
+- 时间列：DSH 用 CSS 百分比列宽 + `font-variant-numeric: tabular-nums`；Go UI 没有 tabular-nums，
+  用等宽字体近似；列宽固定 48px，与 DSH 的窄列一致。
+- 连线：DSH 无箭头绘制代码，语义来自 `send_message`/`team/message/*.jsonl` 的发送方-接收方记录；
+  Graph 侧新增竖向连线 + 端帽矩形，颜色取发送泳道 accent。
+- marker：DSH 用 `+`/勾选图标；我们用 `+`（委派/派生）、`✓`（结果/投递）、`?`（问题）三个字符，
+  尺寸 16px、圆角 4px、实心 accent 底 + 白色符号。
+- 滚动：DSH 横向滚动 + 顶部固定泳道列；Graph 用 `ui.ScrollHorizontal`，泳道栏固定、时间列滚动。
+  没有 sticky 表头，这是 Go UI 框架的限制。
 
 ## 剩余风险
 

@@ -41,8 +41,8 @@ func TestTheMainAgentWindowCountsKeepsAgentTalkAsideAndFoldsTheSteps(t *testing.
 	now := tester.Now()
 	mainAgentWindow(tester, state, now)
 	tester = frames(tester)
-	if !tester.HasText("跨 Agent 协作") {
-		t.Fatalf("the collaboration card shows, texts %q", tester.Texts())
+	if tester.HasText("跨 Agent 协作") {
+		t.Fatalf("the chat window keeps no collaboration card, texts %q", tester.Texts())
 	}
 	if tester.HasText("子 Agent 已完成侦察") {
 		t.Fatalf("the supervisor talk stays out of the chat flow, texts %q", tester.Texts())

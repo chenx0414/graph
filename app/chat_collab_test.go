@@ -33,44 +33,8 @@ func TestAgentMessagesStayOutOfTheChatFlow(t *testing.T) {
 			t.Fatalf("an agent message leaked into the chat flow as %q, texts %q", leaked, tester.Texts())
 		}
 	}
-	if !tester.HasText("跨 Agent 协作") {
-		t.Fatalf("the collaboration card holds the agent messages, texts %q", tester.Texts())
-	}
-}
-
-func TestTheCollaborationCardListsTheAgentMessages(t *testing.T) {
-	state := newChatState("http://127.0.0.1:1", "tok")
-	state.messages = []transcriptMessage{
-		{ID: "u1", Role: "user", Kind: "chat", Text: "帮我看一下进度", State: "delivered", CreatedAt: 900_000},
-		supervisorNotice(supervisorNoticeText),
-		{ID: "a1", Role: "assistant", Kind: "chat", Text: "侦察已经完成。", State: "done", CreatedAt: 1_010_000},
-	}
-	tester := frames(ui.NewTester(state.view, 760, 620))
-	if !tester.HasText("1 条") {
-		t.Fatalf("the card counts the agent messages, texts %q", tester.Texts())
-	}
-	if err := tester.Click("跨 Agent 协作"); err != nil {
-		t.Fatalf("open the collaboration card: %v", err)
-	}
-	tester = frames(tester)
-	if !tester.HasText("项目主管通知") {
-		t.Fatalf("the card names the sender, texts %q", tester.Texts())
-	}
-	if !tester.HasText("子 Agent 已完成侦察") {
-		t.Fatalf("the card shows the notice content, texts %q", tester.Texts())
-	}
-	if tester.HasText("来自项目主管的通知") {
-		t.Fatalf("the card keeps the internal envelope out of sight, texts %q", tester.Texts())
-	}
-	if !tester.HasText("侦察已经完成。") || !tester.HasText("帮我看一下进度") {
-		t.Fatalf("opening the card keeps the chat intact, texts %q", tester.Texts())
-	}
-	if err := tester.Click("跨 Agent 协作"); err != nil {
-		t.Fatalf("fold the collaboration card: %v", err)
-	}
-	tester = frames(tester)
-	if tester.HasText("子 Agent 已完成侦察") {
-		t.Fatalf("the folded card hides the agent messages again, texts %q", tester.Texts())
+	if tester.HasText("跨 Agent 协作") {
+		t.Fatalf("the chat window keeps no collaboration card, texts %q", tester.Texts())
 	}
 }
 
@@ -91,15 +55,15 @@ func TestAnAgentMessageNeverCountsAsTheFinalAnswer(t *testing.T) {
 	}
 }
 
-func TestAChatWithOnlyAgentMessagesKeepsTheCardAndAnEmptyHint(t *testing.T) {
+func TestAChatWithOnlyAgentMessagesPointsAtTheFleetTab(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
 	state.messages = []transcriptMessage{supervisorNotice(supervisorNoticeText)}
 	tester := frames(ui.NewTester(state.view, 760, 620))
-	if !tester.HasText("跨 Agent 协作") {
-		t.Fatalf("the card holds the only agent message, texts %q", tester.Texts())
+	if tester.HasText("跨 Agent 协作") {
+		t.Fatalf("the chat window keeps no collaboration card, texts %q", tester.Texts())
 	}
-	if !tester.HasText("还没有和你说话的记录") {
-		t.Fatalf("the chat says why it is empty, texts %q", tester.Texts())
+	if !tester.HasText("还没有对话") {
+		t.Fatalf("the chat says it is empty, texts %q", tester.Texts())
 	}
 	if tester.HasText("来自项目主管的通知") {
 		t.Fatalf("the agent message is not played back as a user bubble, texts %q", tester.Texts())

@@ -215,16 +215,16 @@ func TestTheFleetPageUsesItsDashboardLayout(t *testing.T) {
 	if kpi.Y+kpi.H > network.Y {
 		t.Fatalf("the KPI strip sits above the rest: kpi %+v network %+v", kpi, network)
 	}
-	if network.W <= collaboration.W {
-		t.Fatalf("the agent network takes the wide column: network %+v collaboration %+v", network, collaboration)
+	if collaboration.X != kpi.X || collaboration.X+collaboration.W != kpi.X+kpi.W {
+		t.Fatalf("the collaboration card spans the dashboard: kpi %+v collaboration %+v", kpi, collaboration)
 	}
-	if collaboration.X < network.X+network.W-1 {
-		t.Fatalf("the network and the right column split one row: network %+v collaboration %+v", network, collaboration)
+	if collaboration.Y < network.Y+network.H-1 {
+		t.Fatalf("the collaboration card sits under the network row: network %+v collaboration %+v", network, collaboration)
 	}
-	if tasks.X != collaboration.X || tasks.Y <= collaboration.Y || tasks.Y < collaboration.Y+collaboration.H-1 {
-		t.Fatalf("the right column stacks collaboration over tasks: collaboration %+v tasks %+v", collaboration, tasks)
+	if tasks.X < network.X+network.W-1 {
+		t.Fatalf("the tasks card keeps the right column beside the network: network %+v tasks %+v", network, tasks)
 	}
-	if events.Y < network.Y+network.H-1 {
+	if events.Y < collaboration.Y+collaboration.H-1 {
 		t.Fatalf("the event check starts under the second row: events %+v network %+v", events, network)
 	}
 	if artifacts.Y < events.Y || artifacts.X < events.X+events.W-1 {

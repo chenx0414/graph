@@ -201,7 +201,7 @@ func TestTheFleetPageUsesTheFreeformBoardLayout(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
 	tester := openFleetTester(t, state)
 	page := state.boardPage()
-	want := []string{"fleet-kpi", "fleet-network", "fleet-collaboration", "fleet-tasks", "fleet-events", "fleet-artifacts"}
+	want := []string{"fleet-kpi", "fleet-network", "fleet-tasks", "fleet-collaboration", "fleet-events", "fleet-artifacts"}
 	if leaves := boardLeafIDs(&page.Layout); !sameStrings(leaves, want) {
 		t.Fatalf("the fleet page is a freeform board over its layout, leaves %v", leaves)
 	}
@@ -225,7 +225,7 @@ func TestTheFleetPageUsesTheFreeformBoardLayout(t *testing.T) {
 	}
 	tester.Release(endX, endY)
 	frames(tester)
-	if leaves := boardLeafIDs(&state.boardPage().Layout); !sameStrings(leaves, []string{"fleet-kpi", "fleet-tasks", "fleet-collaboration", "fleet-network", "fleet-events", "fleet-artifacts"}) {
+	if leaves := boardLeafIDs(&state.boardPage().Layout); !sameStrings(leaves, []string{"fleet-kpi", "fleet-tasks", "fleet-network", "fleet-collaboration", "fleet-events", "fleet-artifacts"}) {
 		t.Fatalf("dragging one fleet panel onto another swaps them, leaves %v", leaves)
 	}
 }
@@ -326,24 +326,25 @@ func TestClickingAFleetArtifactOpensTheSharedArtifactsPanel(t *testing.T) {
 	}
 }
 
-func TestTheFleetCollaborationFiltersByAgent(t *testing.T) {
+func TestTheFleetCollaborationSearchesAgents(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
 	tester := openFleetTester(t, state)
-	if !tester.HasText("委派 · 主控 → 13-Graph") {
-		t.Fatalf("the collaboration timeline shows the delegation, texts %q", tester.Texts())
+	if !tester.HasText("3/3 条记录 · 4 条泳道") {
+		t.Fatalf("the card counts every record and lane, texts %q", tester.Texts())
 	}
-	if err := tester.Click("只看 planner"); err != nil {
-		t.Fatalf("filter the timeline by agent: %v", err)
+	if err := tester.Click("搜索 Agent"); err != nil {
+		t.Fatalf("focus the search field: %v", err)
 	}
+	tester.Type("planner")
 	tester = frames(tester)
-	if state.fleet.agentFilter != "n1" {
-		t.Fatalf("the timeline filter keeps the agent, filter %q", state.fleet.agentFilter)
+	if state.fleet.swimQuery != "planner" {
+		t.Fatalf("the search keeps what the user typed, query %q", state.fleet.swimQuery)
 	}
-	if tester.HasText("委派 · 主控 → 13-Graph") {
-		t.Fatalf("the filtered timeline still shows other agents, texts %q", tester.Texts())
+	if tester.HasText("3/3 条记录") {
+		t.Fatalf("the search narrows the records, texts %q", tester.Texts())
 	}
-	if !tester.HasText("投递 · planner → worker") {
-		t.Fatalf("the filtered timeline must keep the planner rows, texts %q", tester.Texts())
+	if !tester.HasText("1/3 条记录") || !tester.HasText("2 条泳道") {
+		t.Fatalf("one record between planner and worker stays, texts %q", tester.Texts())
 	}
 }
 
