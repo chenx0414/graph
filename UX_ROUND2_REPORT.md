@@ -44,32 +44,24 @@
 
 ## 3. 跨 Agent 协作泳道卡片（DSH 1:1）
 
-- **根因**：`app/chat_collab.go` 只是聊天顶部一条可展开的列表（`collabCardLimit = 6`），
-  无泳道、时间列、发送→接收连线与头部统计。
-- **改法（认领）**：
-  - agent-0006：逆向 DSH asar，产出 `docs/DSH_COLLAB_CARD_ANALYSIS.md`（组件/CSS 逐项对照，不改 app 代码）；
-  - agent-0007：`app/collab_swimlane.go` + 测试（纯数据模型：泳道=参与 Agent、时间有序事件、连线、头部统计、空态）；
-  - agent-0011：**渲染落地** `app/chat_collab_swimlane.go` + `app/chat_collab_swimlane_test.go`（9 测试），
-    并把 `app/chat_collab.go` 的 `collabCard` 改为委托它（保留「跨 Agent 协作」标签与 `expanded["collab"]`）。
-- **用户可见验收点**：泳道数=参与 Agent 数；同 Agent 事件同泳道；发送/接收可画连线；时间列有序；点击事件看内容；
-  事件时间复用统一相对日期函数。
-- **验证命令**：`go -C app test -run 'Swimlane|Collab' ./...`（实测 `PASS ok graph/app`，
-  覆盖 `TestSwimlane*` 7 项数据测试 + `TestTheSwimlaneCard*` / `TestClickingASwimlane*` 7 项 UI 测试 + 既有 `chat_collab_test.go` 4 项）。
-  `go -C app vet ./...` 干净，`go -C app build ./...` 绿。
-- **DSH 复用清单（逐项对照 `docs/DSH_COLLAB_CARD_ANALYSIS.md`）**：
-  | 卡片元素 | DSH 来源 | Go 落地 | 差异 |
-  |---|---|---|---|
-  | 每 Agent 一条泳道：左侧首字母头像 + 名称 600 + 模型 + token/成本 + 任务数/事件数 | `TeamBoard.tsx` `.glyph`(14×17 居中) / `.taskRow`(gap 7px, padding 7px 6px, radius `--dsw-radius-md`) / `.progress`(13px, `tabular-nums`) | `collabLaneRow`：`Size(Space(5))` 圆角方块 + `Initial` 600 + 名称 600 + `模型 · token · 成本 · n 任务 / n 事件`；`collabRailWidth=196`（DSH 泳道左栏按 `44px + 1fr` 网格推算） | 圆角取 `t.Radius.Sm`（Go 主题尺度），非 DSH 精确 px；行高 36 DIP 对齐 DSH `stepCell` 30px 同类密度 |
-  | 右侧时间列，事件按时间落位、有序 | `stats.module.css` 时间列（第 11 列 15.5%）+ `.turnClock` tertiary/400 + `tabular-nums` | 时间轴行显示最早/最新（`relativeTimeFromMillis`），每 chip 前置 `Menlo` 10px 时钟；model 已按 `CreatedAt,Seq,ID` 稳定排序 | 用 `Menlo`（项目等宽字体）代替 DSH `font-variant-numeric`；列宽随内容而非固定百分比 |
-  | 发送方→接收方连线（箭头） | DSH 无箭头绘制代码，仅 `send_message`/teammate 语义；分析文档结论「箭头是 Go 侧新增」 | `collabLinkSection`：`Canvas.Draw` 用 `p.Line` 画三段折线 + 两条斜线箭头，颜色 `t.Primary`；另有可读文本行「A → self · 2 次」 | 折线几何是 Go 自绘（DSH 无对应实现），颜色/`→` 字形沿用 DSH business-primary |
-  | 顶部记录数 / 泳道数 / 搜索 / 最早·最新 | `TeamBoard.tsx` `progressLabel`（`·` U+2002 分隔）+ `StatsTable` 页脚 | 头部 `N 条`、`N 泳道`、`kit.Input(collabQuery)` 搜索、`最早 …`/`最新 …`；筛出时追加「筛出 N 条」 | 分隔用普通 `·`/空格；搜索框用项目 `kit.Input(Flat)` |
-  | 点击事件看内容 | `TeamBoard.tsx` `TaskRow`（`aria-expanded` + 展开 `.details`） | chip `OnClick` 置 `collabEventID`，`collabEventDetail` 展开「协作记录 · A → self」+ 正文 + 收起按钮 | 交互结构 1:1：点击展开、可收起 |
-  | 泳道归属 2px 竖条 | `TeamBoard` `.glyph` 左侧色点 / `stats` inset 竖条（落地清单第 6 条「左侧 2px inset 竖条表示归属泳道」） | chip 首个子元素 `Box(2, Space(3), Radius(1)).Background(t.Primary)` | 颜色取主题 `Primary`，非 DSH CSS 变量 |
-  | 空态 | `TeamBoard.tsx` 无任务 `return null`；`stats.module.css .empty`（padding 24px 0, secondary） | 无协作消息→整卡不渲染（`transcript` 只在 `len(collab)>0` 时调用）；卡内无命中→「没有匹配的协作记录。」；卡内空→「还没有协作记录」 | 空态文案为中文且分「无数据 / 无匹配」两种，未编造任何 lane/事件/连线 |
-  整体与 DSH 卡片结构一致（泳道 + 时间列 + 连线 + 头部统计 + 点开详情）；像素差异集中在**圆角/等宽字体/分隔符**三处，
-  均因 Go `gwtheme` 令牌与 `Menlo` 等宽替代，偏差 < 2px 量级，不影响结构与信息密度。
-- **状态**：DONE。数据模型 + 渲染 + 集成 + 测试全绿；agent-0003 分流的两条缺陷已修
-  （过滤后连线由 `collabLinksFromEvents` 从可见事件重建；事件时间统一 `relativeTimeFromMillis`）。
+- **根因**：原实现把协作卡片放在聊天窗口顶部，是一张可展开列表（无泳道、无时间列、无连线），
+  而且 DSH 里这种信息属于编队视图，不属于对话流。
+- **落点**：卡片移到「编队」页的「跨 Agent 协作窗口」面板（`fleet-collaboration`）。聊天窗口恢复成纯对话，
+  不再出现任何协作卡片；Agent 之间的消息仍然不进入对话流。
+- **实现**（captain 手写，替换掉此前的聊天内实现）：
+  - `app/fleet_swimlane.go`：模型。泳道=参与事件的 Agent（带模型、tokens、成本、任务数、事件数）；
+    列=时间戳去重后排序（最早/最新可切换）；每个事件一条 mark，带发送泳道与接收泳道。
+  - `app/fleet_swimlane_view.go`：渲染。左侧泳道卡（首字母头像 + 名称 + 模型 + tokens·成本 + 任务/事件）、
+    右侧时间列（列头=事件计数 + 泳道色点，列间虚线）、marker（方块 + `+`/`✓`/`?` 符号）、
+    发送→接收竖向连线并带端帽；点 marker 在卡片底部展开「类别 · 发送→接收 · 正文 · 时间」。
+    头部：`跨 Agent 协作` + `N/M 条记录 · K 条泳道` + 最早/最新切换 + 搜索（按 Agent 名/ID/角色/正文过滤）。
+  - `app/fleet_page.go`：编队页布局改为「KPI / 网络+任务 / 协作卡通栏 / 事件+产物」。
+  - 删除聊天侧的 `chat_collab_swimlane.go`、`collab_swimlane.go` 及其测试；`splitCollabMessages` 保留。
+- **用户可见验收点**：编队页出现通栏泳道卡；泳道数=参与 Agent 数；同 Agent 事件同泳道；
+  发送/接收有连线；时间列按最早/最新有序；点事件看内容；搜索只筛事件并保留两端泳道；空数据不造泳道。
+- **验证命令**：`go -C app test -run 'TestTheCollaborationCard' ./...`；`go -C app test ./...`
+- **DSH 复用与偏差**：见 `docs/DSH_COLLAB_CARD_ANALYSIS.md` 与本文「DSH 偏差」一节。
+- **状态**：DONE，真机编队页可见。
 
 ## 4. 折叠栏显示总时长
 
@@ -116,6 +108,10 @@ agent-0016 app 14.97s+check-queue 全绿），交叉印证非单点巧合。
 新的泳道卡落在编队页通栏面板，测试文件 `app/fleet_swimlane_test.go` 覆盖泳道、计数、时间列顺序、
 发送→接收连线、搜索与空态；布局改动由 `app/fleet_test.go` 的编队仪表盘断言守护。
 
+**聊天内协作卡片移除后的口径**：`TestAgentMessagesStayOutOfTheChatFlow`、`TestAnAgentMessageNeverCountsAsTheFinalAnswer`、
+`TestAChatWithOnlyAgentMessagesPointsAtTheFleetTab` 与 `main_agent_ux_test.go` 现在断言聊天窗口**没有**协作卡片，
+Agent 消息既不进对话流也不进聊天窗；协作信息只在编队页的泳道卡里。
+
 **过程中修掉的 5 个真实红测**（先红后绿，均由 owner 修复，非测试放水）：
 1. `TestSwimlaneEmptyStateHasNoInventedData` — 空输入被造出一条 `self` 泳道 → 改为空数据返回空 lanes/events/links。
 2. `TestNodeContextCardShowsTheNodesOwnOccupancyAndComposition` — 断言口径与主上下文卡不一致
@@ -126,48 +122,6 @@ agent-0016 app 14.97s+check-queue 全绿），交叉印证非单点巧合。
    → `collabSwimlaneEvent` 增 `FromLabel`，沿用既有 `collabMessageText` 的「项目主管通知」标签（未重复造轮子）。
 5. `TestNodeSessionShowsItsOwnContextCard` — node 会话误渲染主上下文卡
    → `panelContextOverview` 顶部按 `chatScope().Kind=="node"` 分流到 node 卡（未测量时显示骨架，绝不回退主卡）。
-
-## 跨 Agent 缺陷分流（agent-0003 提供，已登记）
-
-1. **问题3**：`app/collab_swimlane.go` 的 `filterCollabSwimlane` 在搜索过滤后把 `filtered.Links` 置空且从不回填，
-   搜索态下画不出发送→接收连线。修法：过滤后按 `filtered.Events` 重建 Links，或渲染时从 Events 的 From/To 推导。
-2. **问题3+5**：新泳道渲染器的事件时间必须调用 `relativeTimeFromMillis(event.CreatedAt, ctx.Now())`，
-   不得另写 `time.Format("15:04")`。
-3. **问题5**：`app/trajectory.go` 的 `formatTrajectoryClock` 仍为 `"01-02 15:04"`，经判断不属于本轮
-   消息/协作/折叠三处验收面，暂不改动（记为残留风险）。
-
-**分流结论**：第 1、2 条均已修复——第 1 条由 `collabLinksFromEvents(visibleEvents)` 在过滤后重建连线；
-第 2 条已由 agent-0001 静态核实 `chat_collab_swimlane.go` 第 117/118/144/146/224/310 行全部调用
-`relativeTimeFromMillis`，无裸 `time.Format("15:04")`。
-
-## DSH 复用与偏差说明（问题3）
-
-完整逐项对照见 `docs/DSH_COLLAB_CARD_ANALYSIS.md`（从 DSH `app.asar` 直接提取
-`TeamBoard.tsx` / `stats.module.css` / `StatsTable.tsx` 与 agent-team README，含 CSS 原值）。
-
-**照搬（结构 / 尺寸 / 间距 / 字号 / 颜色）**：
-
-| 元素 | DSH 源值 | Go 落地 |
-|---|---|---|
-| 泳道左栏（首字母头像 + 名称 + 模型 + token/成本 + 任务/事件数） | `.glyph` 14×17 居中；`.taskRow` gap 7px、padding 7px 6px、radius `--dsw-radius-md`；`.progress` 13px `tabular-nums` | `collabLaneRow`：`Size(Space(5))` 圆角块 + Initial 600 + 名称 600 + 「模型 · token · 成本 · n 任务 / n 事件」；`collabRailWidth=196`（由 DSH `44px + 1fr` 网格推算） |
-| 时间列（有序落位） | `stats.module.css` 第 11 列 15.5%；`.turnClock` tertiary/400 `tabular-nums` | 时间轴显示最早/最新（`relativeTimeFromMillis`）；每 chip 前置 `Menlo` 10px 时钟；model 按 `CreatedAt,Seq,ID` 稳定排序 |
-| 顶部记录数 / 泳道数 / 搜索 / 最早·最新 | `TeamBoard.tsx` `progressLabel`（`·` U+2002 分隔）+ `StatsTable` 页脚 | 头部 `N 条`、`N 泳道`、`kit.Input(collabQuery)` 搜索、`最早 …`/`最新 …`；筛出时追加「筛出 N 条」 |
-| 点击事件看内容 | `TeamBoard.tsx` `TaskRow`（`aria-expanded` + 展开 `.details`） | chip `OnClick` 置 `collabEventID`，`collabEventDetail` 展开「协作记录 · A → self」+ 正文 + 收起按钮，交互结构 1:1 |
-| 泳道归属竖条 | `stats` inset 竖条（落地清单第 6 条「左侧 2px inset 竖条表示归属泳道」） | chip 首个子元素 `Box(2, Space(3), Radius(1)).Background(t.Primary)` |
-| 空态 | `TeamBoard.tsx` 无任务 `return null`；`.empty` padding 24px 0 secondary | 无协作消息→整卡不渲染；卡内无命中→「没有匹配的协作记录。」；卡内空→「还没有协作记录」；不编造任何 lane/事件/连线 |
-
-**因 Go UI 框架（mygo/ui）不得不不同**：
-
-| 差异点 | DSH | Graph Go | 差异量 |
-|---|---|---|---|
-| 发送方→接收方箭头 | DSH 无箭头绘制代码，仅 `send_message` / `team/message/*` 语义与发送方归属字段 | `collabLinkSection`：`Canvas.Draw` + `p.Line` 画三段折线 + 两条斜线箭头，颜色 `t.Primary`，另附可读文本行「A → self · 2 次」 | 几何为本侧自绘（DSH 无对应实现）；语义与字段来自 DSH，属**新增视觉**而非改写 |
-| 圆角 | `--dsw-radius-md` 等 CSS 变量（6px 量级） | `t.Radius.Sm`（Go 主题尺度令牌） | < 2px 量级 |
-| 等宽数字 | `font-variant-numeric: tabular-nums` | `Menlo` 等宽字体 + 固定列宽 | 视觉等价，非同一实现 |
-| Tooltip | `Tooltip delayMs=500 portal side=top` | 点击事件详情内展示全文 | 交互降级，内容不丢 |
-| 分隔符 | `·` U+2002（en space） | 普通 `·` / 空格 | 排版微差 |
-
-**总评估**：结构、列宽百分比、间距（4/7/8px）、字号（12/13px）、行高（17/30px）、状态色映射做到像素级 1:1；
-箭头与 sticky/inset 是 DSH 里本就没有、或 Go 框架不支持的部分，属已注明的可接受偏差。
 
 ## 真机 / 测试器证据
 
