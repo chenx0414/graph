@@ -137,13 +137,17 @@ Agent 消息既不进对话流也不进聊天窗；协作信息只在编队页�
 
 ## 第 3 条的后续三点（captain 直接改）
 
-1. **箭头**：`fleetSwimArrow` 计算 sender 行中心到 receiver 行中心，画竖线 + 三角箭头（`FillPath`），
-   箭头尖端落在接收方泳道，末端补一个落点圆点。方向由事件数据决定，不猜。
-2. **点事件跳会话**：`shellState.openFleetSwimMark` 优先打开接收方（没有接收方时打开发送方）的会话，
-   `chatState.jumpToMessage` 先按事件正文匹配消息，再按时间戳 5 秒内兜底；命中后展开所在折叠并
-   `list.ScrollTo(row, Center)`，该消息带高亮底与「定位到这条消息」标签。
-3. **只看最近 100 条 + 最新在左**：`fleetSwimMarkLimit = 100`，按时间排序后保留最新 100 条，
-   表头显示「最近 100 条 · 共 N+ 条 · K 条泳道」；默认「最新」在左，可切「最早」。
+1. **箭头（谁向谁投递）**：后端先把"发送方"真正投影出来——`message.*` 事件读
+   `message.data.source.conversationId`（新增 `senderAgentId` 字段），跨 Agent 事件不再被最近的
+   工具日志挤出窗口（`fleetCrossAgentRows` 预留名额）。前端 `fleetSwimArrow` 从发送泳道画竖线到
+   接收泳道，末尾三角箭头（`FillPath`）+ 落点圆点；没有对端的事件只落在自己泳道，不画箭头。
+2. **点事件跳会话**：`shellState.openFleetSwimMark` 先打开接收方会话（无接收方时打开自己），
+   `chatState.jumpToMessage` 按事件正文匹配消息、时间戳 5 秒内兜底；目标在首屏之外时
+   `loadOlderForJump` 一页页翻历史直到覆盖该时间点，再展开折叠并 `list.ScrollTo(row, Center)`，
+   命中消息带高亮底与「定位到这条消息」标签；确实找不到时在会话里提示一句，不假装跳到了。
+3. **只看最近的、左边最新**：默认「只看协作」（有发送→接收方向的事件）；点「全部事件」回到
+   事件流，最多渲染最近 100 条，表头显示「100/192+ 条记录」。默认「最新」在左、可切「最早」，
+   泳道只保留有箭头参与的 Agent，避免空泳道占位置。
 
 ## DSH 偏差（第 3 条，如实列出）
 

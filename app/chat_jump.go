@@ -7,6 +7,7 @@ import (
 )
 
 func (c *chatState) jumpToMessage(at int64, text string) bool {
+	c.loadOlderForJump(at, 20)
 	index, ok := c.messageIndexForEvent(at, text)
 	if !ok {
 		return false
@@ -99,4 +100,30 @@ func (c *chatState) messageIndexForEvent(at int64, text string) (int, bool) {
 		return 0, false
 	}
 	return best, true
+}
+
+func (c *chatState) loadOlderForJump(at int64, pages int) {
+	for page := 0; page < pages; page++ {
+		if c.source == nil || !c.source.Capabilities().History || c.noMoreHistory || c.oldestSeq <= 0 {
+			return
+		}
+		if oldest := c.messages[0].CreatedAt; oldest > 0 && at > 0 && oldest <= at {
+			return
+		}
+		older, oldest, hasMore, err := c.source.LoadOlder(c, c.oldestSeq)
+		if err != nil {
+			return
+		}
+		if len(older) > 0 {
+			c.messages = mergeMessages(older, c.messages)
+			c.pagedHistory = true
+			c.markRunBoundary(older[0].ID)
+		}
+		if oldest > 0 {
+			c.oldestSeq = oldest
+		}
+		if !hasMore {
+			c.noMoreHistory = true
+		}
+	}
 }

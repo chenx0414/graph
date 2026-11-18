@@ -67,16 +67,24 @@ type fleetSwimMark struct {
 }
 
 type fleetSwimlane struct {
-	Lanes     []fleetSwimLane
-	Columns   []fleetSwimColumn
-	Marks     []fleetSwimMark
-	Records   int
-	Hidden    int
-	Total     int
-	Truncated bool
+	Lanes       []fleetSwimLane
+	Columns     []fleetSwimColumn
+	Marks       []fleetSwimMark
+	Records     int
+	All         bool
+	Directional int
+	Rescued     int
+	Hidden      int
+	Total       int
+	Truncated   bool
 }
 
-func buildFleetSwimlane(data *fleetSnapshot, query string, newest bool) fleetSwimlane {
+func fleetSwimDirectional(event fleetEvent) bool {
+	sender := fleetEventSenderID(event)
+	return sender != "" && sender != event.AgentID
+}
+
+func buildFleetSwimlane(data *fleetSnapshot, query string, newest bool, all bool) fleetSwimlane {
 	model := fleetSwimlane{Lanes: []fleetSwimLane{}, Columns: []fleetSwimColumn{}, Marks: []fleetSwimMark{}}
 	if data == nil {
 		return model
@@ -92,7 +100,7 @@ func buildFleetSwimlane(data *fleetSnapshot, query string, newest bool) fleetSwi
 		if needle == "" {
 			return true
 		}
-		for _, id := range []string{event.AgentID, event.TargetAgentID} {
+		for _, id := range []string{event.AgentID, event.TargetAgentID, event.SenderAgentID} {
 			agent, ok := index[id]
 			if ok && strings.Contains(named(agent), needle) {
 				return true
@@ -112,18 +120,33 @@ func buildFleetSwimlane(data *fleetSnapshot, query string, newest bool) fleetSwi
 		}
 		return kept[i].ID < kept[j].ID
 	})
-	if len(kept) > fleetSwimMarkLimit {
-		model.Hidden = len(kept) - fleetSwimMarkLimit
-		kept = kept[len(kept)-fleetSwimMarkLimit:]
-	}
-	participants := map[string]bool{}
 	for _, event := range kept {
-		participants[event.AgentID] = true
-		if event.TargetAgentID != "" {
-			participants[event.TargetAgentID] = true
+		if fleetSwimDirectional(event) {
+			model.Directional++
 		}
 	}
-	model.Records = len(kept)
+	lanes := kept
+	shown := kept
+	if !all && model.Directional > 0 {
+		shown = make([]fleetEvent, 0, model.Directional)
+		for _, event := range kept {
+			if fleetSwimDirectional(event) {
+				shown = append(shown, event)
+			}
+		}
+	}
+	if len(shown) > fleetSwimMarkLimit {
+		model.Hidden = len(shown) - fleetSwimMarkLimit
+		shown = shown[len(shown)-fleetSwimMarkLimit:]
+	}
+	participants := map[string]bool{}
+	for _, event := range shown {
+		participants[event.AgentID] = true
+		if sender := fleetEventSenderID(event); sender != "" {
+			participants[sender] = true
+		}
+	}
+	model.Records = len(shown)
 	accent := fleetAccents()
 	laneAt := map[string]int{}
 	for _, agent := range data.Agents {
@@ -136,7 +159,7 @@ func buildFleetSwimlane(data *fleetSnapshot, query string, newest bool) fleetSwi
 			Accent: accent[(len(model.Lanes)+1)%len(accent)],
 		})
 	}
-	for _, event := range kept {
+	for _, event := range lanes {
 		if at, ok := laneAt[event.AgentID]; ok {
 			model.Lanes[at].Events++
 		}
@@ -147,7 +170,7 @@ func buildFleetSwimlane(data *fleetSnapshot, query string, newest bool) fleetSwi
 		}
 	}
 	at := map[int64]int{}
-	for _, event := range kept {
+	for _, event := range shown {
 		column, ok := at[event.At]
 		if !ok {
 			column = len(model.Columns)
@@ -164,14 +187,14 @@ func buildFleetSwimlane(data *fleetSnapshot, query string, newest bool) fleetSwi
 	for position := range model.Columns {
 		at[model.Columns[position].At] = position
 	}
-	for _, event := range kept {
-		from, ok := laneAt[event.AgentID]
+	for _, event := range shown {
+		receiver, ok := laneAt[event.AgentID]
 		if !ok {
 			continue
 		}
-		to := -1
-		if lane, ok := laneAt[event.TargetAgentID]; ok {
-			to = lane
+		from, to := receiver, -1
+		if lane, ok := laneAt[fleetEventSenderID(event)]; ok && lane != receiver {
+			from, to = lane, receiver
 		}
 		model.Marks = append(model.Marks, fleetSwimMark{
 			ID:     event.ID,

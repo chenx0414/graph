@@ -74,6 +74,7 @@ type fleetEvent struct {
 	Type          string `json:"type"`
 	AgentID       string `json:"agentId"`
 	TargetAgentID string `json:"targetAgentId"`
+	SenderAgentID string `json:"senderAgentId"`
 	TaskID        string `json:"taskId"`
 	Text          string `json:"text"`
 }
@@ -138,6 +139,7 @@ type fleetState struct {
 	accents        map[string]ui.Color
 	swimQuery      string
 	swimOldest     bool
+	swimAll        bool
 	swimPick       string
 	shares         map[string]float64
 }

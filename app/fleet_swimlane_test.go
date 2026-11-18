@@ -20,7 +20,7 @@ func swimlaneState(t *testing.T) *shellState {
 func TestTheCollaborationCardShowsOneLanePerAgent(t *testing.T) {
 	state := swimlaneState(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
-	model := buildFleetSwimlane(state.fleet.data, "", true)
+	model := buildFleetSwimlane(state.fleet.data, "", true, true)
 	if len(model.Lanes) != 4 {
 		t.Fatalf("one lane per participating agent, got %+v", model.Lanes)
 	}
@@ -34,8 +34,8 @@ func TestTheCollaborationCardShowsOneLanePerAgent(t *testing.T) {
 func TestTheCollaborationCardCountsRecordsAndLanes(t *testing.T) {
 	state := swimlaneState(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
-	if !tester.HasText("3/3 条记录") {
-		t.Fatalf("the header counts the records, texts %q", tester.Texts())
+	if !tester.HasText("3 条协作") {
+		t.Fatalf("the header counts the collaboration records, texts %q", tester.Texts())
 	}
 	if !tester.HasText("4 条泳道") {
 		t.Fatalf("the header counts the lanes, texts %q", tester.Texts())
@@ -44,14 +44,14 @@ func TestTheCollaborationCardCountsRecordsAndLanes(t *testing.T) {
 
 func TestTheCollaborationCardPutsTheNewestRecordOnTheLeft(t *testing.T) {
 	state := swimlaneState(t)
-	model := buildFleetSwimlane(state.fleet.data, "", true)
+	model := buildFleetSwimlane(state.fleet.data, "", true, true)
 	if len(model.Columns) != 3 {
 		t.Fatalf("three distinct event times make three columns, got %+v", model.Columns)
 	}
 	if model.Columns[0].At <= model.Columns[2].At {
 		t.Fatalf("the leftmost column is the newest record, got %+v", model.Columns)
 	}
-	oldest := buildFleetSwimlane(state.fleet.data, "", false)
+	oldest := buildFleetSwimlane(state.fleet.data, "", false, true)
 	if oldest.Columns[0].At >= oldest.Columns[2].At {
 		t.Fatalf("the 最早 toggle puts the oldest left, got %+v", oldest.Columns)
 	}
@@ -65,7 +65,7 @@ func TestTheCollaborationCardKeepsOnlyTheRecentRecords(t *testing.T) {
 			Type: "link.delivery", AgentID: "g1", Text: "投递 " + formatSeq(int64(index)),
 		})
 	}
-	model := buildFleetSwimlane(&data, "", true)
+	model := buildFleetSwimlane(&data, "", true, true)
 	if model.Records != fleetSwimMarkLimit || model.Hidden != 37 {
 		t.Fatalf("the card keeps the most recent %d and counts %d hidden, got %d/%d", fleetSwimMarkLimit, 37, model.Records, model.Hidden)
 	}
@@ -84,7 +84,7 @@ func TestTheCollaborationCardKeepsOnlyTheRecentRecords(t *testing.T) {
 
 func TestTheCollaborationCardDrawsArrowheadsTowardTheReceiver(t *testing.T) {
 	state := swimlaneState(t)
-	model := buildFleetSwimlane(state.fleet.data, "", true)
+	model := buildFleetSwimlane(state.fleet.data, "", true, true)
 	var linked *fleetSwimMark
 	for index := range model.Marks {
 		mark := model.Marks[index]
@@ -167,8 +167,115 @@ func conversationWithMarkMessageJSON() string {
 }
 
 func TestTheCollaborationCardInventsNothingWhenEmpty(t *testing.T) {
-	empty := buildFleetSwimlane(&fleetSnapshot{}, "", true)
+	empty := buildFleetSwimlane(&fleetSnapshot{}, "", true, true)
 	if len(empty.Lanes) != 0 || len(empty.Marks) != 0 || len(empty.Columns) != 0 {
 		t.Fatalf("an empty fleet invents no lanes, got %+v", empty)
+	}
+}
+
+func TestTheCollaborationCardFollowsTheProjectedDirection(t *testing.T) {
+	data := &fleetSnapshot{
+		Agents: []fleetAgent{
+			{ID: "g1", Kind: "global", Name: "主控", ConversationID: "g1"},
+			{ID: "p1", Kind: "project", Name: "项目", ConversationID: "p1"},
+		},
+		Events: []fleetEvent{{
+			ID: "e1", At: 1_700_000_000_000, Type: "message.created",
+			AgentID: "p1", SenderAgentID: "g1", Text: "来自主控",
+		}},
+	}
+	model := buildFleetSwimlane(data, "", true, true)
+	if len(model.Marks) != 1 {
+		t.Fatalf("one mark, got %+v", model.Marks)
+	}
+	mark := model.Marks[0]
+	if model.Lanes[mark.From].Agent.ID != "g1" || model.Lanes[mark.To].Agent.ID != "p1" {
+		t.Fatalf("the arrow runs from the sender to the receiver, got %+v", mark)
+	}
+	if label := fleetSwimMarkLabel(mark, model); label != "主控 → 项目" {
+		t.Fatalf("the mark reads sender -> receiver, got %q", label)
+	}
+}
+
+func TestTheCollaborationCardShowsOnlyArrowsUnlessAllIsAsked(t *testing.T) {
+	data := fleetSnapshot{Agents: []fleetAgent{
+		{ID: "g1", Kind: "global", Name: "主控"},
+		{ID: "p1", Kind: "project", Name: "项目"},
+	}, Events: []fleetEvent{
+		{ID: "e1", At: 10, Type: "message.tool", AgentID: "p1", Text: "跑工具"},
+		{ID: "e2", At: 20, Type: "message.created", AgentID: "p1", SenderAgentID: "g1", Text: "来自主控"},
+		{ID: "e3", At: 30, Type: "provider.transport", AgentID: "p1", Text: "传输"},
+	}}
+	collaboration := buildFleetSwimlane(&data, "", true, false)
+	if collaboration.Records != 1 || collaboration.Directional != 1 {
+		t.Fatalf("the card shows the one collaboration record, got %+v", collaboration)
+	}
+	if mark := collaboration.Marks[0]; mark.From < 0 || mark.To < 0 || mark.From == mark.To {
+		t.Fatalf("the record keeps its arrow, got %+v", mark)
+	}
+	all := buildFleetSwimlane(&data, "", true, true)
+	if all.Records != 3 {
+		t.Fatalf("the 全部 toggle brings the tool noise back, got %d", all.Records)
+	}
+}
+
+func TestTheCollaborationCardReachesAMessageOlderThanTheFirstPage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/conversations":
+			_, _ = w.Write([]byte(`[
+				{"id":"g1","title":"Main","role":"global","archivedAt":null},
+				{"id":"p1","title":"13-Graph","projectId":"13-Graph","role":"project","archivedAt":null}
+			]`))
+		case r.URL.Path == "/api/conversations/g1":
+			_, _ = w.Write([]byte(`{"messages":[{"id":"x1","seq":1,"role":"assistant","text":"主控自己的会话","createdAt":1}]}`))
+		case r.URL.Path == "/api/conversations/p1":
+			_, _ = w.Write([]byte(`{"messages":[{"id":"late","seq":900,"role":"assistant","text":"最近的一句","createdAt":1700000009000}]}`))
+		case r.URL.Path == "/api/conversations/p1/history":
+			_, _ = w.Write([]byte(`{"messages":[{"id":"old","seq":880,"role":"assistant","text":"委派 实现四栏页面","createdAt":1700000000000}]}`))
+		case r.URL.Path == "/api/fleet":
+			fleetSampleServer(w, r)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	state := newShellState(server.URL, "tok")
+	state.load()
+	state.openModule("fleet")
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	deadline := time.Now().Add(2 * time.Second)
+	for state.fleet.data == nil && state.fleet.failed == "" {
+		if !time.Now().Before(deadline) {
+			t.Fatalf("the fleet data never landed, texts %q", tester.Texts())
+		}
+		tester.Frame()
+	}
+	tester = frames(tester)
+	if err := tester.Click("协作事件 1"); err != nil {
+		t.Fatalf("click the first mark: %v", err)
+	}
+	tester = frames(tester)
+	if !tester.HasText("委派 实现四栏页面") {
+		t.Fatalf("the jump pages back to the older message, texts %q", tester.Texts())
+	}
+}
+
+func TestTheCollaborationCardHidesLanesWithoutArrows(t *testing.T) {
+	data := fleetSnapshot{Agents: []fleetAgent{
+		{ID: "g1", Kind: "global", Name: "主控"},
+		{ID: "p1", Kind: "project", Name: "项目"},
+		{ID: "r1", Kind: "node", Name: "审查", TaskID: "t1", NodeID: "review"},
+	}, Events: []fleetEvent{
+		{ID: "e1", At: 10, Type: "message.created", AgentID: "p1", SenderAgentID: "g1", Text: "来自主控"},
+		{ID: "e2", At: 20, Type: "message.tool", AgentID: "r1", Text: "跑工具"},
+	}}
+	collaboration := buildFleetSwimlane(&data, "", true, false)
+	if len(collaboration.Lanes) != 2 {
+		t.Fatalf("only agents with arrows get a lane, got %+v", collaboration.Lanes)
+	}
+	all := buildFleetSwimlane(&data, "", true, true)
+	if len(all.Lanes) != 3 {
+		t.Fatalf("the 全部 toggle keeps every lane, got %+v", all.Lanes)
 	}
 }

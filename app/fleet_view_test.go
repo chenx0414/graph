@@ -34,7 +34,7 @@ func TestTheFleetAPIparsesTheProjection(t *testing.T) {
 	if len(data.Tasks) != 2 || data.Tasks[0].ID != "t1" || data.Tasks[0].OwnerAgentID != "p1" {
 		t.Fatalf("tasks %+v", data.Tasks)
 	}
-	if len(data.Events) != 3 || data.Events[0].Type != "link.delegation" || data.Events[0].TargetAgentID != "p1" {
+	if len(data.Events) != 3 || data.Events[0].Type != "link.delegation" || data.Events[0].TargetAgentID != "g1" {
 		t.Fatalf("events %+v", data.Events)
 	}
 	if len(data.Artifacts) != 1 || data.Artifacts[0].ProducerAgentID != "p1" || data.Artifacts[0].Size != 2048 || data.Artifacts[0].Version != 2 {
@@ -329,8 +329,8 @@ func TestClickingAFleetArtifactOpensTheSharedArtifactsPanel(t *testing.T) {
 func TestTheFleetCollaborationSearchesAgents(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
 	tester := openFleetTester(t, state)
-	if !tester.HasText("3/3 条记录 · 4 条泳道") {
-		t.Fatalf("the card counts every record and lane, texts %q", tester.Texts())
+	if !tester.HasText("3 条协作 · 4 条泳道") {
+		t.Fatalf("the card counts every collaboration record and lane, texts %q", tester.Texts())
 	}
 	if err := tester.Click("搜索 Agent"); err != nil {
 		t.Fatalf("focus the search field: %v", err)
@@ -340,10 +340,10 @@ func TestTheFleetCollaborationSearchesAgents(t *testing.T) {
 	if state.fleet.swimQuery != "planner" {
 		t.Fatalf("the search keeps what the user typed, query %q", state.fleet.swimQuery)
 	}
-	if tester.HasText("3/3 条记录") {
+	if tester.HasText("3 条协作") {
 		t.Fatalf("the search narrows the records, texts %q", tester.Texts())
 	}
-	if !tester.HasText("1/3 条记录") || !tester.HasText("2 条泳道") {
+	if !tester.HasText("1 条协作") || !tester.HasText("2 条泳道") {
 		t.Fatalf("one record between planner and worker stays, texts %q", tester.Texts())
 	}
 }

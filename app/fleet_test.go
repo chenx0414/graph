@@ -134,9 +134,9 @@ const fleetSampleJSON = `{
     {"id":"wr-1","title":"补充编队测试","status":"pending","phase":"queued","ownerAgentId":"n1","projectId":"13-Graph","taskId":"","nodeId":"","startedAt":13,"updatedAt":14}
   ],
   "events": [
-    {"id":"1","at":1700000000000,"type":"link.delegation","agentId":"g1","targetAgentId":"p1","text":"委派 实现四栏页面"},
-    {"id":"2","at":1700000001000,"type":"about.result","agentId":"p1","targetAgentId":"g1","text":"返回执行结果"},
-    {"id":"3","at":1700000002000,"type":"link.delivery","agentId":"n1","targetAgentId":"n2","text":"planner 投递 交接说明"}
+    {"id":"1","at":1700000000000,"type":"link.delegation","agentId":"p1","targetAgentId":"g1","text":"委派 实现四栏页面"},
+    {"id":"2","at":1700000001000,"type":"about.result","agentId":"g1","targetAgentId":"p1","text":"返回执行结果"},
+    {"id":"3","at":1700000002000,"type":"link.delivery","agentId":"n2","targetAgentId":"n1","text":"planner 投递 交接说明"}
   ],
   "artifacts": [
     {"artifactId":"a1","taskId":"t1","namespace":"docs","name":"spec.md","title":"规格","mediaType":"text/markdown","version":2,"size":2048,"producerAgentId":"p1","producerTaskId":"t1","createdAt":21}

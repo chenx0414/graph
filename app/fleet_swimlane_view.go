@@ -20,7 +20,8 @@ func (s *shellState) panelFleetCollaboration(ctx *ui.Context) {
 	if data == nil {
 		return
 	}
-	model := buildFleetSwimlane(data, s.fleet.swimQuery, !s.fleet.swimOldest)
+	model := buildFleetSwimlane(data, s.fleet.swimQuery, !s.fleet.swimOldest, s.fleet.swimAll)
+	model.All = s.fleet.swimAll
 	if model.Total == 0 {
 		kit.Text(ctx, "还没有跨 Agent 协作事件。", t.Text.Sm).TextColor(t.Muted)
 		return
@@ -38,6 +39,16 @@ func (s *shellState) panelFleetCollaboration(ctx *ui.Context) {
 			s.fleet.swimOldest = true
 			s.frame()
 		})
+		if model.Directional > 0 {
+			fleetChip(ctx, "协作", "只看协作", !s.fleet.swimAll, func() {
+				s.fleet.swimAll = false
+				s.frame()
+			})
+			fleetChip(ctx, "全部", "全部事件", s.fleet.swimAll, func() {
+				s.fleet.swimAll = true
+				s.frame()
+			})
+		}
 		input := kit.Input(ctx, &s.fleet.swimQuery, kit.InputOpts{Placeholder: "搜索 Agent…", Flat: true})
 		input.Width(th.Space(26)).Label("搜索 Agent")
 	})
@@ -164,14 +175,14 @@ func (s *shellState) fleetSwimGrid(ctx *ui.Context, t gwtheme.Tokens, model flee
 
 func fleetSwimRecordLine(model fleetSwimlane) string {
 	lanes := strconv.Itoa(len(model.Lanes)) + " 条泳道"
-	if model.Hidden > 0 {
+	if model.All {
 		total := strconv.Itoa(model.Total)
 		if model.Truncated {
 			total += "+"
 		}
-		return "最近 " + strconv.Itoa(model.Records) + " 条 · 共 " + total + " 条 · " + lanes
+		return strconv.Itoa(model.Records) + "/" + total + " 条记录 · " + lanes
 	}
-	return strconv.Itoa(model.Records) + "/" + strconv.Itoa(model.Total) + " 条记录 · " + lanes
+	return strconv.Itoa(model.Records) + " 条协作 · " + lanes
 }
 
 func absf(v float32) float32 {
@@ -209,15 +220,23 @@ func (s *shellState) openFleetSwimMark(mark fleetSwimMark, model fleetSwimlane) 
 		candidates = append(candidates, model.Lanes[mark.To].Agent)
 	}
 	candidates = append(candidates, model.Lanes[mark.From].Agent)
+	opened := false
 	for _, agent := range candidates {
 		s.openFleetAgentChat(agent)
 		chat := s.active()
 		if chat == nil {
 			continue
 		}
+		opened = true
 		if chat.jumpToMessage(mark.At, mark.Text) {
 			chat.frame()
 			return
+		}
+	}
+	if opened {
+		if chat := s.active(); chat != nil {
+			chat.status = "这条协作记录在会话里找不到对应消息"
+			chat.frame()
 		}
 	}
 }

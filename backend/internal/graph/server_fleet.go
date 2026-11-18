@@ -70,6 +70,7 @@ type FleetEvent struct {
 	Type          string `json:"type"`
 	AgentId       string `json:"agentId"`
 	TargetAgentId string `json:"targetAgentId"`
+	SenderAgentId string `json:"senderAgentId"`
 	TaskId        string `json:"taskId"`
 	Text          string `json:"text"`
 }

@@ -186,17 +186,23 @@ func fleetAgentName(index map[string]fleetAgent, id string) string {
 	return "未知 Agent"
 }
 
+func fleetEventSenderID(event fleetEvent) string {
+	if event.SenderAgentID != "" {
+		return event.SenderAgentID
+	}
+	return event.TargetAgentID
+}
+
 func fleetEventLine(index map[string]fleetAgent, event fleetEvent) string {
-	from := fleetAgentName(index, event.AgentID)
-	to := fleetAgentName(index, event.TargetAgentID)
 	text := strings.TrimSpace(event.Text)
 	if text == "" {
 		text = event.Type
 	}
-	if event.TargetAgentID == "" {
-		return from + " · " + text
+	sender := fleetEventSenderID(event)
+	if sender == "" {
+		return fleetAgentName(index, event.AgentID) + " · " + text
 	}
-	return from + " → " + to + " · " + text
+	return fleetAgentName(index, sender) + " → " + fleetAgentName(index, event.AgentID) + " · " + text
 }
 
 func formatFleetCount(value int) string {

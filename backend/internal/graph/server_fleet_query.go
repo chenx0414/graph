@@ -7,9 +7,44 @@ import (
 )
 
 func fleetEventText(eventType string, data map[string]any) string {
-	for _, key := range []string{"text", "reason", "summary", "title", "message", "request"} {
+	for _, key := range []string{"text", "reason", "summary", "title", "request"} {
 		if value := fleetDataString(data, key); strings.TrimSpace(value) != "" {
 			return fleetTruncateText(value, 200)
+		}
+	}
+	if message := fleetDataRecord2(data, "message"); message != nil {
+		if value := fleetDataString(message, "text"); strings.TrimSpace(value) != "" {
+			return fleetTruncateText(value, 200)
+		}
+	}
+	return ""
+}
+
+func fleetDataRecord2(data map[string]any, key string) map[string]any {
+	value, _ := data[key].(map[string]any)
+	return value
+}
+
+func fleetMessageSource(data map[string]any) map[string]any {
+	message := fleetDataRecord2(data, "message")
+	if message == nil {
+		return nil
+	}
+	inner := fleetDataRecord2(message, "data")
+	if inner == nil {
+		return nil
+	}
+	return fleetDataRecord2(inner, "source")
+}
+
+func fleetEventSender(data map[string]any, index fleetAgentIndex) string {
+	source := fleetMessageSource(data)
+	if source == nil {
+		return ""
+	}
+	if conversationId := fleetDataString(source, "conversationId"); conversationId != "" {
+		if agent := index.byConversation[conversationId]; agent != "" {
+			return agent
 		}
 	}
 	return ""
@@ -116,6 +151,17 @@ func fleetEvents(store *TaskStore, scope fleetScope, taskSet map[string]bool, in
 	if truncated {
 		rows = rows[:fleetEventLimit]
 	}
+	if extra := fleetCrossAgentRows(store, scope, rows); len(extra) > 0 {
+		room := fleetEventLimit - len(extra)
+		if room < 0 {
+			room = 0
+		}
+		if len(rows) > room {
+			rows = rows[:room]
+			truncated = true
+		}
+		rows = append(rows, extra...)
+	}
 	out := make([]FleetEvent, 0, len(rows))
 	for _, row := range rows {
 		taskId := kernelString(row["task_id"])
@@ -123,11 +169,21 @@ func fleetEvents(store *TaskStore, scope fleetScope, taskSet map[string]bool, in
 			continue
 		}
 		data := fleetDataRecord(kernelString(row["data"]))
+		eventType := kernelString(row["type"])
+		agentId := index.agentForEvent(taskId, data)
+		targetId := index.targetForEvent(taskId, data)
+		senderId := ""
+		if strings.HasPrefix(eventType, "message.") {
+			senderId = fleetEventSender(data, index)
+			if senderId == agentId {
+				senderId = ""
+			}
+		}
 		out = append(out, FleetEvent{
 			Id: strconv.FormatInt(kernelInt(row["cursor"]), 10), At: kernelInt(row["timestamp"]),
-			Type: kernelString(row["type"]), AgentId: index.agentForEvent(taskId, data),
-			TargetAgentId: index.targetForEvent(taskId, data), TaskId: taskId,
-			Text: fleetEventText(kernelString(row["type"]), data),
+			Type: eventType, AgentId: agentId,
+			TargetAgentId: targetId, SenderAgentId: senderId, TaskId: taskId,
+			Text: fleetEventText(eventType, data),
 		})
 	}
 	return out, truncated
@@ -185,4 +241,39 @@ func fleetAgentOf(ledger *fleetLedger, agent AgentRecord) FleetAgent {
 		Tokens: usage.tokens, Cost: usage.cost, Requests: usage.requests, Messages: ledger.agentMessages(agent),
 		CreatedAt: agent.CreatedAt, UpdatedAt: updatedAt, CurrentOperationId: currentOperationId,
 	}
+}
+
+// fleetCrossAgentRows keeps the agent-to-agent events a long run can push out
+// of the recent window. The card draws arrows only where a sender differs from
+// its receiver, so losing every one of them to a busy tool log hides the
+// collaboration entirely.
+func fleetCrossAgentRows(store *TaskStore, scope fleetScope, recent []map[string]any) []map[string]any {
+	if len(recent) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(recent))
+	oldest := int64(1 << 62)
+	for _, row := range recent {
+		seen[kernelString(row["task_id"])+"#"+strconv.FormatInt(kernelInt(row["cursor"]), 10)] = true
+		if cursor := kernelInt(row["cursor"]); cursor < oldest {
+			oldest = cursor
+		}
+	}
+	query := "SELECT cursor,task_id,type,data,timestamp FROM events WHERE cursor < ? AND (data LIKE '%sourceConversationId%' OR (type='message.created' AND data LIKE '%\"source\":{%'))"
+	args := []any{oldest}
+	if !scope.global {
+		query += ` AND task_id IS NOT NULL AND task_id IN
+			(SELECT id FROM tasks WHERE project_id=? OR conversation_id=? OR id=?)`
+		args = append(args, scope.projectId, scope.conversationId, scope.anchorTaskId)
+	}
+	query += " ORDER BY cursor DESC LIMIT " + strconv.Itoa(fleetEventLimit)
+	extra := []map[string]any{}
+	for _, row := range kernelRows(store.Db, query, args...) {
+		key := kernelString(row["task_id"]) + "#" + strconv.FormatInt(kernelInt(row["cursor"]), 10)
+		if seen[key] {
+			continue
+		}
+		extra = append(extra, row)
+	}
+	return extra
 }
