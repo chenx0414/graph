@@ -19,7 +19,6 @@ func TestBoardDataWaitsUntilTheMainConversationIsReady(t *testing.T) {
 	shell.blockBoardDataUntilConversation()
 	shell.ensureUsage()
 	shell.ensureFleet()
-	shell.ensureInsights()
 	shell.ensureTrajectory()
 	if shell.usage != nil {
 		t.Fatal("usage must not load while the main conversation is still opening")

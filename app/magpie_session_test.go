@@ -90,6 +90,10 @@ func TestAProviderRowLeadsToItsModelInTheSession(t *testing.T) {
 	if err := picker.Click("gpt-6.1-sol"); err != nil {
 		t.Fatalf("pick the magpie model: %v", err)
 	}
+	picker = frames(picker)
+	if err := picker.Click("理由 Medium"); err != nil {
+		t.Fatalf("pick the thinking level: %v", err)
+	}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		mock.mu.Lock()

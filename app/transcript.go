@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +32,46 @@ type transcriptMessageData struct {
 	Command    string                  `json:"command"`
 	Args       string                  `json:"args"`
 	Error      bool                    `json:"error"`
+	ErrorText  string                  `json:"-"`
+}
+
+func (data *transcriptMessageData) UnmarshalJSON(payload []byte) error {
+	var body struct {
+		Tool       string                  `json:"tool"`
+		Source     transcriptMessageSource `json:"source"`
+		ToolCallID string                  `json:"toolCallId"`
+		Ordinal    int                     `json:"ordinal"`
+		Output     string                  `json:"output"`
+		Message    string                  `json:"message"`
+		Command    string                  `json:"command"`
+		Args       string                  `json:"args"`
+		Error      json.RawMessage         `json:"error"`
+	}
+	if err := json.Unmarshal(payload, &body); err != nil {
+		return err
+	}
+	failed, text := parseTranscriptError(body.Error)
+	*data = transcriptMessageData{
+		Tool: body.Tool, Source: body.Source, ToolCallID: body.ToolCallID, Ordinal: body.Ordinal,
+		Output: body.Output, Message: body.Message, Command: body.Command, Args: body.Args,
+		Error: failed, ErrorText: text,
+	}
+	return nil
+}
+
+func parseTranscriptError(raw json.RawMessage) (bool, string) {
+	if len(raw) == 0 {
+		return false, ""
+	}
+	var failed bool
+	if json.Unmarshal(raw, &failed) == nil {
+		return failed, ""
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return strings.TrimSpace(text) != "", text
+	}
+	return false, ""
 }
 
 type transcriptMessage struct {
@@ -121,64 +163,67 @@ func runKey(run transcriptRun) string {
 }
 
 type chatState struct {
-	refreshMu       sync.Mutex
-	tasks           []taskRow
-	artifacts       []artifactRow
-	previewTitle    string
-	previewRow      artifactRow
-	preview         string
-	questions       []openQuestion
-	paused          bool
-	roundMaster     string
-	models          []modelChoice
-	modelsLoading   bool
-	currentModel    string
-	currentThinking string
-	oldestSeq       int64
-	listFirst       int
-	listLast        int
-	boundaryMu      sync.RWMutex
-	runBoundaries   map[string]bool
-	jumpMessageID   string
-	historySettle   int
-	historyLoading  bool
-	noMoreHistory   bool
-	pagedHistory    bool
-	fingerprint     string
-	expanded        map[string]bool
-	window          *mygo.Window
-	api             apiClient
-	draft           string
-	caret           int
-	pendingCaret    int
-	menuTrigger     *composerTrigger
-	menuActive      int
-	menuDismissed   string
-	pathQuery       string
-	pathItems       []composerPathEntry
-	pathLoading     bool
-	skillItems      []composerSkillEntry
-	skillsLoading   bool
-	modelPicker     modelPickerState
-	providerOn      func(string) bool
-	projectID       string
-	projectRoot     string
-	attachments     []composerAttachment
-	focusComposer   bool
-	active          string
-	source          agentChatSource
-	agentTitle      string
-	agentStatus     string
-	status          string
-	loading         bool
-	pollAt          time.Time
-	polling         bool
+	refreshMu          sync.Mutex
+	tasks              []taskRow
+	artifacts          []artifactRow
+	previewTitle       string
+	previewRow         artifactRow
+	preview            string
+	questions          []openQuestion
+	paused             bool
+	roundMaster        string
+	models             []modelChoice
+	modelsLoading      bool
+	currentModel       string
+	currentThinking    string
+	modelTelemetryHold int
+	oldestSeq          int64
+	listFirst          int
+	listLast           int
+	boundaryMu         sync.RWMutex
+	runBoundaries      map[string]bool
+	jumpMessageID      string
+	historySettle      int
+	historyLoading     bool
+	noMoreHistory      bool
+	pagedHistory       bool
+	fingerprint        string
+	expanded           map[string]bool
+	window             *mygo.Window
+	api                apiClient
+	draft              string
+	caret              int
+	pendingCaret       int
+	menuTrigger        *composerTrigger
+	menuActive         int
+	menuDismissed      string
+	pathQuery          string
+	pathItems          []composerPathEntry
+	pathLoading        bool
+	skillItems         []composerSkillEntry
+	skillsLoading      bool
+	modelPicker        modelPickerState
+	providerOn         func(string) bool
+	projectID          string
+	projectRoot        string
+	attachments        []composerAttachment
+	focusComposer      bool
+	active             string
+	source             agentChatSource
+	agentTitle         string
+	agentStatus        string
+	status             string
+	problem            string
+	loading            bool
+	pollAt             time.Time
+	polling            bool
 	// answerClocks keeps the last stopwatch reading of an answer the window saw
 	// streaming, keyed by message ID, so a settled answer freezes instead of
 	// resetting.
 	answerClocks map[string]int64
 	messages     []transcriptMessage
 	list         ui.ListState
+	listScroll   ui.ScrollState
 	md           markdown.Options
 }
 

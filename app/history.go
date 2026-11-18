@@ -58,7 +58,7 @@ func (c *chatState) ensureHistory() {
 			return
 		}
 		if err != nil {
-			c.status = "读不到更早的对话：" + err.Error()
+			c.fail("读不到更早的对话：" + err.Error())
 			c.historyLoading = false
 			c.frame()
 			return

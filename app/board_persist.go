@@ -46,7 +46,7 @@ func (s *shellState) loadBoard(stateDir string) {
 			s.board.pages[index].Scope = "fleet"
 		}
 	}
-	if file.Version < 16 {
+	if file.Version < boardLayoutVersion {
 		for index := range s.board.pages {
 			page := &s.board.pages[index]
 			if page.Kind == "" {
@@ -198,22 +198,18 @@ func ensureBoardDashboardPanels(page *boardPage) {
 	}
 	kept := make([]boardPanel, 0, len(page.Panels))
 	for _, panel := range page.Panels {
-		if panel.Kind == "insights" {
-			removeBoardPanelFromLayout(&page.Layout, panel.ID)
-			continue
-		}
 		kept = append(kept, panel)
 	}
 	page.Panels = kept
-	hasTrajectory, hasOverview, hasNetwork := false, false, false
+	hasOverview, hasNetwork, hasCollaboration := false, false, false
 	for _, panel := range page.Panels {
 		switch panel.Kind {
-		case "trajectory":
-			hasTrajectory = true
 		case "context-overview":
 			hasOverview = true
 		case "agent-network":
 			hasNetwork = true
+		case "fleet-collaboration":
+			hasCollaboration = true
 		}
 	}
 	added := []boardPanel{}
@@ -223,8 +219,8 @@ func ensureBoardDashboardPanels(page *boardPage) {
 	if !hasNetwork {
 		added = append(added, boardPanel{ID: "agent-network", Kind: "agent-network"})
 	}
-	if !hasTrajectory {
-		added = append(added, boardPanel{ID: "trajectory", Kind: "trajectory"})
+	if !hasCollaboration {
+		added = append(added, boardPanel{ID: "fleet-collaboration", Kind: "fleet-collaboration"})
 	}
 	if len(added) == 0 {
 		return

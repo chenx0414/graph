@@ -16,6 +16,7 @@ type modelPickerState struct {
 	provider string
 	showAll  bool
 	focus    bool
+	pending  *modelChoice
 }
 
 var pickerShortcutKeys = []ui.Key{ui.Key1, ui.Key2, ui.Key3, ui.Key4}
@@ -67,10 +68,50 @@ func (c *chatState) pickerProviders() []string {
 }
 
 func (c *chatState) currentLevel() string {
+	if c.modelPicker.pending != nil {
+		return c.pendingLevel()
+	}
 	if c.currentThinking != "" {
 		return c.currentThinking
 	}
 	return c.pickerActiveModel().thinking
+}
+
+func (c *chatState) pendingLevel() string {
+	if c.modelPicker.pending == nil {
+		return ""
+	}
+	if c.modelPicker.pending.id == c.currentModel && c.currentThinking != "" {
+		return c.currentThinking
+	}
+	return c.modelPicker.pending.thinking
+}
+
+func (c *chatState) pendingModel() modelChoice {
+	if c.modelPicker.pending != nil {
+		return *c.modelPicker.pending
+	}
+	return c.pickerActiveModel()
+}
+
+func (c *chatState) chooseProvider(id string) {
+	c.modelPicker.provider = id
+	c.modelPicker.active = 0
+	c.modelPicker.pending = nil
+	c.frame()
+}
+
+func (c *chatState) pickModel(model modelChoice) {
+	chosen := model
+	c.modelPicker.pending = &chosen
+	c.frame()
+}
+
+func (c *chatState) pickLevel(level string) {
+	model := c.pendingModel()
+	c.modelPicker.pending = nil
+	c.modelPicker.open = false
+	go c.selectModel(model, level)
 }
 
 func (c *chatState) pickerActiveModel() modelChoice {
@@ -111,12 +152,13 @@ func providerMark(ctx *ui.Context, id string, size float32, t gwtheme.Tokens) {
 }
 
 func (c *chatState) pickerRow(ctx *ui.Context, model modelChoice, index int, t gwtheme.Tokens) {
-	row := ui.Row(ctx).FillWidth().Height(34).PaddingX(12).Gap(8).AlignItems(ui.Center).Label(shortModel(model.id))
+	row := ui.Row(ctx).FillWidth().Height(34).PaddingX(12).Gap(8).AlignItems(ui.Center).Role(ui.RoleOption).
+		Label(shortModel(model.id)).AccessSelected(model.id == c.pendingModel().id)
 	active := model.id == c.pickerActiveModel().id
 	if active {
 		row.Background(t.Hover)
 	}
-	row.OnClick(func() { c.chooseModel(model) })
+	row.OnClick(func() { c.pickModel(model) })
 	row.Children(func() {
 		providerMark(ctx, c.modelProviderOf(model), 16, t)
 		label := ui.Row(ctx).Grow(1).Gap(6).AlignItems(ui.Center)
@@ -126,7 +168,7 @@ func (c *chatState) pickerRow(ctx *ui.Context, model modelChoice, index int, t g
 				kit.Text(ctx, c.modelProviderOf(model), t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
 			}
 		})
-		if model.id == c.currentModel {
+		if model.id == c.pendingModel().id {
 			ui.Icon(ctx, iconCheck).Size(14, 14).TextColor(t.Foreground)
 		}
 		if index < 4 {
@@ -139,7 +181,7 @@ func (c *chatState) pickerRow(ctx *ui.Context, model modelChoice, index int, t g
 }
 
 func (c *chatState) pickerReasoning(ctx *ui.Context, t gwtheme.Tokens) {
-	model := c.pickerActiveModel()
+	model := c.pendingModel()
 	ui.Column(ctx).Width(192).FillHeight().Children(func() {
 		head := ui.Row(ctx).FillWidth().Height(48).PaddingX(12).Gap(8).AlignItems(ui.Center)
 		head.Children(func() {
@@ -151,10 +193,9 @@ func (c *chatState) pickerReasoning(ctx *ui.Context, t gwtheme.Tokens) {
 			levels := thinkingLevels(model)
 			for _, level := range levels {
 				value := level
-				row := ui.Row(ctx).FillWidth().Height(34).PaddingX(12).Gap(8).AlignItems(ui.Center).Label("理由 " + reasoningLabel(value))
-				row.OnClick(func() {
-					go c.selectModel(model, value)
-				})
+				row := ui.Row(ctx).FillWidth().Height(34).PaddingX(12).Gap(8).AlignItems(ui.Center).
+					Role(ui.RoleOption).Label("理由 " + reasoningLabel(value)).AccessSelected(value == c.currentLevel())
+				row.OnClick(func() { c.pickLevel(value) })
 				row.Children(func() {
 					kit.Text(ctx, reasoningLabel(value), t.Text.Xs).TextColor(t.Foreground).Grow(1).SingleLine()
 					if value == c.currentLevel() {
@@ -167,15 +208,33 @@ func (c *chatState) pickerReasoning(ctx *ui.Context, t gwtheme.Tokens) {
 }
 
 func (c *chatState) chooseModel(model modelChoice) {
-	level := model.thinking
-	if model.id == c.currentModel && c.currentThinking != "" {
-		level = c.currentThinking
-	}
-	c.modelPicker.open = false
-	go c.selectModel(model, level)
+	c.pickModel(model)
+	c.pickLevel(c.pendingLevel())
 }
 
-func (c *chatState) modelPickerView(ctx *ui.Context) {
+func (c *chatState) modelPickerOverlay(ctx *ui.Context, anchor ui.Element) {
+	if !c.modelPicker.open {
+		return
+	}
+	th := ctx.Theme()
+	ui.Overlay(ctx, func() {
+		backdrop := ui.Box(ctx).Absolute().Left(0).Top(0).Right(0).Bottom(0)
+		backdrop.OnClick(func() { c.closeModelPicker() })
+		panel := c.modelPickerView(ctx)
+		panel.AttachTo(anchor, ui.AnchorTopRight, ui.AnchorBottomRight).Margin(0, 0, th.Space(1.5), 0)
+		if panel.OverlayShortcut(0, ui.KeyEscape) {
+			c.closeModelPicker()
+		}
+	})
+}
+
+func (c *chatState) closeModelPicker() {
+	c.modelPicker.open = false
+	c.modelPicker.pending = nil
+	c.frame()
+}
+
+func (c *chatState) modelPickerView(ctx *ui.Context) ui.Element {
 	t := gwtheme.Of(ctx)
 	c.loadModels()
 	panel := ui.Row(ctx).Width(530).Height(346).Radius(t.Radius.Xl).Border(gwtheme.Hairline, t.Border).
@@ -200,9 +259,7 @@ func (c *chatState) modelPickerView(ctx *ui.Context) {
 				allButton.Background(t.Hover)
 			}
 			allButton.OnClick(func() {
-				c.modelPicker.provider = ""
-				c.modelPicker.active = 0
-				c.frame()
+				c.chooseProvider("")
 			})
 			allButton.Children(func() {
 				kit.Text(ctx, "全", t.Text.Xs).TextColor(t.Muted)
@@ -214,9 +271,7 @@ func (c *chatState) modelPickerView(ctx *ui.Context) {
 					button.Background(t.Hover)
 				}
 				button.OnClick(func() {
-					c.modelPicker.provider = id
-					c.modelPicker.active = 0
-					c.frame()
+					c.chooseProvider(id)
 				})
 				button.Children(func() {
 					providerMark(ctx, id, 16, t)
@@ -254,9 +309,7 @@ func (c *chatState) modelPickerView(ctx *ui.Context) {
 					case ui.KeyEnter:
 						models := c.pickerModels()
 						if c.modelPicker.active >= 0 && c.modelPicker.active < len(models) {
-							chosen := models[c.modelPicker.active]
-							c.modelPicker.open = false
-							go c.selectModel(chosen, chosen.thinking)
+							c.pickModel(models[c.modelPicker.active])
 						}
 						return true
 					}
@@ -290,4 +343,5 @@ func (c *chatState) modelPickerView(ctx *ui.Context) {
 		ui.Box(ctx).Width(gwtheme.Stroke).FillHeight().Background(t.Border)
 		c.pickerReasoning(ctx, t)
 	})
+	return panel
 }

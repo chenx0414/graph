@@ -30,7 +30,6 @@ func TestEveryPageHasASkeletonLayout(t *testing.T) {
 		"chat":         skeletonChatTranscript,
 		"overview":     skeletonOverviewPage,
 		"trajectory":   skeletonTrajectoryPage,
-		"insights":     skeletonInsightsPage,
 		"fleet":        skeletonFleetKPIs,
 		"fleet rows":   func(c *ui.Context) { skeletonFleetRows(c, 4) },
 		"fleet net":    skeletonFleetNetwork,
@@ -90,11 +89,9 @@ func TestTheFleetPanelsShowSkeletonsWhileTheFleetLoads(t *testing.T) {
 	}
 }
 
-func TestTheTrajectoryAndInsightsShowSkeletonsWhileTheyLoad(t *testing.T) {
+func TestTheTrajectoryShowsSkeletonsWhileItLoads(t *testing.T) {
 	trajectory := &shellState{trajectory: trajectoryState{loadState: loadState[conversationTrajectory]{phase: loadBusy}}}
 	requireSkeleton(t, skeletonTester(t, trajectory.panelTrajectory), "a loading trajectory")
-	insights := &shellState{insights: insightsState{loadState: loadState[trajectoryInsights]{phase: loadBusy}}}
-	requireSkeleton(t, skeletonTester(t, insights.panelInsights), "loading insights")
 }
 
 func TestTheStartupPanesShowSkeletonsBeforeTheFirstRead(t *testing.T) {
@@ -121,6 +118,5 @@ func TestSwitchingAConversationShowsSkeletonsUntilItsDataLands(t *testing.T) {
 	requireSkeleton(t, skeletonTester(t, shell.chatPane), "the switching chat")
 	requireSkeleton(t, skeletonTester(t, shell.panelFleetKPI), "the switching fleet")
 	requireSkeleton(t, skeletonTester(t, shell.panelTrajectory), "the switching trajectory")
-	requireSkeleton(t, skeletonTester(t, shell.panelChatAgent), "the switching agent panel")
 	requireSkeleton(t, skeletonTester(t, func(c *ui.Context) { shell.panelChatNetwork(c, "") }), "the switching network")
 }

@@ -77,7 +77,9 @@ func TestReachingTheTopFetchesOlderHistory(t *testing.T) {
 		t.Fatalf("one page means one history request, got %d", requests.Load())
 	}
 	state.ensureHistory()
-	time.Sleep(20 * time.Millisecond)
+	if state.historyLoading || !state.noMoreHistory {
+		t.Fatalf("the last page must stop the fetching, loading %v noMore %v", state.historyLoading, state.noMoreHistory)
+	}
 	if requests.Load() != 1 {
 		t.Fatalf("the last page must stop the fetching, got %d requests", requests.Load())
 	}
@@ -200,7 +202,7 @@ func TestLoadingOlderHistoryKeepsTheReaderInPlace(t *testing.T) {
 	for frame := 0; frame < 6; frame++ {
 		tester.Frame()
 	}
-	time.Sleep(50 * time.Millisecond)
+	state.ensureHistory()
 	if requests.Load() != 1 {
 		t.Fatalf("staying at the loaded page must not fetch again, got %d requests", requests.Load())
 	}

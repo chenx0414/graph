@@ -31,11 +31,11 @@ func TestDropZoneFollowsTheOuterQuarter(t *testing.T) {
 func TestTheDropPreviewFillsTheExactHalfOfTheTarget(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
-	state.board.drag = &boardDrag{panelID: "overview", target: "agent", edge: "left"}
+	state.board.drag = &boardDrag{panelID: "context-overview", target: "agent-network", edge: "left"}
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
-	target := state.board.rects["agent"]
+	target := state.board.rects["agent-network"]
 	if target.W <= 0 {
 		t.Fatalf("the target partition was never measured: %+v", state.board.rects)
 	}
@@ -48,7 +48,7 @@ func TestTheDropPreviewFillsTheExactHalfOfTheTarget(t *testing.T) {
 	if leftSide < 1000 || rightSide*10 > leftSide {
 		t.Fatalf("the left edge preview fills the left half only, left %d right %d", leftSide, rightSide)
 	}
-	state.board.drag = &boardDrag{panelID: "overview", target: "agent", edge: "center"}
+	state.board.drag = &boardDrag{panelID: "context-overview", target: "agent-network", edge: "center"}
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}

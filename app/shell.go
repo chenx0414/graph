@@ -26,7 +26,6 @@ type shellState struct {
 	resources         *resourceState
 	assemblies        *assemblyState
 	trajectory        trajectoryState
-	insights          insightsState
 	fleet             fleetState
 	fleetHistory      fleetHistoryState
 	graph             fleetGraphView

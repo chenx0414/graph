@@ -67,7 +67,7 @@ func TestTheFleetPageRendersTheProjection(t *testing.T) {
 		t.Fatalf("the fleet request scopes by the active conversation, asked %q", asked)
 	}
 	for _, label := range []string{
-		"编队总览窗口", "Agent 网络窗口", "跨 Agent 协作窗口", "协作任务窗口", "事件检查窗口", "共享产物窗口",
+		"编队总览窗口", "Agent 网络窗口", "跨 Agent 协作窗口", "事件检查窗口", "共享产物窗口",
 	} {
 		if !tester.HasText(label) {
 			t.Fatalf("the fleet page misses %q, texts %q", label, tester.Texts())
@@ -76,7 +76,7 @@ func TestTheFleetPageRendersTheProjection(t *testing.T) {
 	for _, want := range []string{
 		"Agent 数", "运行中", "工作项", "消息数", "Tokens", "成本",
 		"主控", "13-Graph", "planner", "worker",
-		"委派 实现四栏页面", "实现四栏页面", "补充编队测试", "docs/spec.md",
+		"委派 实现四栏页面", "实现四栏页面", "docs/spec.md",
 	} {
 		if !tester.HasText(want) {
 			t.Fatalf("the fleet page misses %q, texts %q", want, tester.Texts())
@@ -201,7 +201,7 @@ func TestTheFleetPageUsesTheFreeformBoardLayout(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
 	tester := openFleetTester(t, state)
 	page := state.boardPage()
-	want := []string{"fleet-kpi", "fleet-network", "fleet-tasks", "fleet-collaboration", "fleet-events", "fleet-artifacts"}
+	want := []string{"fleet-kpi", "fleet-network", "fleet-collaboration", "fleet-events", "fleet-artifacts"}
 	if leaves := boardLeafIDs(&page.Layout); !sameStrings(leaves, want) {
 		t.Fatalf("the fleet page is a freeform board over its layout, leaves %v", leaves)
 	}
@@ -212,12 +212,12 @@ func TestTheFleetPageUsesTheFreeformBoardLayout(t *testing.T) {
 	if !ok {
 		t.Fatalf("the network panel never laid out, rects %+v", state.board.rects)
 	}
-	tasks, ok := state.board.rects["fleet-tasks"]
+	events, ok := state.board.rects["fleet-events"]
 	if !ok {
-		t.Fatalf("the tasks panel never laid out, rects %+v", state.board.rects)
+		t.Fatalf("the events panel never laid out, rects %+v", state.board.rects)
 	}
 	startX, startY := network.X+network.W/2, network.Y+12
-	endX, endY := tasks.X+tasks.W/2, tasks.Y+tasks.H*0.6
+	endX, endY := events.X+events.W/2, events.Y+events.H*0.6
 	tester.Press(startX, startY)
 	for step := 1; step <= 12; step++ {
 		tester.Move(startX+(endX-startX)*float32(step)/12, startY+(endY-startY)*float32(step)/12)
@@ -225,7 +225,7 @@ func TestTheFleetPageUsesTheFreeformBoardLayout(t *testing.T) {
 	}
 	tester.Release(endX, endY)
 	frames(tester)
-	if leaves := boardLeafIDs(&state.boardPage().Layout); !sameStrings(leaves, []string{"fleet-kpi", "fleet-tasks", "fleet-network", "fleet-collaboration", "fleet-events", "fleet-artifacts"}) {
+	if leaves := boardLeafIDs(&state.boardPage().Layout); !sameStrings(leaves, []string{"fleet-kpi", "fleet-events", "fleet-collaboration", "fleet-network", "fleet-artifacts"}) {
 		t.Fatalf("dragging one fleet panel onto another swaps them, leaves %v", leaves)
 	}
 }

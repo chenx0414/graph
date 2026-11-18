@@ -80,17 +80,19 @@ func TestTheWhiteboardNetworkShowsTheGraphForAGraphAgent(t *testing.T) {
 	}
 }
 
-func TestTheDefaultWhiteboardShowsTheNetworkBesideTheAgentPanel(t *testing.T) {
+func TestTheDefaultWhiteboardShowsTheNetworkBelowTheContext(t *testing.T) {
 	page := defaultBoardPages()[0]
 	seen := map[string]bool{}
 	for _, panel := range page.Panels {
 		seen[panel.Kind] = true
 	}
-	if !seen["agent"] || !seen["agent-network"] {
-		t.Fatalf("the whiteboard leads with the agent panel and its network, panels %+v", page.Panels)
+	if !seen["context-overview"] || !seen["agent-network"] || !seen["fleet-collaboration"] {
+		t.Fatalf("the whiteboard shows the context, its network and the collaboration, panels %+v", page.Panels)
 	}
-	if seen["artifacts"] {
-		t.Fatalf("the generic artifacts card is gone from the whiteboard, panels %+v", page.Panels)
+	for _, gone := range []string{"agent", "trajectory", "artifacts"} {
+		if seen[gone] {
+			t.Fatalf("the whiteboard drops %q, panels %+v", gone, page.Panels)
+		}
 	}
 }
 

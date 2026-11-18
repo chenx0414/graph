@@ -2,7 +2,6 @@ package main
 
 import (
 	"strconv"
-	"strings"
 
 	"github.com/egoist/mygo/ui"
 	"graph/app/gwui/kit"
@@ -83,55 +82,6 @@ func (s *shellState) panelFleetKPI(ctx *ui.Context) {
 			s.refreshFleet()
 		})
 	})
-}
-
-func (s *shellState) panelFleetTasks(ctx *ui.Context) {
-	t, th := gwtheme.Of(ctx), ctx.Theme()
-	if s.fleet.data == nil {
-		if !s.fleetUnavailable(ctx) {
-			skeletonFleetRows(ctx, 4)
-		}
-		return
-	}
-	data := s.fleetData(ctx)
-	if data == nil {
-		return
-	}
-	if len(data.Tasks) == 0 {
-		kit.Text(ctx, "还没有协作任务。", t.Text.Sm).TextColor(t.Muted)
-		return
-	}
-	index := fleetIndex(data)
-	shown := data.Tasks
-	if len(shown) > fleetTaskLimit {
-		shown = shown[:fleetTaskLimit]
-	}
-	for _, task := range shown {
-		row := task
-		ui.Column(ctx).FillWidth().Gap(th.Space(0.25)).Children(func() {
-			ui.Row(ctx).FillWidth().PaddingEnd(th.Space(2)).Gap(th.Space(1)).AlignItems(ui.Center).Children(func() {
-				fleetStatusDot(ctx, row.Status)
-				kit.Text(ctx, row.Title, t.Text.Sm).TextColor(t.Foreground).Grow(1).SingleLine().Ellipsis("…")
-				kit.Text(ctx, fleetStatusLabel(row.Status), t.Text.Xs).TextColor(t.Muted)
-			})
-			meta := []string{}
-			if owner := fleetAgentName(index, row.OwnerAgentID); owner != "—" {
-				meta = append(meta, owner)
-			}
-			if row.Phase != "" {
-				meta = append(meta, row.Phase)
-			}
-			if row.ProjectID != "" {
-				meta = append(meta, row.ProjectID)
-			}
-			if len(meta) > 0 {
-				fleetEllipsis(ctx, strings.Join(meta, " · "), t.Text.Xs, t.Muted)
-			}
-		})
-	}
-	if hidden := len(data.Tasks) - len(shown); hidden > 0 {
-		kit.Text(ctx, "还有 "+strconv.Itoa(hidden)+" 个任务未列出", t.Text.Xs).TextColor(t.Muted)
-	}
 }
 
 func (s *shellState) panelFleetEvents(ctx *ui.Context) {

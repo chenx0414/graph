@@ -40,13 +40,14 @@ type boardFile struct {
 	Active  int          `json:"active"`
 }
 
-const boardLayoutVersion = 16
+const boardLayoutVersion = 17
 
 const boardDefaultTitle = "白板"
 
 const (
-	boardContextRowWeight = 1.75
-	boardNetworkRowWeight = 3.25
+	boardContextRowWeight       = 1.75
+	boardNetworkRowWeight       = 3.25
+	boardCollaborationRowWeight = 3.5
 )
 
 const boardMinPaneWidth = 140
@@ -55,10 +56,9 @@ const boardMinPaneHeight = 90
 
 func defaultBoardPanels() []boardPanel {
 	return []boardPanel{
-		{ID: "agent", Kind: "agent"},
-		{ID: "trajectory", Kind: "trajectory"},
 		{ID: "context-overview", Kind: "context-overview"},
 		{ID: "agent-network", Kind: "agent-network"},
+		{ID: "fleet-collaboration", Kind: "fleet-collaboration"},
 	}
 }
 
@@ -66,10 +66,7 @@ func defaultBoardLayout() boardNode {
 	return boardNode{Kind: "split", Axis: "column", Children: []boardSlot{
 		{Weight: boardContextRowWeight, Node: boardNode{Kind: "panel", PanelID: "context-overview"}},
 		{Weight: boardNetworkRowWeight, Node: boardNode{Kind: "panel", PanelID: "agent-network"}},
-		{Weight: 3.0, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
-			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "agent"}},
-			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "trajectory"}},
-		}}},
+		{Weight: boardCollaborationRowWeight, Node: boardNode{Kind: "panel", PanelID: "fleet-collaboration"}},
 	}}
 }
 
@@ -138,14 +135,6 @@ func boardPanelTitle(kind string) string {
 		return "Agent 网络"
 	case "trajectory-request-detail":
 		return "请求详情"
-	case "insights":
-		return "洞察概览"
-	case "insights-kpi":
-		return "洞察概览"
-	case "insights-days":
-		return "用量趋势"
-	case "insights-sessions":
-		return "会话排行"
 	case "tasks":
 		return "任务清单"
 	case "agent":
@@ -171,8 +160,6 @@ func boardPanelTitle(kind string) string {
 		return "Agent 网络"
 	case "fleet-collaboration":
 		return "跨 Agent 协作"
-	case "fleet-tasks":
-		return "协作任务"
 	case "fleet-events":
 		return "事件检查"
 	case "fleet-artifacts":
@@ -260,20 +247,6 @@ func (s *shellState) openModuleWithScope(kind, scope string) {
 			{ID: kind, Kind: kind, Scope: scope},
 		},
 		Layout: boardNode{Kind: "panel", PanelID: kind},
-	}
-	if kind == "insights" {
-		page.Panels = []boardPanel{
-			{ID: "insights-kpi", Kind: "insights-kpi"},
-			{ID: "insights-days", Kind: "insights-days"},
-			{ID: "insights-sessions", Kind: "insights-sessions"},
-		}
-		page.Layout = boardNode{Kind: "split", Axis: "column", Children: []boardSlot{
-			{Weight: 1, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
-				{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "insights-kpi"}},
-				{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "insights-days"}},
-			}}},
-			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "insights-sessions"}},
-		}}
 	}
 	if kind == "trajectory" {
 		s.boardScrollTop = true
@@ -373,8 +346,6 @@ func (s *shellState) ensureBoardPageData() {
 		}
 	case "trajectory":
 		s.ensureTrajectory()
-	case "insights":
-		s.ensureInsights()
 	case "fleet", "agent":
 		s.ensureFleet()
 	case "fleet-history":

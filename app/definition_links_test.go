@@ -39,7 +39,9 @@ func TestTheAgentPanelLinksADefinitionToItsAssembly(t *testing.T) {
 		{id: "coder", name: "Bob_coder", description: "通用代码实现", status: "valid", mode: "", resources: []assemblyResource{{ResourceID: "gan", Version: "1", Role: "identity"}}},
 	}}
 	state.openFleetAgentChat(node)
-	tester = frames(tester)
+	state.board.pages[0].Panels = append(state.board.pages[0].Panels, boardPanel{ID: "agent", Kind: "agent"})
+	state.board.pages[0].Layout = layoutFromPanels(state.board.pages[0].Panels)
+	tester = frames(frames(tester))
 	if !tester.HasText("装配 coder") {
 		t.Fatalf("the node row links its definition, texts %q", tester.Texts())
 	}

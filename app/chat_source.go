@@ -49,12 +49,12 @@ func (source *conversationChatSource) Follows() bool { return true }
 func (source *conversationChatSource) Load(c *chatState) error {
 	payload, err := source.api.get("/api/conversations/" + source.id + "?questions=open&lean=1&limit=" + itoa64(initialMessagePageSize))
 	if err != nil {
-		c.status = "读不到这个会话：" + err.Error()
+		c.fail("读不到这个会话：" + err.Error())
 		return err
 	}
 	messages, err := parseConversationMessages(payload)
 	if err != nil {
-		c.status = "会话内容不是预期的 JSON：" + err.Error()
+		c.fail("会话内容不是预期的 JSON：" + err.Error())
 		return err
 	}
 	source.version = parseConversationVersion(payload)
@@ -62,6 +62,7 @@ func (source *conversationChatSource) Load(c *chatState) error {
 	c.messages = messages
 	c.roundMaster = parseRoundMaster(payload)
 	c.projectID, c.projectRoot = parseConversationScope(payload)
+	c.syncModelTelemetry(payload)
 	c.fingerprint = transcriptFingerprint(messages)
 	c.historyLoading = false
 	c.pagedHistory = false
@@ -97,10 +98,11 @@ func (source *conversationChatSource) Load(c *chatState) error {
 		c.tasks = rows
 	}
 	if len(messages) == 0 {
-		c.status = "这个会话还没有可显示的对话。"
+		c.fail("这个会话还没有可显示的对话。")
 		return nil
 	}
 	c.status = ""
+	c.problem = ""
 	return nil
 }
 
@@ -163,6 +165,7 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 		changed = changed || master != c.roundMaster
 		c.roundMaster = master
 		c.projectID, c.projectRoot = parseConversationScope(payload)
+		c.syncModelTelemetry(payload)
 		if bodyErr == nil {
 			var questions []openQuestion
 			for _, question := range body.Questions {
@@ -177,10 +180,6 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 		if tasksErr == nil {
 			changed = changed || !reflect.DeepEqual(tasks, c.tasks)
 			c.tasks = tasks
-		}
-		if c.status == chatWaitStatus && roundAnswered(c.messages) && !c.roundPhase().busy() {
-			changed = true
-			c.status = ""
 		}
 	})
 	return changed, nil
@@ -276,7 +275,7 @@ func (source *nodeChatSource) path(suffix string) string {
 func (source *nodeChatSource) Load(c *chatState) error {
 	messages, hasOlder, err := source.loadPage(0)
 	if err != nil {
-		c.status = "读不到这个节点的记录：" + err.Error()
+		c.fail("读不到这个节点的记录：" + err.Error())
 		return err
 	}
 	for page := 0; page < 5 && hasOlder && !nodeEntriesHaveMessage(messages); page++ {
@@ -286,7 +285,7 @@ func (source *nodeChatSource) Load(c *chatState) error {
 		}
 		older, olderHas, err := source.loadPage(before)
 		if err != nil {
-			c.status = "读不到这个节点的记录：" + err.Error()
+			c.fail("读不到这个节点的记录：" + err.Error())
 			return err
 		}
 		if len(older) == 0 {
@@ -302,10 +301,11 @@ func (source *nodeChatSource) Load(c *chatState) error {
 	c.questions = nil
 	source.loadScopeData(c)
 	if len(messages) == 0 {
-		c.status = "这个节点还没有可显示的记录。"
+		c.fail("这个节点还没有可显示的记录。")
 		return nil
 	}
 	c.status = ""
+	c.problem = ""
 	return nil
 }
 

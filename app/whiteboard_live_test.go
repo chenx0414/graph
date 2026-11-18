@@ -7,18 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/egoist/mygo/ui"
 )
-
-func TestTheChatHidesTheWaitingNoteAboveTheComposer(t *testing.T) {
-	chat := &chatState{status: chatWaitStatus, messages: []transcriptMessage{{ID: "m1", Role: "user", Text: "问"}}}
-	tester := ui.NewTester(chat.view, 900, 700)
-	frames(tester)
-	if tester.HasText(chatWaitStatus) {
-		t.Fatalf("the waiting note must stay out of the chat, texts %q", tester.Texts())
-	}
-}
 
 func TestWhiteboardContextRefreshesWhenTheChatChanges(t *testing.T) {
 	version := atomic.Value{}

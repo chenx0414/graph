@@ -13,7 +13,6 @@ const (
 	fleetWindowStep    = 24
 	fleetAutoExpand    = 40
 	fleetEventLimit    = 20
-	fleetTaskLimit     = 12
 	fleetTimeline      = 12
 	fleetArtifactLimit = 12
 )

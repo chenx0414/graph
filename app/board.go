@@ -17,13 +17,25 @@ type railItem struct {
 
 var railItems = []railItem{
 	{"trajectory", "轨迹", iconActivity},
-	{"insights", "洞察", iconTrend},
 	{"fleet", "编队", iconNetwork},
 	{"providers", "供应商", iconDatabase},
 	{"capabilities", "资源", iconShare},
 	{"assemblies", "装配", iconLayers},
 	{"settings", "设置", iconGear},
 }
+
+const (
+	boardHeaderMotion = 160 * time.Millisecond
+	boardPanelPadding = float32(12)
+)
+
+type boardHeaderMode int
+
+const (
+	boardHeaderAlways boardHeaderMode = iota
+	boardHeaderOnHover
+	boardHeaderNone
+)
 
 type boardState struct {
 	pages       []boardPage
@@ -32,6 +44,7 @@ type boardState struct {
 	drag        *boardDrag
 	rects       map[string]ui.Rect
 	splits      map[string]ui.Rect
+	scrolls     map[string]*ui.ScrollState
 	press       string
 	pressX      float32
 	pressY      float32
@@ -45,6 +58,18 @@ type boardDrag struct {
 	edge    string
 	dx      float32
 	dy      float32
+}
+
+func (s *shellState) boardScrollOf(panelID string) *ui.ScrollState {
+	if s.board.scrolls == nil {
+		s.board.scrolls = map[string]*ui.ScrollState{}
+	}
+	scroll := s.board.scrolls[panelID]
+	if scroll == nil {
+		scroll = &ui.ScrollState{}
+		s.board.scrolls[panelID] = scroll
+	}
+	return scroll
 }
 
 func (s *shellState) boardTabBar(ctx *ui.Context) {
@@ -118,12 +143,16 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 	card := ui.Column(ctx).Grow(1).FillWidth().Background(t.Sidebar)
 	card.Children(func() {
 		if page.Kind != "" && len(page.Panels) == 1 {
-			s.boardPanelView(ctx, &page.Panels[0], false, false)
+			header := boardHeaderAlways
+			if page.Title == boardPanelTitle(page.Panels[0].Kind) {
+				header = boardHeaderNone
+			}
+			s.boardPanelView(ctx, &page.Panels[0], false, header)
 			return
 		}
 		if page.Kind == fleetPageID {
 			ui.Column(ctx).Fill().Padding(10).Children(func() {
-				s.boardNodeView(ctx, &page.Layout, "root", true, false)
+				s.boardNodeView(ctx, &page.Layout, "root", true, boardHeaderOnHover)
 			})
 			return
 		}
@@ -143,7 +172,7 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 								panel := panels[index]
 								cell := ui.Column(ctx).Grow(1).FillHeight()
 								cell.Children(func() {
-									s.boardPanelView(ctx, &panel, false, false)
+									s.boardPanelView(ctx, &panel, false, boardHeaderAlways)
 								})
 							}
 						})
@@ -159,7 +188,7 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 		}
 		freeform := page.Kind == ""
 		ui.Column(ctx).Fill().Padding(10).Children(func() {
-			s.boardNodeView(ctx, &page.Layout, "root", freeform, page.Kind == "")
+			s.boardNodeView(ctx, &page.Layout, "root", freeform, boardHeaderOnHover)
 		})
 	})
 }
@@ -193,14 +222,14 @@ func boardPanelFullWidth(kind string) bool {
 	return kind == "context-overview"
 }
 
-func (s *shellState) boardNodeView(ctx *ui.Context, node *boardNode, path string, freeform, autoHide bool) {
+func (s *shellState) boardNodeView(ctx *ui.Context, node *boardNode, path string, freeform bool, header boardHeaderMode) {
 	switch node.Kind {
 	case "panel":
 		panel := s.panelByID(node.PanelID)
 		if panel == nil {
 			return
 		}
-		s.boardPanelView(ctx, panel, freeform, autoHide)
+		s.boardPanelView(ctx, panel, freeform, header)
 	case "split":
 		var container ui.Element
 		if node.Axis == "row" {
@@ -223,7 +252,7 @@ func (s *shellState) boardNodeView(ctx *ui.Context, node *boardNode, path string
 					cell = ui.Row(ctx).Grow(slot.Weight).FillWidth()
 				}
 				cell.Children(func() {
-					s.boardNodeView(ctx, &slot.Node, childPath, freeform, autoHide)
+					s.boardNodeView(ctx, &slot.Node, childPath, freeform, header)
 				})
 			}
 		})
@@ -311,11 +340,14 @@ func iconAction(ctx *ui.Context, icon *ui.SVG, label string, selected bool, size
 	return button
 }
 
-func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform, autoHide bool) {
-	t, th := gwtheme.Of(ctx), ctx.Theme()
+func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform bool, header boardHeaderMode) {
+	t := gwtheme.Of(ctx)
 	card := kit.Panel(ctx, t.Radius.Xl)
-	card.Fill().Label(boardPanelTitle(panel.Kind) + "窗口")
-	if autoHide {
+	card.Fill()
+	if header != boardHeaderNone {
+		card.Label(boardPanelTitle(panel.Kind) + "窗口")
+	}
+	if header == boardHeaderOnHover {
 		kit.Elevate(ctx, card, shellShadow)
 	}
 	card.Draw(func(p *ui.Painter, r ui.Rect) {
@@ -325,12 +357,12 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform
 	})
 	card.OnClick(func() {})
 	headerProgress := float32(1)
-	if autoHide {
+	if header == boardHeaderOnHover {
 		target := float32(0)
 		if _, _, over := card.PointerPosition(); over {
 			target = 1
 		}
-		headerProgress = card.Animate("card-header", target, 160*time.Millisecond)
+		headerProgress = card.Animate("card-header", target, boardHeaderMotion)
 	}
 	if freeform {
 		card.Drag(panel.ID).Cursor(ui.CursorGrab)
@@ -339,58 +371,78 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform
 		}
 	}
 	card.Children(func() {
-		if !autoHide {
+		if header == boardHeaderAlways {
 			s.boardPanelHeader(ctx, panel, freeform)
 		}
-		fills := boardPanelFills(panel.Kind)
-		var body ui.Element
-		if fills {
-			body = ui.Box(ctx).Grow(1).Padding(th.Space(3))
-		} else {
-			body = ui.Scroll(ctx).Grow(1).Padding(th.Space(3))
-			body.MaskLinearGradient(ui.LinearGradient{Angle: 180, Stops: []ui.GradientStop{
-				{Color: ui.Transparent, At: 0},
-				{Color: ui.RGB(0, 0, 0), At: 0.08},
-				{Color: ui.RGB(0, 0, 0), At: 0.92},
-				{Color: ui.Transparent, At: 1},
-			}})
+		s.boardPanelContent(ctx, panel)
+		if header == boardHeaderOnHover {
+			s.boardFloatingHeader(ctx, panel, freeform, headerProgress)
 		}
-		body.Children(func() {
-			content := ui.Column(ctx).FillWidth().Gap(th.Space(2))
-			if fills {
-				content.FillHeight()
-			}
+		if freeform {
+			s.boardPanelDrag(ctx, card, panel)
+		}
+	})
+}
+
+func (s *shellState) boardPanelContent(ctx *ui.Context, panel *boardPanel) {
+	th := ctx.Theme()
+	if boardPanelFills(panel.Kind) {
+		ui.Box(ctx).Grow(1).Padding(boardPanelPadding).Children(func() {
+			content := ui.Column(ctx).FillWidth().Gap(th.Space(2)).FillHeight()
 			content.Children(func() {
 				s.boardPanelBody(ctx, panel)
 			})
 		})
-		if autoHide {
-			header := s.boardPanelHeader(ctx, panel, freeform)
-			header.Absolute().Top(0).Left(0).Right(0).Background(t.Background).
-				Translate(0, -(1-headerProgress)*th.Space(9)).Opacity(headerProgress).
-				IgnoreInput(headerProgress < 0.5)
+		return
+	}
+	scroll := s.boardScrollOf(panel.ID)
+	top, bottom := fadeInsets(scroll)
+	body := ui.Scroll(ctx).Grow(1).Padding(boardPanelPadding).TrackScroll(scroll)
+	body.MaskLinearGradient(ui.LinearGradient{Angle: 180, Stops: []ui.GradientStop{
+		{Color: ui.Transparent, At: 0},
+		{Color: ui.RGB(0, 0, 0), At: 0.08},
+		{Color: ui.RGB(0, 0, 0), At: 0.92},
+		{Color: ui.Transparent, At: 1},
+	}})
+	body.Children(func() {
+		content := ui.Column(ctx).FillWidth().Gap(th.Space(2))
+		if top > 0 || bottom > 0 {
+			content.Padding(top, 0, bottom, 0)
 		}
-		if freeform {
-			rect, hasRect := s.board.rects[panel.ID]
-			if card.Pressed() && hasRect && s.board.press != panel.ID {
-				if px, py, over := card.PointerPosition(); over {
-					s.board.press = panel.ID
-					s.board.pressX = rect.X + px
-					s.board.pressY = rect.Y + py
-				}
-			}
-			if dx, dy, ok := card.Dragged(); ok {
-				s.dragBoardPanel(panel, dx, dy)
-			}
-			if point, missed := card.DragMissed(); missed {
-				s.deferBoardDrop(func() { s.dropBoardPanelAt(panel.ID, point.X, point.Y) })
-			}
-			if _, _, ended := card.DragEnded(); ended {
-				s.deferBoardDrop(func() { s.dropBoardPanel() })
-			}
-			s.boardDropPreview(ctx, panel)
-		}
+		content.Children(func() {
+			s.boardPanelBody(ctx, panel)
+		})
 	})
+}
+
+func (s *shellState) boardFloatingHeader(ctx *ui.Context, panel *boardPanel, freeform bool, progress float32) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	header := s.boardPanelHeader(ctx, panel, freeform)
+	header.Absolute().Top(0).Left(0).Right(0).Background(t.Background).
+		Translate(0, -(1-progress)*th.Space(9)).Opacity(progress).
+		Hidden(progress <= 0.001).
+		IgnoreInput(progress < 0.5)
+}
+
+func (s *shellState) boardPanelDrag(ctx *ui.Context, card ui.Element, panel *boardPanel) {
+	rect, hasRect := s.board.rects[panel.ID]
+	if card.Pressed() && hasRect && s.board.press != panel.ID {
+		if px, py, over := card.PointerPosition(); over {
+			s.board.press = panel.ID
+			s.board.pressX = rect.X + px
+			s.board.pressY = rect.Y + py
+		}
+	}
+	if dx, dy, ok := card.Dragged(); ok {
+		s.dragBoardPanel(panel, dx, dy)
+	}
+	if point, missed := card.DragMissed(); missed {
+		s.deferBoardDrop(func() { s.dropBoardPanelAt(panel.ID, point.X, point.Y) })
+	}
+	if _, _, ended := card.DragEnded(); ended {
+		s.deferBoardDrop(func() { s.dropBoardPanel() })
+	}
+	s.boardDropPreview(ctx, panel)
 }
 
 func boardPanelFills(kind string) bool {
@@ -418,126 +470,4 @@ func (s *shellState) boardPanelHeader(ctx *ui.Context, panel *boardPanel, freefo
 		})
 	})
 	return header
-}
-
-func (s *shellState) boardDropPreview(ctx *ui.Context, panel *boardPanel) {
-	drag := s.board.drag
-	if drag == nil || drag.target != panel.ID {
-		return
-	}
-	t := gwtheme.Of(ctx)
-	tint := t.Unread.Alpha(0.18)
-	switch drag.edge {
-	case "left", "right":
-		row := ui.Row(ctx).Fill().IgnoreInput(true)
-		row.Children(func() {
-			if drag.edge == "left" {
-				ui.Box(ctx).Grow(1).FillHeight().Background(tint).Border(2, t.Unread).Radius(t.Radius.Md)
-				ui.Box(ctx).Grow(1).FillHeight()
-				return
-			}
-			ui.Box(ctx).Grow(1).FillHeight()
-			ui.Box(ctx).Grow(1).FillHeight().Background(tint).Border(2, t.Unread).Radius(t.Radius.Md)
-		})
-	case "top", "bottom":
-		column := ui.Column(ctx).Fill().IgnoreInput(true)
-		column.Children(func() {
-			if drag.edge == "top" {
-				ui.Box(ctx).Grow(1).FillWidth().Background(tint).Border(2, t.Unread).Radius(t.Radius.Md)
-				ui.Box(ctx).Grow(1).FillWidth()
-				return
-			}
-			ui.Box(ctx).Grow(1).FillWidth()
-			ui.Box(ctx).Grow(1).FillWidth().Background(tint).Border(2, t.Unread).Radius(t.Radius.Md)
-		})
-	default:
-		ui.Box(ctx).Fill().IgnoreInput(true).Background(tint).Border(2, t.Unread).Radius(t.Radius.Xl)
-	}
-}
-
-func (s *shellState) dragBoardPanel(panel *boardPanel, dx, dy float32) {
-	if s.board.drag == nil || s.board.drag.panelID != panel.ID {
-		s.board.drag = &boardDrag{panelID: panel.ID}
-	}
-	s.board.drag.dx += dx
-	s.board.drag.dy += dy
-	s.updateBoardDragTarget()
-}
-
-func (s *shellState) updateBoardDragTarget() {
-	drag := s.board.drag
-	if drag == nil {
-		return
-	}
-	rect, ok := s.board.rects[drag.panelID]
-	if !ok {
-		return
-	}
-	pointX := rect.X + rect.W/2 + drag.dx
-	pointY := rect.Y + rect.H/2 + drag.dy
-	if s.board.press == drag.panelID {
-		pointX = s.board.pressX + drag.dx
-		pointY = s.board.pressY + drag.dy
-	}
-	drag.target, drag.edge = s.boardDropTarget(drag.panelID, pointX, pointY)
-}
-
-func (s *shellState) boardDropTarget(sourceID string, pointX, pointY float32) (string, string) {
-	for id, target := range s.board.rects {
-		if id == sourceID || target.W <= 0 || target.H <= 0 {
-			continue
-		}
-		if pointX < target.X || pointX > target.X+target.W || pointY < target.Y || pointY > target.Y+target.H {
-			continue
-		}
-		return id, boardDropEdge((pointX-target.X)/target.W, (pointY-target.Y)/target.H)
-	}
-	return "", ""
-}
-
-func (s *shellState) dropBoardPanelAt(sourceID string, pointX, pointY float32) {
-	drag := s.board.drag
-	if drag == nil || drag.panelID != sourceID {
-		drag = &boardDrag{panelID: sourceID}
-	}
-	drag.target, drag.edge = s.boardDropTarget(sourceID, pointX, pointY)
-	s.board.drag = drag
-	s.dropBoardPanel()
-}
-
-func boardDropEdge(x, y float32) string {
-	if x > 0.25 && x < 0.75 && y > 0.25 && y < 0.75 {
-		return "center"
-	}
-	edge := "left"
-	distance := x
-	if 1-x < distance {
-		edge, distance = "right", 1-x
-	}
-	if y < distance {
-		edge, distance = "top", y
-	}
-	if 1-y < distance {
-		edge = "bottom"
-	}
-	return edge
-}
-
-func (s *shellState) dropBoardPanel() {
-	drag := s.board.drag
-	s.board.drag = nil
-	s.board.press = ""
-	if drag == nil || drag.target == "" {
-		return
-	}
-	page := s.boardPage()
-	if drag.edge == "center" {
-		swapBoardPanels(&page.Layout, drag.panelID, drag.target)
-	} else {
-		splitBoardPane(&page.Layout, drag.target, drag.panelID, drag.edge)
-	}
-	normalizeBoardLayout(&page.Layout)
-	pruneBoardPanels(page)
-	s.saveBoard()
-	s.frame()
 }

@@ -9,8 +9,8 @@ import (
 )
 
 func defaultFleetPanels() []boardPanel {
-	panels := make([]boardPanel, 0, 6)
-	for _, kind := range []string{"fleet-kpi", "fleet-collaboration", "fleet-tasks", "fleet-events", "fleet-artifacts"} {
+	panels := make([]boardPanel, 0, 5)
+	for _, kind := range []string{"fleet-kpi", "fleet-collaboration", "fleet-events", "fleet-artifacts"} {
 		panels = append(panels, boardPanel{ID: kind, Kind: kind})
 	}
 	network := boardPanel{ID: "fleet-network", Kind: "agent-network", Scope: "fleet"}
@@ -18,16 +18,23 @@ func defaultFleetPanels() []boardPanel {
 	return panels
 }
 
+const (
+	fleetKPIRowWeight           = 1.5
+	fleetNetworkRowWeight       = 2.5
+	fleetCollaborationRowWeight = 5.9
+	fleetEventRowWeight         = 1.5
+	fleetEventColumnWeight      = 3
+	fleetArtifactColumnWeight   = 2
+)
+
 func defaultFleetLayout() boardNode {
-	network := boardSlot{Weight: 3, Node: boardNode{Kind: "panel", PanelID: "fleet-network"}}
-	tasks := boardSlot{Weight: 2, Node: boardNode{Kind: "panel", PanelID: "fleet-tasks"}}
 	return boardNode{Kind: "split", Axis: "column", Children: []boardSlot{
-		{Weight: 2.0, Node: boardNode{Kind: "panel", PanelID: "fleet-kpi"}},
-		{Weight: 3.0, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{network, tasks}}},
-		{Weight: 7.4, Node: boardNode{Kind: "panel", PanelID: "fleet-collaboration"}},
-		{Weight: 2.0, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
-			{Weight: 3, Node: boardNode{Kind: "panel", PanelID: "fleet-events"}},
-			{Weight: 2, Node: boardNode{Kind: "panel", PanelID: "fleet-artifacts"}},
+		{Weight: fleetKPIRowWeight, Node: boardNode{Kind: "panel", PanelID: "fleet-kpi"}},
+		{Weight: fleetNetworkRowWeight, Node: boardNode{Kind: "panel", PanelID: "fleet-network"}},
+		{Weight: fleetCollaborationRowWeight, Node: boardNode{Kind: "panel", PanelID: "fleet-collaboration"}},
+		{Weight: fleetEventRowWeight, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
+			{Weight: fleetEventColumnWeight, Node: boardNode{Kind: "panel", PanelID: "fleet-events"}},
+			{Weight: fleetArtifactColumnWeight, Node: boardNode{Kind: "panel", PanelID: "fleet-artifacts"}},
 		}}},
 	}}
 }

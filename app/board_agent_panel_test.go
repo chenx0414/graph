@@ -4,21 +4,23 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/egoist/mygo/ui"
 )
 
-func TestTheDefaultWhiteboardStartsWithTheAgentPanel(t *testing.T) {
+func TestTheDefaultWhiteboardNoLongerLeadsWithTheAgentPanel(t *testing.T) {
 	page := defaultBoardPages()[0]
-	if len(page.Panels) == 0 || page.Panels[0].Kind != "agent" {
-		t.Fatalf("the whiteboard leads with the agent panel, panels %+v", page.Panels)
+	if len(page.Panels) == 0 || page.Panels[0].Kind != "context-overview" {
+		t.Fatalf("the whiteboard leads with the context overview, panels %+v", page.Panels)
 	}
 	for _, panel := range page.Panels {
-		if panel.Kind == "tasks" {
-			t.Fatalf("the generic task list is gone from the default whiteboard, panels %+v", page.Panels)
+		if panel.Kind == "tasks" || panel.Kind == "agent" {
+			t.Fatalf("the agent panel is off the default whiteboard, panels %+v", page.Panels)
 		}
 	}
 }
 
-func TestSavedWhiteboardsSwapTheTaskListForTheAgentPanel(t *testing.T) {
+func TestSavedWhiteboardsResetToTheThreeCardDefault(t *testing.T) {
 	dir := t.TempDir()
 	saved := `{"version":7,"active":0,"pages":[{"id":"board","title":"白板","panels":[
 		{"id":"tasks","kind":"tasks"},{"id":"artifacts","kind":"artifacts"},
@@ -39,31 +41,13 @@ func TestSavedWhiteboardsSwapTheTaskListForTheAgentPanel(t *testing.T) {
 	if page == nil {
 		t.Fatal("the whiteboard never loaded")
 	}
-	agentPanel := func() *boardPanel {
-		for index := range page.Panels {
-			if page.Panels[index].Kind == "agent" {
-				return &page.Panels[index]
-			}
-		}
-		return nil
-	}()
-	if agentPanel == nil {
-		t.Fatalf("the saved task list becomes the agent panel, panels %+v", page.Panels)
+	if leaves := boardLeafIDs(&page.Layout); len(leaves) != 3 || leaves[0] != "context-overview" || leaves[1] != "agent-network" || leaves[2] != "fleet-collaboration" {
+		t.Fatalf("a saved board takes the three card default, leaves %v", leaves)
 	}
 	for _, panel := range page.Panels {
-		if panel.Kind == "tasks" {
-			t.Fatalf("no generic task list survives the migration, panels %+v", page.Panels)
+		if panel.Kind == "tasks" || panel.Kind == "insights" || panel.Kind == "agent" || panel.Kind == "trajectory" {
+			t.Fatalf("no removed module survives the migration, panels %+v", page.Panels)
 		}
-	}
-	ids := boardLeafIDs(&page.Layout)
-	found := false
-	for _, id := range ids {
-		if id == agentPanel.ID {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("the agent panel keeps its slot in the layout, leaves %q panel %+v", ids, agentPanel)
 	}
 }
 
@@ -88,17 +72,19 @@ func TestTheAgentPanelFollowsTheOpenChat(t *testing.T) {
 	state, tester := nodeChatShell(t, mock)
 	state.selectConversation("g1")
 	tester = frames(frames(tester))
-	if !tester.HasText("global · 全局主管") {
-		t.Fatalf("the panel describes the open conversation's agent, texts %q", tester.Texts())
-	}
 	if tester.HasText("任务清单窗口") {
 		t.Fatal("the generic task list is not on the whiteboard any more")
+	}
+	agent, data := state.chatAgent()
+	if agent == nil || data == nil || agent.Kind != "global" {
+		t.Fatalf("the agent panel describes the open conversation's agent, agent %+v data %+v", agent, data)
 	}
 	node := fleetAgent{ID: "p1-n1", ParentID: "p1", Kind: "node", Name: "planner", TaskID: "tA", NodeID: "n2", Status: "running"}
 	state.openFleetAgentChat(node)
 	tester = frames(frames(tester))
-	if !tester.HasText("node · 执行节点") {
-		t.Fatalf("the panel follows the node chat, texts %q", tester.Texts())
+	agent, data = state.chatAgent()
+	if agent == nil || data == nil || agent.Kind != "node" {
+		t.Fatalf("the agent panel follows the node chat, agent %+v data %+v", agent, data)
 	}
 }
 
@@ -116,10 +102,14 @@ func TestTheAgentPanelDoesNotCallAProjectTheRoot(t *testing.T) {
 	state, tester := nodeChatShell(t, mock)
 	state.selectConversation("p1")
 	tester = frames(frames(tester))
-	if tester.HasText("它是编队的根。") {
-		t.Fatalf("a project agent with a parent is not the root, texts %q", tester.Texts())
+	panel := frames(ui.NewTester(func(ctx *ui.Context) {
+		ui.Column(ctx).Fill().Children(func() { state.panelChatAgent(ctx) })
+	}, 800, 600))
+	if panel.HasText("它是编队的根。") {
+		t.Fatalf("a project agent with a parent is not the root, texts %q", panel.Texts())
 	}
-	if !tester.HasText("父级不在当前编队范围里。") {
-		t.Fatalf("the panel says the parent is outside the snapshot, texts %q", tester.Texts())
+	if !panel.HasText("父级不在当前编队范围里。") {
+		t.Fatalf("the panel says the parent is outside the snapshot, texts %q", panel.Texts())
 	}
+	_ = tester
 }

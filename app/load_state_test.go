@@ -6,15 +6,7 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/egoist/mygo/ui"
 )
-
-const insightsSevenDayJSON = `{"days":[{"date":"2026-11-10","requests":7,"tokens":700,"cost":0.07,"cacheHitRate":0.5}],
-	"totals":{"requests":7,"tokens":700,"cost":0.07,"cacheHitRate":0.5,"sessions":0},"sessions":[]}`
-
-const insightsThirtyDayJSON = `{"days":[{"date":"2026-10-20","requests":30,"tokens":3000,"cost":0.3,"cacheHitRate":0.5}],
-	"totals":{"requests":30,"tokens":3000,"cost":0.3,"cacheHitRate":0.5,"sessions":0},"sessions":[]}`
 
 func waitFor(t *testing.T, label string, done func() bool) {
 	t.Helper()
@@ -26,63 +18,6 @@ func waitFor(t *testing.T, label string, done func() bool) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("%s never happened", label)
-}
-
-func TestInsightsKeepsTheRangeTheUserPicked(t *testing.T) {
-	releaseSeven := make(chan struct{})
-	var releaseOnce sync.Once
-	answerSeven := func() { releaseOnce.Do(func() { close(releaseSeven) }) }
-	sevenAnswered := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Query().Get("days") {
-		case "7":
-			<-releaseSeven
-			w.Write([]byte(insightsSevenDayJSON))
-			close(sevenAnswered)
-		case "30":
-			w.Write([]byte(insightsThirtyDayJSON))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-	defer answerSeven()
-
-	shell := newShellState(server.URL, "tok")
-	shell.ensureInsights()
-	shell.setInsightsDays(30)
-	waitFor(t, "the 30-day range", func() bool {
-		return shell.insights.data != nil && shell.insights.data.Totals.Requests == 30
-	})
-	answerSeven()
-	<-sevenAnswered
-	deadline := time.Now().Add(300 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if got := shell.insights.data.Totals.Requests; got != 30 {
-			t.Fatalf("a 7-day answer replaced the 30-day range the user picked: requests %d", got)
-		}
-		time.Sleep(time.Millisecond)
-	}
-}
-
-func TestInsightsLabelsTheRangeTheUserPicked(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("days") == "30" {
-			w.Write([]byte(insightsThirtyDayJSON))
-			return
-		}
-		w.Write([]byte(insightsSevenDayJSON))
-	}))
-	defer server.Close()
-
-	shell := newShellState(server.URL, "tok")
-	shell.setInsightsDays(30)
-	shell.openModule("insights")
-	waitFor(t, "the 30-day range", func() bool { return shell.insights.data != nil })
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
-	if !tester.HasText("近 30 天还没有会话用量。") {
-		t.Fatalf("the sessions card names the range the user picked, texts %q", tester.Texts())
-	}
 }
 
 func TestTrajectoryKeepsTheScopeTheUserOpened(t *testing.T) {
@@ -127,13 +62,13 @@ func TestTrajectoryKeepsTheScopeTheUserOpened(t *testing.T) {
 }
 
 func TestLoadStateRejectsAnAnswerFromASupersededRequest(t *testing.T) {
-	var state loadState[trajectoryInsights]
+	var state loadState[conversationTrajectory]
 	generation, start := state.begin()
 	if !start {
 		t.Fatal("an idle machine must start a request")
 	}
 	state.reset()
-	if state.settle(generation, &trajectoryInsights{Totals: insightTotals{Requests: 7}}, "") {
+	if state.settle(generation, &conversationTrajectory{ConversationId: "c1"}, "") {
 		t.Fatal("an answer from a superseded request must not settle the machine")
 	}
 	if state.data != nil || state.loading() || state.ready() {
@@ -148,7 +83,7 @@ func TestLoadStateRejectsAnAnswerFromASupersededRequest(t *testing.T) {
 }
 
 func TestLoadStateStartsOnceUntilTheAnswerOrAReset(t *testing.T) {
-	var state loadState[trajectoryInsights]
+	var state loadState[conversationTrajectory]
 	generation, start := state.begin()
 	if !start {
 		t.Fatal("the first begin must start")
@@ -156,7 +91,7 @@ func TestLoadStateStartsOnceUntilTheAnswerOrAReset(t *testing.T) {
 	if second, again := state.begin(); again || second != generation {
 		t.Fatalf("a loading machine must not start a second request: %d %v", second, again)
 	}
-	if !state.settle(generation, &trajectoryInsights{Totals: insightTotals{Requests: 30}}, "") {
+	if !state.settle(generation, &conversationTrajectory{ConversationId: "c1"}, "") {
 		t.Fatal("the current request must settle")
 	}
 	if !state.ready() || state.loading() || state.data == nil {
@@ -172,9 +107,9 @@ func TestLoadStateStartsOnceUntilTheAnswerOrAReset(t *testing.T) {
 }
 
 func TestLoadStateKeepsAFailureUntilTheNextAttempt(t *testing.T) {
-	var state loadState[trajectoryInsights]
+	var state loadState[conversationTrajectory]
 	generation, _ := state.begin()
-	state.settle(generation, nil, "读不到洞察：连接被拒绝")
+	state.settle(generation, nil, "读不到轨迹：连接被拒绝")
 	if state.failed == "" || state.loading() || state.ready() {
 		t.Fatalf("a failed answer must be visible and stop the spinner: %+v", state)
 	}

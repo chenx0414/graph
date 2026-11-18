@@ -118,6 +118,35 @@ func shortModel(id string) string {
 	return id
 }
 
+type modelTelemetryPayload struct {
+	Telemetry struct {
+		Model         string `json:"model"`
+		ThinkingLevel string `json:"thinkingLevel"`
+	} `json:"telemetry"`
+}
+
+func parseModelTelemetry(payload []byte) (string, string) {
+	var body modelTelemetryPayload
+	if json.Unmarshal(payload, &body) != nil {
+		return "", ""
+	}
+	return strings.TrimSpace(body.Telemetry.Model), strings.TrimSpace(body.Telemetry.ThinkingLevel)
+}
+
+func (c *chatState) syncModelTelemetry(payload []byte) {
+	model, thinking := parseModelTelemetry(payload)
+	if c.modelTelemetryHold > 0 {
+		c.modelTelemetryHold--
+		return
+	}
+	if model != "" {
+		c.currentModel = model
+	}
+	if thinking != "" {
+		c.currentThinking = thinking
+	}
+}
+
 func (c *chatState) selectModel(model modelChoice, thinking string) {
 	if c.active == "" {
 		return
@@ -137,7 +166,9 @@ func (c *chatState) selectModel(model modelChoice, thinking string) {
 	}
 	c.currentModel = model.id
 	c.currentThinking = thinking
-	c.status = "已切到 " + shortModel(model.id) + " · 思考 " + thinking
+	c.modelTelemetryHold = 1
+	c.status = ""
+	c.problem = ""
 	c.frame()
 }
 

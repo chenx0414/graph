@@ -96,24 +96,6 @@ func TestACancelledToolIsNoLongerRunning(t *testing.T) {
 	}
 }
 
-func TestTheWaitingLabelClearsWhenAToolOnlyRoundEnds(t *testing.T) {
-	state := roundServer(t, `{"paused":false,"master":{"status":"done"},"messages":[{"role":"user","text":"跑一下","state":"delivered"},{"role":"tool","text":"bash","state":"cancelled"}]}`)
-	state.status = chatWaitStatus
-	state.refresh()
-	if state.status != "" {
-		t.Fatalf("the round ended, so the waiting label is stale: %q", state.status)
-	}
-}
-
-func TestTheWaitingLabelStaysWhileThePromptIsStillUnanswered(t *testing.T) {
-	state := roundServer(t, `{"paused":false,"messages":[{"role":"user","text":"跑一下","state":"pending"}]}`)
-	state.status = chatWaitStatus
-	state.refresh()
-	if state.status != chatWaitStatus {
-		t.Fatalf("nothing answered the prompt yet, status %q", state.status)
-	}
-}
-
 func TestFollowStopsWhenAToolOnlyRoundEnds(t *testing.T) {
 	polls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

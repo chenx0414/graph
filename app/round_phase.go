@@ -5,8 +5,6 @@ import (
 	"strings"
 )
 
-const chatWaitStatus = "已发出，等待回复…"
-
 type roundPhase int
 
 const (

@@ -144,8 +144,11 @@ func TestChatStateKeepsAStatusWhileTheAnswerIsPending(t *testing.T) {
 	state.open("c1")
 	state.draft = "发出去的"
 	state.send()
-	if state.status != "已发出，等待回复…" {
-		t.Fatalf("status %q", state.status)
+	if state.draft != "" {
+		t.Fatalf("a sent prompt leaves the composer, draft %q", state.draft)
+	}
+	if state.status != "" {
+		t.Fatalf("the chat keeps no status line, status %q", state.status)
 	}
 }
 

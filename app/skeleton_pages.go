@@ -129,37 +129,6 @@ func skeletonTrajectoryPage(c *ui.Context) {
 	})
 }
 
-func skeletonInsightsPage(c *ui.Context) {
-	t, th := gwtheme.Of(c), c.Theme()
-	ui.Column(c).FillWidth().Gap(th.Space(2)).Children(func() {
-		ui.Row(c).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center).Children(func() {
-			kit.SkeletonLine(c, 18, th.Space(2))
-			ui.Spacer(c)
-			kit.SkeletonLine(c, 10, th.Space(1.75))
-			kit.SkeletonLine(c, 10, th.Space(1.75))
-		})
-		for range 2 {
-			ui.Row(c).FillWidth().Gap(th.Space(1)).Children(func() {
-				for range 3 {
-					cell := ui.Column(c).Grow(1).Padding(th.Space(1), th.Space(1.5)).Gap(th.Space(0.75)).
-						Radius(t.Radius.Lg).Background(t.Card).Border(gwtheme.Hairline, t.Border)
-					cell.Children(func() {
-						kit.SkeletonLine(c, 42, th.Space(2))
-						kit.SkeletonLine(c, 60, th.Space(1.5))
-					})
-				}
-			})
-		}
-		chart := ui.Column(c).FillWidth().Height(th.Space(26)).Radius(t.Radius.Lg).Background(t.Card).
-			Border(gwtheme.Hairline, t.Border).Padding(th.Space(2)).Gap(th.Space(1))
-		chart.Children(func() {
-			kit.SkeletonLine(c, 24, th.Space(1.75))
-			kit.SkeletonLine(c, 100, th.Space(18))
-		})
-		skeletonCard(c, 4, false, true)
-	})
-}
-
 func skeletonFleetKPIs(c *ui.Context) {
 	t, th := gwtheme.Of(c), c.Theme()
 	ui.Column(c).FillWidth().Gap(th.Space(1)).Children(func() {

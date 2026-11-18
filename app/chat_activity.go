@@ -19,6 +19,7 @@ type codexActivity struct {
 	command   string
 	args      string
 	output    string
+	failure   string
 	failed    bool
 	cancelled bool
 	key       string
@@ -56,6 +57,7 @@ func codexActivities(run transcriptRun) []codexActivity {
 	commands := []string{}
 	argsValues := []string{}
 	outputs := []string{}
+	failures := []string{}
 	failed := false
 	key := ""
 	flushCommands := func() {
@@ -64,9 +66,10 @@ func codexActivities(run transcriptRun) []codexActivity {
 		}
 		activities = append(activities, codexActivity{
 			kind: "command", text: "已运行 " + strings.Join(commands, "; "), label: "Shell",
-			command: strings.Join(commands, "; "), args: argsText(argsValues), output: strings.Join(outputs, "\n\n"), failed: failed, key: key,
+			command: strings.Join(commands, "; "), args: argsText(argsValues), output: strings.Join(outputs, "\n\n"),
+			failure: argsText(failures), failed: failed, key: key,
 		})
-		commands, argsValues, outputs, failed, key = nil, nil, nil, false, ""
+		commands, argsValues, outputs, failures, failed, key = nil, nil, nil, nil, false, ""
 	}
 	for _, message := range run.messages {
 		name := message.Data.Tool
@@ -107,6 +110,9 @@ func codexActivities(run transcriptRun) []codexActivity {
 			if message.Data.Error {
 				failed = true
 			}
+			if message.Data.ErrorText != "" {
+				failures = append(failures, message.Data.ErrorText)
+			}
 		case codexImageTools[name]:
 			flushCommands()
 			text := "已查看 1 张图像"
@@ -135,7 +141,7 @@ func codexActivities(run transcriptRun) []codexActivity {
 					text = "已取消编辑 " + payload
 				}
 			}
-			activities = append(activities, codexActivity{kind: "edit", text: text, label: "Edit", command: payload, args: message.Data.Args, output: message.Data.Output, failed: message.Data.Error, cancelled: cancelled, key: message.Data.ToolCallID})
+			activities = append(activities, codexActivity{kind: "edit", text: text, label: "Edit", command: payload, args: message.Data.Args, output: message.Data.Output, failure: message.Data.ErrorText, failed: message.Data.Error, cancelled: cancelled, key: message.Data.ToolCallID})
 		default:
 			flushCommands()
 			label := name
@@ -149,7 +155,7 @@ func codexActivities(run transcriptRun) []codexActivity {
 			if cancelled {
 				text = label + "已取消"
 			}
-			activities = append(activities, codexActivity{kind: "tool", text: text, label: codexActivityLabel(name), args: message.Data.Args, output: message.Data.Output, failed: message.Data.Error, cancelled: cancelled, key: message.Data.ToolCallID})
+			activities = append(activities, codexActivity{kind: "tool", text: text, label: codexActivityLabel(name), args: message.Data.Args, output: message.Data.Output, failure: message.Data.ErrorText, failed: message.Data.Error, cancelled: cancelled, key: message.Data.ToolCallID})
 		}
 	}
 	flushCommands()
@@ -268,6 +274,10 @@ func (c *chatState) activityPanel(ctx *ui.Context, activity codexActivity) {
 		if output := activityOutput(activity.output); output != "" {
 			kit.Text(ctx, "输出", t.Text.Xs).TextColor(t.Muted).Padding(0, 0, th.Space(0.5), 0)
 			kit.Text(ctx, output, t.Text.Xs).Font(gwtheme.MonoFont).TextColor(t.Muted)
+		}
+		if activity.failure != "" {
+			kit.Text(ctx, "错误", t.Text.Xs).TextColor(t.Muted).Padding(0, 0, th.Space(0.5), 0)
+			kit.Text(ctx, activity.failure, t.Text.Xs).Font(gwtheme.MonoFont).TextColor(t.Danger)
 		}
 		ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center).Justify(ui.End).Children(func() {
 			if activity.cancelled {

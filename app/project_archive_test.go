@@ -135,7 +135,9 @@ func TestArchivingAProjectWithRunningWorkAsksFirst(t *testing.T) {
 			_, _ = w.Write([]byte(`{"archived":false,"activeExecutions":2}`))
 			return
 		}
-		posted <- r.URL.Path
+		if strings.HasSuffix(r.URL.Path, "/archive") {
+			posted <- r.URL.Path
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()

@@ -123,7 +123,7 @@ func (c *chatState) answer(question openQuestion, value string) {
 		"requestId":  "native-" + question.ID + "-" + strconv.FormatInt(time.Now().UnixNano(), 36),
 	}
 	if _, err := c.api.post("/api/tasks/"+question.TaskID+"/answer", body); err != nil {
-		c.status = "回答失败：" + err.Error()
+		c.fail("回答失败：" + err.Error())
 		return
 	}
 	c.status = ""
@@ -145,7 +145,7 @@ func (c *chatState) sendText(text string) {
 		return
 	}
 	if err := c.source.Send(c, text); err != nil {
-		c.status = "发送失败：" + err.Error()
+		c.fail("发送失败：" + err.Error())
 		return
 	}
 	if stripSpace(c.draft) == text {
@@ -153,7 +153,8 @@ func (c *chatState) sendText(text string) {
 	}
 	c.attachments = nil
 	c.focusComposer = true
-	c.status = "已发出，等待回复…"
+	c.status = ""
+	c.problem = ""
 	c.refresh()
 	if c.source.Follows() {
 		go c.follow()
@@ -181,7 +182,7 @@ func (c *chatState) refresh() {
 		return
 	}
 	if _, err := c.source.Refresh(c); err != nil {
-		c.status = "读不到这个会话：" + err.Error()
+		c.fail("读不到这个会话：" + err.Error())
 	}
 }
 
@@ -194,15 +195,15 @@ func (c *chatState) openSource(source agentChatSource) {
 	c.active = source.Key()
 	c.messages = nil
 	c.fingerprint = ""
-	c.status = "正在读取会话…"
+	c.status = ""
 	c.loading = true
 	c.questions = nil
 	c.artifacts = nil
 	c.tasks = nil
 	err := source.Load(c)
 	c.loading = false
-	if err != nil && c.status == "正在读取会话…" {
-		c.status = "读不到这个会话：" + err.Error()
+	if err != nil && c.status == "" {
+		c.fail("读不到这个会话：" + err.Error())
 	}
 }
 
@@ -221,9 +222,6 @@ func (c *chatState) view(ctx *ui.Context) {
 	c.keepFresh(ctx)
 	ui.Column(ctx).Fill().Children(func() {
 		c.transcript(ctx)
-		if c.status != "" && c.status != chatWaitStatus && !c.loading {
-			ui.Text(ctx, c.status).FontSize(12).TextColor(th.TextMuted).Padding(16, 4, 16, 0)
-		}
 		bottom := ui.Column(ctx).FillWidth()
 		bottom.Children(func() {
 			if _, last := c.list.Visible(); last >= 0 && !c.list.AtEnd() {
@@ -268,6 +266,7 @@ func (c *chatState) transcript(ctx *ui.Context) {
 	}
 	rows := chatFoldRows(c.runs())
 	c.list.Key = func(row int) any { return rows[row].key }
+	top, bottom := fadeInsets(&c.listScroll)
 	fade := ui.Box(ctx).Grow(1).FillWidth()
 	fade.Children(func() {
 		list := ui.List(ctx, &c.list, len(rows), func(index int) {
@@ -281,13 +280,16 @@ func (c *chatState) transcript(ctx *ui.Context) {
 				c.messageRow(ctx, row.run.messages[0])
 			}
 		})
-		list.Grow(1).Padding(0, th.Space(4), th.Space(4), th.Space(4)).Gap(th.Space(3))
+		list.Grow(1).TrackScroll(&c.listScroll).Padding(0, th.Space(4), th.Space(4), th.Space(4)).Gap(th.Space(3))
 		list.MaskLinearGradient(ui.LinearGradient{Angle: 180, Stops: []ui.GradientStop{
 			{Color: ui.Transparent, At: 0},
 			{Color: ui.RGB(0, 0, 0), At: 0.06},
 			{Color: ui.RGB(0, 0, 0), At: 0.94},
 			{Color: ui.Transparent, At: 1},
 		}})
+		if top > 0 || bottom > 0 {
+			list.Padding(top, th.Space(4), th.Space(4)+bottom, th.Space(4))
+		}
 	})
 	first, last := c.list.Visible()
 	c.listFirst, c.listLast = first, last
@@ -342,16 +344,6 @@ func (c *chatState) composer(ctx *ui.Context) {
 			c.composerMenuView(ctx, c.composerMenuItems(c.menuTrigger))
 			ui.Box(ctx).Height(th.Space(1.5))
 		})
-		pickerSlot := ui.Column(ctx).FillWidth()
-		pickerSlot.Children(func() {
-			if !c.modelPicker.open {
-				ui.Box(ctx).Height(0)
-				return
-			}
-			align := ui.Row(ctx).FillWidth().Justify(ui.End)
-			align.Children(func() { c.modelPickerView(ctx) })
-			ui.Box(ctx).Height(th.Space(1.5))
-		})
 		card := ui.Column(ctx).FillWidth().Padding(th.Space(3)).Gap(th.Space(2)).
 			Radius(t.Radius.X2l).Background(t.Background).Border(gwtheme.Stroke, t.Input).Clip()
 		kit.Elevate(ctx, card, composerShadow)
@@ -362,8 +354,8 @@ func (c *chatState) composer(ctx *ui.Context) {
 			if strings.Contains(c.draft, "$") {
 				c.ensureComposerSkills()
 			}
-			field := kit.TextArea(ctx, &c.draft, kit.InputOpts{Placeholder: "想问什么？  @ 文件，$ 技能，/ 命令", Bare: true})
-			field.Label("消息").FillWidth().PaddingX(th.Space(0.5)).Lines(1, 6)
+			field := kit.TextArea(ctx, &c.draft, kit.InputOpts{Placeholder: c.composerPlaceholder(), Bare: true})
+			field.Label("消息").FillWidth().PaddingX(th.Space(0.5)).Lines(2, 6)
 			field.TextRanges(composerTextRanges(composerTokens(c.draft, c.composerSkillNames()))...)
 			if c.focusComposer {
 				field.Focus()
@@ -400,6 +392,18 @@ func (c *chatState) composer(ctx *ui.Context) {
 			c.composerTrackTrigger(field)
 		})
 	})
+}
+
+func (c *chatState) composerPlaceholder() string {
+	if c.problem != "" {
+		return c.problem
+	}
+	return "想问什么？  @ 文件，$ 技能，/ 命令"
+}
+
+func (c *chatState) fail(text string) {
+	c.status = text
+	c.problem = text
 }
 
 func (c *chatState) composerTrackTrigger(field ui.Element) {
@@ -449,6 +453,7 @@ func (c *chatState) modelChip(ctx *ui.Context) {
 	}
 	chip.OnClick(func() {
 		c.modelPicker.open = !c.modelPicker.open
+		c.modelPicker.pending = nil
 		c.modelPicker.focus = c.modelPicker.open
 		c.frame()
 	})
@@ -457,6 +462,7 @@ func (c *chatState) modelChip(ctx *ui.Context) {
 		kit.Text(ctx, text, t.Text.Sm).FontWeight(500).TextColor(t.Muted).SingleLine()
 		ui.Icon(ctx, iconChevron).Size(gwtheme.IconXs, gwtheme.IconXs).TextColor(t.Muted)
 	})
+	c.modelPickerOverlay(ctx, chip)
 }
 
 func (c *chatState) composerButton(ctx *ui.Context) {

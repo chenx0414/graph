@@ -16,7 +16,6 @@ var fleetPanelKinds = []string{
 	"fleet-kpi",
 	"fleet-network",
 	"fleet-collaboration",
-	"fleet-tasks",
 	"fleet-events",
 	"fleet-artifacts",
 }
@@ -200,7 +199,6 @@ func TestTheFleetPageUsesItsDashboardLayout(t *testing.T) {
 	kpi := rects["fleet-kpi"]
 	network := rects["fleet-network"]
 	collaboration := rects["fleet-collaboration"]
-	tasks := rects["fleet-tasks"]
 	events := rects["fleet-events"]
 	artifacts := rects["fleet-artifacts"]
 	if delta := kpi.X - network.X; delta < -1 || delta > 1 {
@@ -209,7 +207,7 @@ func TestTheFleetPageUsesItsDashboardLayout(t *testing.T) {
 	if delta := (kpi.X + kpi.W) - (artifacts.X + artifacts.W); delta < -2 || delta > 2 {
 		t.Fatalf("the KPI strip spans the dashboard: kpi %+v artifacts %+v", kpi, artifacts)
 	}
-	if kpi.H < 108 || kpi.H > 132 {
+	if kpi.H < boardMinPaneHeight {
 		t.Fatalf("the KPI strip keeps its own band, height %.1f", kpi.H)
 	}
 	if kpi.Y+kpi.H > network.Y {
@@ -221,8 +219,8 @@ func TestTheFleetPageUsesItsDashboardLayout(t *testing.T) {
 	if collaboration.Y < network.Y+network.H-1 {
 		t.Fatalf("the collaboration card sits under the network row: network %+v collaboration %+v", network, collaboration)
 	}
-	if tasks.X < network.X+network.W-1 {
-		t.Fatalf("the tasks card keeps the right column beside the network: network %+v tasks %+v", network, tasks)
+	if network.X != kpi.X || network.X+network.W != kpi.X+kpi.W {
+		t.Fatalf("the network card spans the dashboard: kpi %+v network %+v", kpi, network)
 	}
 	if events.Y < collaboration.Y+collaboration.H-1 {
 		t.Fatalf("the event check starts under the second row: events %+v network %+v", events, network)

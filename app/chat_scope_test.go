@@ -7,7 +7,7 @@ import (
 
 func showArtifactsBoard(state *shellState) {
 	page := &state.board.pages[0]
-	page.Panels = append(page.Panels, boardPanel{ID: "artifacts", Kind: "artifacts"})
+	page.Panels = append(page.Panels, boardPanel{ID: "tasks", Kind: "tasks"}, boardPanel{ID: "artifacts", Kind: "artifacts"})
 	page.Layout = layoutFromPanels(page.Panels)
 }
 
@@ -79,6 +79,7 @@ func TestNodeChatLabelsTheWhiteboardPanelsWithItsAgent(t *testing.T) {
 		run:   `{"entries":[{"seq":1,"id":"a1","role":"assistant","kind":"message","text":"节点在干活","createdAt":1}],"hasOlder":false}`,
 	}
 	state, tester := nodeChatShell(t, mock)
+	showArtifactsBoard(state)
 	state.openFleetAgentChat(node)
 	tester = frames(frames(tester))
 	if !tester.HasText("当前 Agent · fleet-ui") {

@@ -72,8 +72,8 @@ func TestTheWindowShowsFourPanesLeftToRight(t *testing.T) {
 	if !(rail.X < conversation.X && conversation.X+conversation.W <= composer.X && composer.X < board.X) {
 		t.Fatalf("panes out of order: rail %+v conversation %+v composer %+v board %+v", rail, conversation, composer, board)
 	}
-	if !tester.HasText("Agent 面板窗口") || !tester.HasText("轨迹量化窗口") || !tester.HasText("当前上下文窗口") {
-		t.Fatalf("the whiteboard must present the agent panel, trajectory and context overview, texts %q", tester.Texts())
+	if !tester.HasText("当前上下文窗口") || !tester.HasText("Agent 网络窗口") || !tester.HasText("跨 Agent 协作窗口") {
+		t.Fatalf("the whiteboard must present the context, network and collaboration, texts %q", tester.Texts())
 	}
 	if !tester.HasText("来自主控") {
 		t.Fatalf("the chat pane must open the main agent conversation, texts %q", tester.Texts())
@@ -133,7 +133,7 @@ func TestTheRailOpensATabForTheModule(t *testing.T) {
 		t.Fatalf("click the board tab: %v", err)
 	}
 	frames(tester)
-	if kind := state.activeBoardKind(); kind != "" || !tester.HasText("Agent 面板窗口") {
+	if kind := state.activeBoardKind(); kind != "" || !tester.HasText("当前上下文窗口") {
 		t.Fatalf("the board tab must come back: kind %q texts %q", kind, tester.Texts())
 	}
 }
@@ -249,7 +249,7 @@ func TestTabsSwitchAndCloseWithoutLosingTheBoard(t *testing.T) {
 	if len(state.board.pages) != 1 || state.activeBoardKind() != "" {
 		t.Fatalf("closing a tab returns to the board, pages %d kind %q", len(state.board.pages), state.activeBoardKind())
 	}
-	if !tester.HasText("Agent 面板窗口") {
+	if !tester.HasText("当前上下文窗口") {
 		t.Fatalf("the board comes back with its modules, texts %q", tester.Texts())
 	}
 }
@@ -274,7 +274,7 @@ func TestTheFunctionRailStaysCompactAndCentered(t *testing.T) {
 		t.Fatalf("the rail must stay compact, width %.1f", railWidth)
 	}
 	center := float32(trafficLightPosition().X) + 6.5
-	for _, label := range []string{"轨迹", "洞察", "编队", "供应商", "资源", "装配", "设置"} {
+	for _, label := range []string{"轨迹", "编队", "供应商", "资源", "装配", "设置"} {
 		rect, ok := tester.Find(label)
 		if !ok {
 			t.Fatalf("the rail lost %q, texts %q", label, tester.Texts())
@@ -289,7 +289,7 @@ func TestTheFunctionRailSpacesItsIconsApart(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 	previousBottom := float32(-1)
-	for _, label := range []string{"轨迹", "洞察", "编队", "供应商", "资源", "装配", "设置"} {
+	for _, label := range []string{"轨迹", "编队", "供应商", "资源", "装配", "设置"} {
 		rect, ok := tester.Find(label)
 		if !ok {
 			t.Fatalf("the rail lost %q, texts %q", label, tester.Texts())

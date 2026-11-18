@@ -41,7 +41,7 @@ func (c *chatState) answerClock(message transcriptMessage, now time.Time) (time.
 		return 0, false
 	}
 	start := time.UnixMilli(message.CreatedAt)
-	if messageStreaming(message) {
+	if c.answerClockRuns(message) {
 		elapsed := now.Sub(start)
 		if elapsed < 0 || elapsed > answerClockWindow {
 			return 0, false
@@ -53,6 +53,32 @@ func (c *chatState) answerClock(message transcriptMessage, now time.Time) (time.
 		return time.Duration(recorded) * time.Millisecond, true
 	}
 	return 0, false
+}
+
+func (c *chatState) answerClockRuns(message transcriptMessage) bool {
+	if messageStreaming(message) {
+		return true
+	}
+	if message.Role != "assistant" || !c.roundPhase().busy() {
+		return false
+	}
+	return answerClockKey(message) == c.currentAnswerKey()
+}
+
+func (c *chatState) currentAnswerKey() string {
+	lastUser, lastAnswer := -1, -1
+	for index, message := range c.messages {
+		switch message.Role {
+		case "user":
+			lastUser = index
+		case "assistant":
+			lastAnswer = index
+		}
+	}
+	if lastAnswer < 0 || lastAnswer < lastUser {
+		return ""
+	}
+	return answerClockKey(c.messages[lastAnswer])
 }
 
 // rememberAnswerClock keeps the reading of a streaming answer for the frame that
@@ -74,7 +100,7 @@ func (c *chatState) answerClockRow(ctx *ui.Context, message transcriptMessage) {
 	}
 	t := gwtheme.Of(ctx)
 	label := "已用时 " + codexWorkedFor(elapsed)
-	if messageStreaming(message) {
+	if c.answerClockRuns(message) {
 		label = "正在回复 · 用时 " + codexWorkedFor(elapsed)
 		ctx.After(time.Second)
 	}

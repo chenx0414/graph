@@ -23,8 +23,6 @@ func (s *shellState) boardPanelBody(ctx *ui.Context, panel *boardPanel) {
 		s.panelChatNetwork(ctx, s.panelScope())
 	case "trajectory":
 		s.panelTrajectory(ctx)
-	case "insights":
-		s.panelInsights(ctx)
 	case "trajectory-summary":
 		s.trajectorySummaryCard(ctx)
 	case "trajectory-tokens":
@@ -49,12 +47,6 @@ func (s *shellState) boardPanelBody(ctx *ui.Context, panel *boardPanel) {
 		s.trajectoryAgentsCard(ctx)
 	case "trajectory-request-detail":
 		s.trajectoryRequestDetailCard(ctx)
-	case "insights-kpi":
-		s.insightsKPICard(ctx)
-	case "insights-days":
-		s.insightsDaysCard(ctx)
-	case "insights-sessions":
-		s.insightsSessionsCard(ctx)
 	case "tasks":
 		s.panelTasks(ctx)
 	case "artifacts":
@@ -76,8 +68,6 @@ func (s *shellState) boardPanelBody(ctx *ui.Context, panel *boardPanel) {
 
 	case "fleet-collaboration":
 		s.panelFleetCollaboration(ctx)
-	case "fleet-tasks":
-		s.panelFleetTasks(ctx)
 	case "fleet-events":
 		s.panelFleetEvents(ctx)
 	case "fleet-artifacts":

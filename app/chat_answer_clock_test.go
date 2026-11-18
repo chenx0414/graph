@@ -96,3 +96,42 @@ func TestAnAnswerFromLongAgoShowsNoStopwatch(t *testing.T) {
 		t.Fatalf("a stale timestamp invents no duration, texts %q", tester.Texts())
 	}
 }
+
+// TestTheAnswerClockKeepsTickingWhileTheRoundRuns covers the gap the console
+// leaves: the answer's own state can lag behind the round, so the stopwatch has
+// to keep counting while the master of this round still runs, one second at a
+// time, instead of freezing until the next poll flips the state.
+func TestTheAnswerClockKeepsTickingWhileTheRoundRuns(t *testing.T) {
+	state := newChatState("http://127.0.0.1:1", "tok")
+	tester := ui.NewTester(state.view, 760, 620)
+	tester.Frame()
+	now := tester.Now()
+	state.roundMaster = "running"
+	state.messages = []transcriptMessage{
+		{ID: "u1", Role: "user", Kind: "chat", Text: "帮我跑一下测试", State: "delivered",
+			CreatedAt: now.Add(-2 * time.Second).UnixMilli()},
+		{ID: "a1", Role: "assistant", Kind: "chat", Text: "正在整理结果", State: "done",
+			CreatedAt: now.Add(-2 * time.Second).UnixMilli()},
+	}
+	tester = frames(tester)
+	if !tester.HasText("正在回复 · 用时 2s") {
+		t.Fatalf("an answer in a running round shows its stopwatch, texts %q", tester.Texts())
+	}
+	for _, want := range []string{"正在回复 · 用时 3s", "正在回复 · 用时 4s"} {
+		tester.Advance(time.Second)
+		tester = frames(tester)
+		if !tester.HasText(want) {
+			t.Fatalf("the stopwatch counts one second per second, want %q, texts %q", want, tester.Texts())
+		}
+	}
+	state.roundMaster = ""
+	tester = frames(tester)
+	if !tester.HasText("已用时 4s") {
+		t.Fatalf("a landed round freezes the reading, texts %q", tester.Texts())
+	}
+	tester.Advance(3 * time.Second)
+	tester = frames(tester)
+	if tester.HasText("已用时 7s") || tester.HasText("正在回复") {
+		t.Fatalf("a landed answer stops counting, texts %q", tester.Texts())
+	}
+}
