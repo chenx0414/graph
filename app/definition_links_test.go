@@ -43,7 +43,6 @@ func TestTheAgentPanelLinksADefinitionToItsAssembly(t *testing.T) {
 	if !tester.HasText("装配 coder") {
 		t.Fatalf("the node row links its definition, texts %q", tester.Texts())
 	}
-	boardReveal(t, tester, state, "装配 coder")
 	if err := tester.Click("装配 coder"); err != nil {
 		t.Fatalf("click the definition: %v", err)
 	}

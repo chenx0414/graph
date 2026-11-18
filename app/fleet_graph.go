@@ -240,7 +240,6 @@ func (s *shellState) openFleetGraphPage(unit fleetGraphUnit) error {
 		Layout: boardNode{Kind: "panel", PanelID: "graph-dag"},
 	})
 	s.board.active = len(s.board.pages) - 1
-	s.boardScrollTop = true
 	s.ensureBoardPageData()
 	s.saveBoard()
 	s.frame()
