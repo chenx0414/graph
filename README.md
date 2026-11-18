@@ -34,6 +34,33 @@ go -C backend run ./cmd/graphbuild install   # 装到 /Applications，退出重�
 - 只想在终端里跑无窗口守护进程：`go -C backend run ./cmd/graphbuild backend && dist/graphd --application-root "$PWD" --execute`。
 - 只绑定 `127.0.0.1`。同一状态目录只允许一个守护进程；`Ctrl-C`/SIGTERM 有界停止（5 秒），在途调用不会被记作成功。
 
+## 打包产物零外部依赖
+
+`Graph.app` 里只有一个二进制，presets 与运行时脚本都编在它里面，拷到别的 Mac 上行为一致
+（ADR 0046）：
+
+- `presets/`（bootstrap manifest 与 master prompt）与 `src/runtime/` 的脚本用 `//go:embed` 编进二进制。
+  磁盘上有真文件时优先用磁盘（开发时改 prompt 不必重编译），没有就解压内嵌副本到
+  `--graph-home` 下的 `assets/`（默认 `~/.graph/assets/`）。
+- 宿主的 shell 命令由 Go 直接执行，不再经过 Node；仍需 Node 的只有模块求值与扩展加载两条执行面，
+  它们的脚本同样随二进制走。`GRAPH_APP_NODE` 可指定 Node 路径。
+- 图布局在没有 `node_modules/elkjs` 时回落到 `layoutFallback`，这是有意的降级。
+
+改过 `presets/` 或 `src/runtime/` 要同步 `backend/internal/graph/embedded/`，否则
+`go -C backend test ./internal/graph/embedded/` 会逐字节比对并报出差异清单。
+
+验证打包产物真的自洽（空 HOME、空 cwd、无 presets 的环境下起守护进程）：
+
+```sh
+go -C backend run ./cmd/graphbuild app
+bash scripts/verify-bundle-selfcontained.sh
+```
+
+它断言：只链接系统库、`/api/health` 返回 200、catalog 里有 `master`/`coder`/`reviewer`/`tester`
+四个 bootstrap 定义、日志没有 "Bootstrap preset pack not available"、运行时脚本从二进制解压成功。
+同样的断言在 `go -C backend test ./internal/appinstall/` 里有一份 Go 版本（进快层门禁）。
+
+
 最小 `graph.config.json`：
 
 ```json

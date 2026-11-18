@@ -110,16 +110,6 @@ func callSafely(run func()) (failure error) {
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
-
-func quotedNodeOption(value string) string {
-	if !strings.ContainsAny(value, " \t\n\r\"\\") {
-		return value
-	}
-	escaped := strings.ReplaceAll(value, "\\", "\\\\")
-	escaped = strings.ReplaceAll(escaped, "\"", "\\\"")
-	return "\"" + escaped + "\""
-}
-
 func jsonString(value string) string {
 	encoded, err := marshalJSON(value)
 	if err != nil {
@@ -178,60 +168,3 @@ func canonicalGrant(path string) string {
 }
 
 var grantGlobPattern = regexp.MustCompile(`[*?\[\]]`)
-
-func canonicalGrantAll(paths []string) []string {
-	out := make([]string, 0, len(paths))
-	for _, path := range paths {
-		out = append(out, canonicalGrant(path))
-	}
-	return out
-}
-
-func grantsScratch(writePaths []string, scratchDir string) bool {
-	for _, root := range writePaths {
-		if scratchDir == root {
-			return true
-		}
-		if root == "/" {
-			return true
-		}
-		if strings.HasPrefix(scratchDir, root+"/") {
-			return true
-		}
-	}
-	return false
-}
-
-func resolveAll(paths []string) []string {
-	out := make([]string, 0, len(paths))
-	for _, path := range paths {
-		resolved, err := filepath.Abs(path)
-		if err != nil {
-			panic(err)
-		}
-		out = append(out, resolved)
-	}
-	return out
-}
-
-func uniquePaths(paths []string) []string {
-	seen := map[string]bool{}
-	out := []string{}
-	for _, path := range paths {
-		if seen[path] {
-			continue
-		}
-		seen[path] = true
-		out = append(out, path)
-	}
-	return out
-}
-
-func containsPathOrSubtree(exceptions []string, path string) bool {
-	for _, exception := range exceptions {
-		if exception == path || strings.HasPrefix(exception, path+"/") {
-			return true
-		}
-	}
-	return false
-}

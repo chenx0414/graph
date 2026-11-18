@@ -120,6 +120,9 @@ func countKernelRows(t *testing.T, kernel *KernelStore, query string) int64 {
 }
 
 func TestGraphRunnerHoldsOneThousandSimultaneousExecutionSlots(t *testing.T) {
+	if testing.Short() {
+		t.Skip("1000 simultaneous execution slots: slow layer only")
+	}
 	const nodes = 1000
 	kernel := newSimulatedGraph(t, nodes)
 	store := kernel.Store
@@ -309,6 +312,9 @@ func BenchmarkGraphRunnerSimulatedThousandNodes(b *testing.B) {
 }
 
 func TestGraphRunnerScaleReport(t *testing.T) {
+	if testing.Short() {
+		t.Skip("1000-node scale report: slow layer only")
+	}
 	const nodes = 1000
 	kernel := newSimulatedGraph(t, nodes)
 	store := kernel.Store

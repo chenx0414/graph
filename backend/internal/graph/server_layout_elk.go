@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 
 	"bytes"
 )
@@ -34,8 +33,8 @@ func layoutElk(graph map[string]any) map[string]any {
 	if err != nil {
 		panic(err)
 	}
-	elkPath := filepath.Join(ApplicationRoot, "node_modules", "elkjs", "lib", "elk.bundled.js")
-	if _, err := os.Stat(elkPath); err != nil {
+	elkPath := elkScript()
+	if elkPath == "" {
 		return layoutFallback(graph)
 	}
 	script := `import { createRequire } from 'node:module';

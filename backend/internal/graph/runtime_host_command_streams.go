@@ -31,7 +31,7 @@ func (buffer *hostCommandBuffer) keep(chunk []byte, state *hostCommandState) {
 	buffer.mutex.Lock()
 	defer buffer.mutex.Unlock()
 	if buffer.bytes >= maxHostOutputBytes {
-		state.truncated = true
+		state.markTruncated()
 		return
 	}
 	room := len(chunk)
@@ -40,9 +40,15 @@ func (buffer *hostCommandBuffer) keep(chunk []byte, state *hostCommandState) {
 	}
 	buffer.chunks = append(buffer.chunks, chunk[:room])
 	if room < len(chunk) {
-		state.truncated = true
+		state.markTruncated()
 	}
 	buffer.bytes += room
+}
+
+func (state *hostCommandState) markTruncated() {
+	state.mutex.Lock()
+	defer state.mutex.Unlock()
+	state.truncated = true
 }
 
 func (buffer *hostCommandBuffer) String() string {
@@ -90,17 +96,6 @@ func (stream preservedStream) Read(chunk []byte) (int, error) {
 		}
 	}
 	return read, err
-}
-
-func (state *hostCommandState) send(message map[string]any) {
-	if state.channel == nil {
-		return
-	}
-	encoded, err := marshalJSON(message)
-	if err != nil {
-		return
-	}
-	_, _ = state.channel.Write(append([]byte(encoded), '\n'))
 }
 
 func (state *hostCommandState) readStream(reader io.Reader, name string) {

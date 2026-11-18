@@ -31,19 +31,50 @@ type DaemonOptions struct {
 
 func daemonBinary(repository string) (string, error) {
 	binary := filepath.Join(repository, "dist", "graphd")
-	if _, err := os.Stat(binary); err == nil {
+	if _, err := os.Stat(binary); err == nil && !daemonBinaryIsStale(repository, binary) {
 		return binary, nil
 	}
 	build := exec.Command("go", "-C", filepath.Join(repository, "backend"), "run", "./cmd/graphbuild", "backend")
 	build.Stdout = os.Stderr
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
-		return "", fmt.Errorf("the daemon binary is missing and could not be built: %w", err)
+		return "", fmt.Errorf("the daemon binary is missing or stale and could not be built: %w", err)
 	}
 	if _, err := os.Stat(binary); err != nil {
 		return "", fmt.Errorf("the daemon binary is still missing after building: %w", err)
 	}
 	return binary, nil
+}
+
+func daemonBinaryIsStale(repository, binary string) bool {
+	built, err := os.Stat(binary)
+	if err != nil {
+		return true
+	}
+	stale := false
+	sources := filepath.Join(repository, "backend")
+	walkErr := filepath.WalkDir(sources, func(path string, entry os.DirEntry, incoming error) error {
+		if incoming != nil || stale {
+			return incoming
+		}
+		if entry.IsDir() {
+			if name := entry.Name(); name == "testdata" || name == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(path) != ".go" && filepath.Base(path) != "go.mod" && filepath.Base(path) != "go.sum" {
+			return nil
+		}
+		if info, statErr := entry.Info(); statErr == nil && info.ModTime().After(built.ModTime()) {
+			stale = true
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return true
+	}
+	return stale
 }
 
 func StartDaemon(options DaemonOptions) (*Daemon, error) {

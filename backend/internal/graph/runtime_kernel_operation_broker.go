@@ -35,25 +35,25 @@ type ModuleOperationInput struct {
 }
 
 type moduleOperationRecord struct {
-	OperationId    string                           `json:"operationId"`
-	Command        string                           `json:"command"`
-	Args           []string                         `json:"args"`
-	Code           *int                             `json:"code"`
-	Stdout         string                           `json:"stdout"`
-	Stderr         string                           `json:"stderr"`
-	OutputFiles    map[string]HostCommandOutputFile `json:"outputFiles,omitempty"`
-	Commit         *string                          `json:"commit"`
-	CommitAfter    *string                          `json:"commitAfter"`
-	CleanBefore    bool                             `json:"cleanBefore"`
-	CleanAfter     bool                             `json:"cleanAfter"`
-	VerifiedCommit *string                          `json:"verifiedCommit"`
-	Sandboxed      bool                             `json:"sandboxed"`
-	Verdict string `json:"verdict"`
-	NoVerdictReason string `json:"noVerdictReason,omitempty"`
-	TimedOut bool `json:"timedOut"`
-	TimeoutMs int `json:"timeoutMs"`
-	WaitMs int64 `json:"waitMs"`
-	ElapsedMs int64 `json:"elapsedMs"`
+	OperationId     string                           `json:"operationId"`
+	Command         string                           `json:"command"`
+	Args            []string                         `json:"args"`
+	Code            *int                             `json:"code"`
+	Stdout          string                           `json:"stdout"`
+	Stderr          string                           `json:"stderr"`
+	OutputFiles     map[string]HostCommandOutputFile `json:"outputFiles,omitempty"`
+	Commit          *string                          `json:"commit"`
+	CommitAfter     *string                          `json:"commitAfter"`
+	CleanBefore     bool                             `json:"cleanBefore"`
+	CleanAfter      bool                             `json:"cleanAfter"`
+	VerifiedCommit  *string                          `json:"verifiedCommit"`
+	Sandboxed       bool                             `json:"sandboxed"`
+	Verdict         string                           `json:"verdict"`
+	NoVerdictReason string                           `json:"noVerdictReason,omitempty"`
+	TimedOut        bool                             `json:"timedOut"`
+	TimeoutMs       int                              `json:"timeoutMs"`
+	WaitMs          int64                            `json:"waitMs"`
+	ElapsedMs       int64                            `json:"elapsedMs"`
 }
 
 type moduleOperationOutput struct {
@@ -253,24 +253,12 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 	started := NowMillis()
 	waitMs := started - queued
 	var programEnv map[string]string
-	var programReadPaths []string
 	var nodeModulesPath *string
 	if options.Program != nil {
 		programEnv = options.Program.Env
-		programReadPaths = options.Program.ReadPaths
 		nodeModulesPath = options.Program.NodeModulesPath
 	}
-	modules := LinkProjectDependencies(options.Workspace, nodeModulesPath)
-	candidates := append([]string{}, programReadPaths...)
-	if modules != nil {
-		candidates = append(candidates, *modules)
-	}
-	readPaths := []string{}
-	for _, path := range candidates {
-		if resolved, err := filepath.EvalSymlinks(path); err == nil {
-			readPaths = append(readPaths, resolved)
-		}
-	}
+	LinkProjectDependencies(options.Workspace, nodeModulesPath)
 	timeoutMs := moduleOperationDefaultTimeoutMs
 	if operation.TimeoutMs != nil {
 		timeoutMs = *operation.TimeoutMs
@@ -319,7 +307,7 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 				return started
 			},
 			Settle: func(string, *TokenUsage) {},
-		}, readPaths, environment, true, true, timeoutMs)
+		}, environment, timeoutMs)
 		command := runner.Run(operation.Command, operation.Args, cancellation)
 		result = HostCommandResult{
 			Code: command.Code, Stdout: command.Stdout, Stderr: command.Stderr,

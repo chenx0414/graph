@@ -19,32 +19,30 @@ type McpProcessControl struct {
 }
 
 type RestrictedProcessControl struct {
-	Pid *int
+	Pid   *int
 	Write func(message any) bool
-	End func()
-	Kill func(signal string) bool
+	End   func()
+	Kill  func(signal string) bool
 }
 
 type RestrictedCommand struct {
-	Broker RestrictedGate
-	Cwd string
-	ScratchDir string
-	Executable string
-	Args []string
-	Input string
-	ReadPaths []string
-	WritePaths []string
-	TimeoutMs int
-	OnRequest func(request any) (any, error)
+	Broker          RestrictedGate
+	Cwd             string
+	ScratchDir      string
+	Executable      string
+	Args            []string
+	Input           string
+	TimeoutMs       int
+	OnRequest       func(request any) (any, error)
 	OnWorkerMessage func(message any)
-	Env map[string]string
-	KeepStdinOpen bool
-	Signal *AbortSignal
-	OnSpawn func(control McpProcessControl)
-	OnProcess func(control RestrictedProcessControl)
-	OnStdout func(chunk string)
-	OnCancel func(request any)
-	Preflight func()
+	Env             map[string]string
+	KeepStdinOpen   bool
+	Signal          *AbortSignal
+	OnSpawn         func(control McpProcessControl)
+	OnProcess       func(control RestrictedProcessControl)
+	OnStdout        func(chunk string)
+	OnCancel        func(request any)
+	Preflight       func()
 }
 
 type RestrictedExecutor interface {

@@ -11,6 +11,9 @@ import (
 const fleetScaleAgents = 1024
 
 func TestFleetRunsOneThousandTwentyFourAgentsThroughExecution(t *testing.T) {
+	if testing.Short() {
+		t.Skip("1024-agent fleet scale run: slow layer only")
+	}
 	limits := &TaskRuntimeLimits{
 		MaxAgents:        fleetScaleAgents,
 		SpawnDepth:       DefaultSpawnDepth,

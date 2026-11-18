@@ -1,0 +1,109 @@
+# 慢层：每天跑一次全量确认，不进每次提交的门禁。
+#
+# 分层理由：快层（`python3 scripts/check-queue.py` 与 `ci.yml`）用 `-short` 跳过重活，
+# 目标 2 分钟内出结论；慢层没有时间预算，把被跳过的重活、harness 行为门禁与全量测试
+# 重新跑一遍，任何一处红都说明快层的跳过掩盖了回归。
+#
+# 三层内容：
+#   1. `full`：两个 module 的 `-count=1` 全量测试（不用缓存结果，也不加 -short）；
+#   2. `gate`：`go -C backend run ./cmd/graphcheck all`（快层同一批步骤再走一遍）；
+#   3. `harness`：`graphcheck harness` 单独跑，失败时把判决与日志一起留下。
+#
+# 每项都上传日志（不只是失败时）：慢层的结果要能事后回看趋势。
+
+name: nightly
+
+on:
+  schedule:
+    - cron: "30 18 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  full:
+    name: full test (${{ matrix.module }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [backend, app]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache: true
+          cache-dependency-path: |
+            backend/go.sum
+            app/go.sum
+      - name: 全量测试（不跳过任何用例）
+        run: go -C ${{ matrix.module }} test -count=1 ./...
+      - name: 保留日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-full-${{ matrix.module }}
+          path: |
+            backend/**/*.log
+            app/**/*.log
+          if-no-files-found: ignore
+
+  gate:
+    name: 全量确认（graphcheck all）
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+          cache-dependency-path: |
+            backend/go.sum
+            app/go.sum
+      - name: graphcheck all
+        run: go -C backend run ./cmd/graphcheck all
+      - name: 保留日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-gate
+          path: |
+            backend/**/*.log
+            app/**/*.log
+          if-no-files-found: ignore
+
+  harness:
+    name: harness 行为门禁
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+          cache-dependency-path: |
+            backend/go.sum
+            app/go.sum
+      - name: graphcheck harness
+        run: go -C backend run ./cmd/graphcheck harness
+      - name: 保留判决
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-harness
+          path: |
+            backend/internal/harness/testdata/**
+            state/**/*.log
+          if-no-files-found: ignore

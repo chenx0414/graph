@@ -1,0 +1,265 @@
+# 每次提交的 CI。分层原则：最便宜的失败最先暴露，最贵的活按 diff 缩小范围并切分到多台机器。
+#
+# 分层与并行（除 changes 这道判据外，各 job 之间没有 needs，互不阻塞）：
+#   - `changes`：判断这次提交是不是只动了文档。约 10 秒，后面三个 job 靠它的输出决定跑不跑。
+#   - `lint`：gofmt（只查本次改动的文件）+ go vet（两个 module）+ 静态门禁，ubuntu-latest。
+#   - `build`：`go build` 两个 module（ubuntu）+ MyGo app bundle（macOS，全仓只做一次）。
+#   - `test`：scripts/ci-shard.py 切片后的 matrix；PR 只跑 diff 触发的包，main 跑全量。
+#     `-short` 跳过被移到慢层的重活（见 docs/guides/checks.md 的「坏测试清单」），
+#     那些用例由 nightly.yml 在没有时间预算时跑。
+#   - `ci-required`：永远运行、永远给出结论的汇总检查，分支保护只要求它。
+#
+# 为什么不用 paths-ignore：被路径过滤跳过的 workflow 会让必需的 check 永远停在 Pending，
+# PR 合不进去。所以过滤放在 job 级：`changes` 判出“只改文档”后，lint/build/test 跳过，
+# 而 `ci-required` 用 if: always() 收口，把 skipped 当通过。
+#
+# 为什么静态门禁全在 ubuntu：免费账号 macOS runner 并发上限 5 台且所有 workflow 共用，
+# 而 gofmt / vet / graphcheck 都是纯 CPU 的 Go 程序，不挑系统。只有 MyGo 的
+# darwin-arm64 app bundle 必须留在 macOS。
+#
+# 缓存只用 actions/setup-go 自带的 `cache: true`：它按 cache-dependency-path 派生 key，
+# 同时恢复 module 与 build 缓存。自己再套一层 actions/cache 只会多一层 key 抖动，
+# 而且容易把不该进缓存的产物塞进 10 GB 配额。
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 同一个 PR 连推多次只跑最新的一次；main 不 cancel——每个进 main 的提交都要完整跑过。
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.scope.outputs.code }}
+      base: ${{ steps.scope.outputs.base }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 这次提交有没有动代码
+        id: scope
+        run: |
+          set -eu
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="origin/${{ github.base_ref }}"
+            git fetch --no-tags --depth=200 origin "${{ github.base_ref }}"
+          else
+            base="HEAD~1"
+          fi
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          changed=$(git diff --name-only "$base"...HEAD || git diff --name-only "$base" HEAD)
+          echo "本次改动的文件："
+          echo "${changed:-（无）}"
+          # 只改文档（*.md）或只改 CI 自身配置时不跑代码检查。
+          code=$(echo "$changed" | grep -Ev '^$|\.md$|^\.github/' | head -1 || true)
+          if [ -z "$changed" ] || [ -z "$code" ]; then
+            echo "只改了文档或 CI 配置，跳过代码检查"
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  lint:
+    name: lint
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+          cache-dependency-path: |
+            backend/go.sum
+            app/go.sum
+      - name: gofmt（只查本次改动的 Go 文件）
+        run: |
+          set -eu
+          changed=$(git diff --name-only "${{ needs.changes.outputs.base }}"...HEAD -- '*.go' | while read -r file; do [ -f "$file" ] && echo "$file"; done)
+          if [ -z "$changed" ]; then echo "本次没有改动 Go 文件"; exit 0; fi
+          unformatted=$(echo "$changed" | xargs -r gofmt -l)
+          if [ -n "$unformatted" ]; then
+            echo "这些改动过的文件没有 gofmt 过：" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+      - name: go vet（两个 module）
+        run: |
+          go -C backend vet ./...
+          go -C app vet ./...
+      - name: 静态门禁（先编译一次二进制，不要每个子命令都 go run 现场编译）
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/bin"
+          go -C backend build -o "$RUNNER_TEMP/bin/graphcheck" ./cmd/graphcheck
+          "$RUNNER_TEMP/bin/graphcheck" comments
+          "$RUNNER_TEMP/bin/graphcheck" ownership
+          "$RUNNER_TEMP/bin/graphcheck" api
+          "$RUNNER_TEMP/bin/graphcheck" machines
+          "$RUNNER_TEMP/bin/graphcheck" evidence
+      - name: 失败时保留日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-logs
+          path: |
+            backend/**/*.log
+            app/**/*.log
+          if-no-files-found: ignore
+
+  build:
+    name: build (${{ matrix.name }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-latest
+          - name: darwin-app
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+          cache-dependency-path: |
+            backend/go.sum
+            app/go.sum
+      - name: go build（两个 module）
+        run: |
+          go -C backend build ./...
+          go -C app build ./...
+      - name: 构建 MyGo app bundle（全仓只在这里做一次）
+        if: matrix.name == 'darwin-app'
+        run: go -C backend run ./cmd/graphbuild app
+      - name: 上传 app bundle
+        if: matrix.name == 'darwin-app'
+        uses: actions/upload-artifact@v4
+        with:
+          name: graph-app-mac-arm64
+          path: dist/app/mac-arm64/Graph.app
+          retention-days: 7
+      - name: 失败时保留日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ matrix.name }}
+          path: |
+            backend/**/*.log
+            app/**/*.log
+          if-no-files-found: ignore
+
+  test:
+    name: test (${{ matrix.module }}, ${{ matrix.shard }}/4)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [backend, app]
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache: true
+          cache-dependency-path: |
+            backend/go.sum
+            app/go.sum
+      - name: 选择范围（PR 只跑 diff 触发的包，main 跑全量）
+        id: scope
+        run: |
+          set -eu
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            packages=$(python3 scripts/ci-shard.py --module "${{ matrix.module }}" --affected "${{ needs.changes.outputs.base }}")
+            echo "PR 触发的包："
+            echo "${packages:-（无）}"
+            if [ -z "$packages" ]; then
+              echo "run=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "run=$(echo "$packages" | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=./..." >> "$GITHUB_OUTPUT"
+          fi
+      - name: 分片测试
+        if: steps.scope.outputs.run != ''
+        run: |
+          set -eu
+          pattern=$(python3 scripts/ci-shard.py --module "${{ matrix.module }}" --shard "${{ matrix.shard }}/4")
+          echo "分片 ${{ matrix.shard }}/4 的 -run 正则长度：${#pattern}"
+          go -C "${{ matrix.module }}" test -short -count=1 -run "$pattern" ${{ steps.scope.outputs.run }}
+      - name: 失败时保留日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ matrix.module }}-${{ matrix.shard }}
+          path: |
+            backend/**/*.log
+            app/**/*.log
+          if-no-files-found: ignore
+
+  # 分支保护只要求这一个 check。它总是运行：判据 job 说“只改文档”时上面三个 job
+  # 是 skipped，这里把 skipped 当通过；任何一个 job 红，这里红并点名。
+  ci-required:
+    name: ci-required
+    needs: [changes, lint, build, test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 汇总各 job 的结论
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+          LINT: ${{ needs.lint.result }}
+          BUILD: ${{ needs.build.result }}
+          TEST: ${{ needs.test.result }}
+        run: |
+          set -eu
+          echo "changes=$CHANGES code=$CODE lint=$LINT build=$BUILD test=$TEST"
+          if [ "$CHANGES" = "failure" ] || [ "$CHANGES" = "cancelled" ]; then
+            echo "判据 job 失败，无法判断这次提交该跑什么" >&2
+            exit 1
+          fi
+          if [ "$CODE" != "true" ]; then
+            echo "只改了文档或 CI 配置：没有要跑得代码检查，视为通过"
+            exit 0
+          fi
+          for result in "$LINT" "$BUILD" "$TEST"; do
+            case "$result" in
+              success) ;;
+              *) echo "有 job 没有通过：lint=$LINT build=$BUILD test=$TEST" >&2; exit 1 ;;
+            esac
+          done
+          echo "全部通过"

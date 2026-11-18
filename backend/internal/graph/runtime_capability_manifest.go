@@ -149,6 +149,9 @@ type capabilityResolvedCommand struct {
 func capabilityResolveRuntimeCommand(command string, snapshot string) capabilityResolvedCommand {
 	execPath, electron := GraphNodeRuntime(nil)
 	if command == "node" {
+		if execPath == "" {
+			Raise("capability_unavailable", MissingNodeRuntime("run this Pi extension").Error())
+		}
 		return capabilityResolvedCommand{command: command, path: execPath, readPaths: NodeReadPaths(execPath, electron)}
 	}
 	candidate := ""

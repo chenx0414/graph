@@ -30,8 +30,8 @@ Go 化分两段走完：先是界面（`app/`，Go + MyGo）接替 Electron 外�
 
 **两处例外，都是别人的代码或执行面，不是我们的工具**：
 
-- `src/runtime/`（`extension-worker.mjs`、`module-worker.mjs`、`host-command-worker.mjs`、
-  `check-resolver.cjs`）：PiG 内核在 Node 里跑用户扩展与模块的地方，Go 侧只负责起进程与读结果。
+- `src/runtime/`（`module-worker.mjs`、`check-resolver.cjs`）：PiG 内核在 Node 里跑用户模块的地方，
+  Go 侧只负责起进程与读结果。
 - `.agents/skills/**`：第三方技能脚本，随版本锁定，不由我们改写。
 
 `package.json` 只剩一条转发脚本：`check` → `python3 scripts/check-queue.py`。原因是宿主工具的
@@ -50,3 +50,18 @@ Go 化分两段走完：先是界面（`app/`，Go + MyGo）接替 Electron 外�
   报告（`taskSuccess`、工具序列、verify 结论），需要比较时把两次的报告放在一起看。
 - 少一套生态：不再需要 `pnpm install`，工作树不需要拷 `node_modules`，CI 少一步。
 - 代价：以后写工具只写 Go；需要快速脚本时也得是 Go（或者 `python3 scripts/` 下那两支）。
+
+## 后续修正（2026-11-19）
+
+上面那张表里的例外从**四个** Node 执行面降到**两个**：
+
+- `host-command-worker.mjs` 已删除。它只是一层薄壳（`spawn` + `detached` 进程组 + 转流 + 杀组 +
+  回 exit code + 写 quiescence 文件），全部由 Go 标准库取代，`RunHostCommand` 现在直接 `exec.Cmd`。
+  Agent 的 shell 命令这条链路不再需要 Node。见 ADR 0046。
+- `check-resolver.cjs` 与 `module-worker.mjs` 保留：前者是 `node --require` 的解析钩子，后者要动态
+  `import` 用户模块并执行其 `evaluate`，是真 JS 语义。
+- `extension-worker.mjs` 已删除。扩展由 PiG 内核自己的 `pigkernel.ExtensionHost` 承载
+  （`runtime_pig_extensions.go`），本仓库里它没有调用者。
+
+「四个 Node worker」这个说法在 `docs/guides/checks.md` 与 `src/runtime/README.md` 里已同步改成
+现状。这两条执行面的脚本在磁盘缺失时从二进制内嵌副本取用（ADR 0046），所以打包后仍然可用。

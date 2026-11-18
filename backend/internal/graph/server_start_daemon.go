@@ -119,15 +119,16 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 	rsiRoot := ResolveRsiRoot(options.Env, cliCwd())
 	rsi := OpenRsiService(RsiServiceOptions{Root: rsiRoot, StateDir: stateDir})
 	runningSource := ReadSourceIdentity(ApplicationRoot)
-	presetsRoot := options.PresetsDir
-	if presetsRoot == "" {
-		presetsRoot = filepath.Join(ApplicationRoot, "presets")
+	presetsDir := options.PresetsDir
+	if presetsDir == "" {
+		presetsDir = presetsRoot()
 	}
 	userHome := options.GraphHome
 	if userHome == "" {
 		userHome = GraphHome(options.Env)
 	}
-	bootstrap := LoadPresetBootstrap(presetsRoot, log)
+	warmRuntimeAssets()
+	bootstrap := LoadPresetBootstrap(presetsDir, log)
 	agentContext := OpenAgentContextLibrary(filepath.Join(userHome, "prompts"))
 	ensureAgentContext(agentContext)
 	testConnection := func(modelID string) map[string]any {

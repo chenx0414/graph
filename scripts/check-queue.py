@@ -389,9 +389,9 @@ def main():
         static = (
             ("go", "-C", "backend", "run", "./cmd/graphbuild", "backend"),
             ("go", "-C", "backend", "vet", "./..."),
-            ("go", "-C", "backend", "test", "./..."),
+            ("go", "-C", "backend", "test", "-short", "./..."),
             ("go", "-C", "app", "vet", "./..."),
-            ("go", "-C", "app", "test", "./..."),
+            ("go", "-C", "app", "test", "-short", "./..."),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "comments"),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "ownership"),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "api"),

@@ -53,7 +53,7 @@ grep -rno --include=*.go -E '(==|!=) "(running|done|queued|pending|failed|comple
 | 14 | 模型选择器 | `model_picker.go` `{open,query,active,provider,showAll}` | 关闭/搜索/按供应商过滤/展开全部 | 打开与筛选共用一个结构，`active` 是行号 | 关闭时没有清理路径，`active` 越界靠渲染处兜底 |
 | 15 | 输入框菜单 | `transcript.go` `{menuTrigger,menuActive,menuDismissed,pathQuery,pathItems,pathLoading,skillItems,skillsLoading}` | 关闭/命令/路径/技能；每种各自加载 | 触发器类型 + 两个加载标志 + 一个"已忽略"字符串 | 忽略用字符串记录，输入改回同一触发词会重新弹 |
 | 16 | 会话接入/断连 | `shell.go` `{broken,api.address}`、`adoptConsole` | 正常/换过地址/读失败 | `broken` 既表示"刚接管新地址"也表示"列表读失败" | 接管成功后仍显示为坏，直到下一次 `loadRows` 成功 |
-| 17 | 轨迹与洞察加载 | `trajectory.go` `loading`；`insights.go` `loading` | 空闲/加载中/失败 | 各自布尔 + `failed` 字符串 | 作用域切换时靠外部再判断一次 |
+| 17 | 轨迹加载 | `trajectory.go` `loading` | 空闲/加载中/失败 | 布尔 + `failed` 字符串 | 作用域切换时靠外部再判断一次 |
 
 ## B. 后端（权威状态，`backend/`）
 
@@ -134,31 +134,27 @@ python3 scripts/check-queue.py
 - `reset()`：换代并清空，用在范围/作用域切换处，让在途响应作废。
 - `settle(generation, data, failure) bool`：代号不匹配即丢弃并返回 false，**迟到的响应无法写入状态**；这是本仓此前只有 `fleet` 一族具备的保证。
 
-接线：`insightsState`、`trajectoryState` 改为内嵌 `loadState[T]`，`loading` 字段变 `loading()`；切换 7/30 天与切换会话/节点时先 `reset()`，旧作用域的响应不再落进当前页面。
+接线：`trajectoryState` 改为内嵌 `loadState[T]`，`loading` 字段变 `loading()`；切换会话/节点时先 `reset()`，旧作用域的响应不再落进当前页面。
 
-同时修掉三处用户可见缺陷（均为先红后绿）：
+同时修掉一处用户可见缺陷（先红后绿）：
 
-- 洞察页切到 30 天后，7 天的迟到响应把数据换回去（`TestInsightsKeepsTheRangeTheUserPicked`）。
 - 轨迹页在上一次取数未回时切走，新作用域发不出请求、界面停在“正在整理轨迹…”（`TestTrajectoryKeepsTheScopeTheUserOpened`）。
-- 洞察页加载中与空态文案写死“近 7 天”，与所选范围不符（`TestInsightsLabelsTheRangeTheUserPicked`）。
 
 先红后绿的证据（同一组用例在实现前跑在 `HEAD` 的 `app/` 上）：
 
 ```
---- FAIL: TestInsightsKeepsTheRangeTheUserPicked (0.00s)
-    a 7-day answer replaced the 30-day range the user picked: requests 7
---- FAIL: TestInsightsLabelsTheRangeTheUserPicked (0.03s)
+--- FAIL: TestTrajectoryKeepsTheScopeTheUserOpened (0.00s)
     the sessions card names the range the user picked, texts [... "近 7 天还没有会话用量。"]
 --- FAIL: TestTrajectoryKeepsTheScopeTheUserOpened (2.00s)
     the trajectory of the chat the user opened never happened
 ```
 
-实现后同一组用例通过，另外三条钉住机器本身（`TestLoadStateRejectsAnAnswerFromASupersededRequest`、`TestLoadStateStartsOnceUntilTheAnswerOrAReset`、`TestLoadStateKeepsAFailureUntilTheNextAttempt`）；`go -C app test ./...` 全绿，既有 `TestInsightsModuleSummarizesTheLastSevenDays`、`TestTrajectoryModuleQuantifiesTheLatestConversation`、`TestSwitchingChatsMovesTheTrajectoryToTheNewAgent` 不需要修改，说明对外行为未被改写。
+实现后同一组用例通过，另外三条钉住机器本身（`TestLoadStateRejectsAnAnswerFromASupersededRequest`、`TestLoadStateStartsOnceUntilTheAnswerOrAReset`、`TestLoadStateKeepsAFailureUntilTheNextAttempt`）；`go -C app test ./...` 全绿，既有 `TestTrajectoryModuleQuantifiesTheLatestConversation`、`TestSwitchingChatsMovesTheTrajectoryToTheNewAgent` 不需要修改，说明对外行为未被改写。
 
 验证：
 
 ```sh
-go -C app test -run 'TestLoadState|TestInsights|TestTrajectory' -count=1 ./...
+go -C app test -run 'TestLoadState|TestTrajectory' -count=1 ./...
 ```
 
 下一台直接复用同一类型：#6（`fleet`/`global` 两套）、#7（编队详情、网络面板、编队图），把它们手写的 generation/守卫分支收进类型。

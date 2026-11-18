@@ -169,8 +169,7 @@ func resolvedModuleLimits(in *ModuleLimits) resolvedLimits {
 }
 
 func moduleWorkerPath() string {
-	root := GraphApplicationRoot()
-	return filepath.Join(root, "src", "runtime", "module-worker.mjs")
+	return runtimeScript("module-worker.mjs")
 }
 
 type moduleEvalPayload struct {

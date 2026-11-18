@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "bootstrap": {
+    "prompts": {
+      "master": "bootstrap/master/agent.md",
+      "main": "bootstrap/master/agent.md"
+    },
+    "definitions": [
+      { "id": "master", "recommendedGrade": "high" },
+      { "id": "coder", "recommendedGrade": "medium" },
+      { "id": "reviewer", "recommendedGrade": "high", "review": true },
+      { "id": "tester", "recommendedGrade": "medium" }
+    ]
+  }
+}

@@ -178,19 +178,12 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 			}
 			masterReadRoots = piAdapterUnique(masterReadRoots)
 		}
-		dependencies := LinkProjectDependencies(workspace, nil)
-		commandReadPaths := []string(nil)
-		if dependencies != nil {
-			commandReadPaths = []string{*dependencies}
-		}
+		LinkProjectDependencies(workspace, nil)
 		commands = OpenWorkspaceCommandRunner(
 			workspace,
 			filepath.Join(options.InstancesDir, instanceId, "command-scratch"),
 			observedGate,
-			commandReadPaths,
 			nil,
-			false,
-			false,
 			0,
 		)
 		operationInput := CapabilityOperationOptions{

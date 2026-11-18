@@ -1,15 +1,12 @@
 package graph
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 
 	"os"
 )
-
-var workspaceReadOnlyGit = map[string]bool{"status": true, "diff": true, "log": true, "show": true}
-
-var workspaceInlineNode = map[string]bool{"-e": true, "--eval": true, "-p": true, "--print": true, "--input-type": true}
 
 const RUNTIME_NODE_ENV = "GRAPH_APP_NODE"
 
@@ -36,11 +33,12 @@ func GraphNodeRuntime(env map[string]string) (execPath string, electron string) 
 	if found := lookupNodeOnPath(env); found != "" {
 		return found, ""
 	}
-	path, err := os.Executable()
-	if err != nil {
-		return "", ""
-	}
-	return path, ""
+	return "", ""
+}
+
+func MissingNodeRuntime(purpose string) error {
+	return errors.New("No Node.js runtime is available to " + purpose +
+		"; install node, or point " + RUNTIME_NODE_ENV + " at one")
 }
 
 func existingNode(path string) string {
@@ -75,7 +73,7 @@ func lookupNodeOnPath(env map[string]string) string {
 }
 
 func resolverShim() string {
-	return filepath.Join(ApplicationRoot, "src", "runtime", "check-resolver.cjs")
+	return runtimeScript("check-resolver.cjs")
 }
 
 func gitExecutable() string {
@@ -110,30 +108,6 @@ func ResolveNodeCommand(args []string, execPath, electron string, shim bool) Res
 	}
 	return ResolvedCommand{Executable: execPath, Args: shimArgs, ReadPaths: reads, Env: map[string]string{"ELECTRON_RUN_AS_NODE": "1"}}
 }
-
-func ValidateWorkspaceCommand(command string, args []string) ResolvedCommand {
-	if command == "node" {
-		for _, arg := range args {
-			if workspaceInlineNode[arg] || strings.HasPrefix(arg, "--eval=") {
-				Raise("permission", "Inline node evaluation is not allowed in a work copy")
-			}
-		}
-		return ResolveNodeCommand(args, "", "", true)
-	}
-	if command == "git" {
-		name := ""
-		if len(args) > 0 {
-			name = args[0]
-		}
-		if !workspaceReadOnlyGit[name] {
-			Raise("permission", "Only read-only Git commands are allowed")
-		}
-		return ResolvedCommand{Executable: gitExecutable(), Args: args}
-	}
-	Raise("permission", "Command "+command+" is not allowed in a work copy")
-	return ResolvedCommand{}
-}
-
 func pathCommand(command string, args []string) ResolvedCommand {
 	candidates := []string{}
 	if strings.Contains(command, "/") {
@@ -189,19 +163,16 @@ func pipefailShell(command ResolvedCommand) ResolvedCommand {
 }
 
 type WorkspaceCommandRunner struct {
-	workspace                      string
-	scratchDir                     string
-	gate                           SendGate
-	readPaths                      []string
-	env                            map[string]string
-	localNetwork                   bool
-	gitMetadataWritesInsideScratch bool
-	timeoutMs                      int
-	acquired                       *restrictedLease
-	closed                         bool
+	workspace  string
+	scratchDir string
+	gate       SendGate
+	env        map[string]string
+	timeoutMs  int
+	acquired   *restrictedLease
+	closed     bool
 }
 
-func OpenWorkspaceCommandRunner(workspace, scratchDir string, gate SendGate, readPaths []string, env map[string]string, localNetwork bool, gitMetadataWritesInsideScratch bool, timeoutMs int) *WorkspaceCommandRunner {
+func OpenWorkspaceCommandRunner(workspace, scratchDir string, gate SendGate, env map[string]string, timeoutMs int) *WorkspaceCommandRunner {
 	resolved, err := filepath.EvalSymlinks(workspace)
 	if err != nil {
 		panic(err)
@@ -210,8 +181,7 @@ func OpenWorkspaceCommandRunner(workspace, scratchDir string, gate SendGate, rea
 		timeoutMs = 120_000
 	}
 	return &WorkspaceCommandRunner{
-		workspace: resolved, scratchDir: scratchDir, gate: gate, readPaths: readPaths, env: env,
-		localNetwork: localNetwork, gitMetadataWritesInsideScratch: gitMetadataWritesInsideScratch, timeoutMs: timeoutMs,
+		workspace: resolved, scratchDir: scratchDir, gate: gate, env: env, timeoutMs: timeoutMs,
 	}
 }
 
@@ -224,13 +194,7 @@ func (runner *WorkspaceCommandRunner) RunWithTimeout(command string, args []stri
 }
 
 func (runner *WorkspaceCommandRunner) run(command string, args []string, signal *AbortSignal, timeoutMs int) CommandResult {
-	hostCommands := true
-	var resolved ResolvedCommand
-	if hostCommands {
-		resolved = resolveHostCommand(command, args)
-	} else {
-		resolved = ValidateWorkspaceCommand(command, args)
-	}
+	resolved := resolveHostCommand(command, args)
 	if runner.acquired == nil {
 		lease := AcquireRestrictedExecutor()
 		runner.acquired = &restrictedLease{Executor: lease.Executor, Release: lease.Release}
@@ -242,10 +206,7 @@ func (runner *WorkspaceCommandRunner) run(command string, args []string, signal 
 	if err != nil {
 		panic(err)
 	}
-	environment := map[string]string{}
-	if hostCommands {
-		environment["PATH"] = os.Getenv("PATH")
-	}
+	environment := map[string]string{"PATH": os.Getenv("PATH")}
 	for key, value := range runner.env {
 		environment[key] = value
 	}
@@ -259,10 +220,8 @@ func (runner *WorkspaceCommandRunner) run(command string, args []string, signal 
 	cmd := RestrictedCommand{
 		Broker: runner.gate, Cwd: runner.workspace, ScratchDir: scratch,
 		Executable: resolved.Executable, Args: resolved.Args,
-		ReadPaths:  append([]string{runner.workspace, filepath.Dir(resolved.Executable)}, append(resolved.ReadPaths, runner.readPaths...)...),
-		WritePaths: []string{runner.workspace, scratch},
-		TimeoutMs:  limit,
-		Signal:     signal,
+		TimeoutMs: limit,
+		Signal:    signal,
 	}
 	if len(environment) > 0 {
 		cmd.Env = environment

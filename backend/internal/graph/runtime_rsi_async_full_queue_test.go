@@ -33,12 +33,13 @@ func TestAsyncFullDoesNotStartASecondRunWhileOneIsRunning(t *testing.T) {
 	if second != "commit-c" {
 		t.Fatalf("the coalesced run covered %s instead of the newest commit-c", second)
 	}
+	release <- struct{}{}
+	service.rsiWaitAsyncFullIdle(t)
 	select {
 	case extra := <-started:
 		t.Fatalf("a third run started for %s; three activations produced three full runs", extra)
-	case <-time.After(200 * time.Millisecond):
+	default:
 	}
-	release <- struct{}{}
 }
 
 func TestAsyncFullCoalescedRunKeepsEveryConversationThatWaited(t *testing.T) {
