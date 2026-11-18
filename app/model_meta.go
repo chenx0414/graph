@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 )
 
@@ -43,6 +44,8 @@ func (s *shellState) ensureModelMeta() {
 		payload, err := s.api.get("/api/settings")
 		if err == nil {
 			s.modelMeta = parseModelMeta(payload)
+			s.modelMetaResolved = nil
+			s.modelMetaMiss = nil
 		}
 		s.modelMetaError = ""
 		if err != nil {
@@ -57,21 +60,66 @@ func (s *shellState) modelMetaFor(model string) (modelMeta, bool) {
 	if model == "" || len(s.modelMeta) == 0 {
 		return modelMeta{}, false
 	}
+	if meta, ok := s.modelMetaResolved[model]; ok {
+		return meta, true
+	}
+	if s.modelMetaMiss != nil && s.modelMetaMiss[model] {
+		return modelMeta{}, false
+	}
 	if meta, ok := s.modelMeta[model]; ok {
+		s.rememberModelMeta(model, meta)
 		return meta, true
 	}
 	short := shortModel(model)
-	for id, meta := range s.modelMeta {
-		if meta.modelID == model || meta.modelID == short || shortModel(id) == short {
-			return meta, true
+	best, bestScore, found := modelMeta{}, 0, false
+	for _, id := range s.modelMetaKeys() {
+		meta := s.modelMeta[id]
+		score := modelMetaMatchScore(id, meta, model, short)
+		if score == 0 {
+			continue
+		}
+		if !found || score > bestScore || (score == bestScore && id < best.id) {
+			best, bestScore, found = meta, score, true
 		}
 	}
-	for id, meta := range s.modelMeta {
-		if modelPrefixMatches(shortModel(id), short) || modelPrefixMatches(meta.modelID, short) {
-			return meta, true
-		}
+	if found {
+		s.rememberModelMeta(model, best)
+	} else if s.modelMetaMiss == nil {
+		s.modelMetaMiss = map[string]bool{model: true}
+	} else {
+		s.modelMetaMiss[model] = true
 	}
-	return modelMeta{}, false
+	return best, found
+}
+
+func (s *shellState) rememberModelMeta(model string, meta modelMeta) {
+	if s.modelMetaResolved == nil {
+		s.modelMetaResolved = map[string]modelMeta{}
+	}
+	s.modelMetaResolved[model] = meta
+}
+
+func (s *shellState) modelMetaKeys() []string {
+	keys := make([]string, 0, len(s.modelMeta))
+	for id := range s.modelMeta {
+		keys = append(keys, id)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func modelMetaMatchScore(id string, meta modelMeta, model, short string) int {
+	switch {
+	case meta.modelID == model:
+		return 4
+	case shortModel(id) == short && meta.modelID == short:
+		return 3
+	case shortModel(id) == short:
+		return 2
+	case modelPrefixMatches(shortModel(id), short), modelPrefixMatches(meta.modelID, short):
+		return 1
+	}
+	return 0
 }
 
 func modelPrefixMatches(candidate, model string) bool {

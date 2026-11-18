@@ -92,6 +92,8 @@ func (s *shellState) dropCachedModels() {
 		chat.modelsLoading = false
 	}
 	s.modelMeta = nil
+	s.modelMetaResolved = nil
+	s.modelMetaMiss = nil
 	s.modelMetaLoading = false
 	s.modelMetaError = ""
 }
