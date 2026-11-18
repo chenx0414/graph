@@ -89,74 +89,76 @@ func (s *shellState) fleetSwimGrid(ctx *ui.Context, t gwtheme.Tokens, model flee
 	width := float32(len(model.Columns)) * columnWidth
 	height := head + float32(len(model.Lanes))*laneHeight
 	ui.ScrollHorizontal(ctx).Grow(1).Children(func() {
-		stage := ui.Box(ctx).Width(width).Height(height).Clip().Label("协作时间列")
-		stage.Draw(func(p *ui.Painter, r ui.Rect) {
-			for at := 0; at <= len(model.Lanes); at++ {
-				y := r.Y + head + float32(at)*laneHeight
-				p.Fill(ui.Rect{X: r.X, Y: y, W: r.W, H: 1}, t.Border.Alpha(0.55), 0)
-			}
-			for at := 1; at < len(model.Columns); at++ {
-				x := r.X + float32(at)*columnWidth
-				p.Fill(ui.Rect{X: x, Y: r.Y + head, W: 1, H: r.H - head}, t.Border.Alpha(0.3), 0)
-			}
-			center := func(lane int) float32 {
-				return r.Y + head + float32(lane)*laneHeight + laneHeight/2
-			}
-			for _, mark := range model.Marks {
-				if mark.From < 0 || mark.To < 0 || mark.From == mark.To {
-					continue
+		ui.Row(ctx).AlignItems(ui.Start).Children(func() {
+			stage := ui.Box(ctx).Width(width).Height(height).Clip().Label("协作时间列")
+			stage.Draw(func(p *ui.Painter, r ui.Rect) {
+				for at := 0; at <= len(model.Lanes); at++ {
+					y := r.Y + head + float32(at)*laneHeight
+					p.Fill(ui.Rect{X: r.X, Y: y, W: r.W, H: 1}, t.Border.Alpha(0.55), 0)
 				}
-				x := r.X + float32(mark.Column)*columnWidth + columnWidth/2
-				color := model.Lanes[mark.From].Accent
-				from, to := center(mark.From), center(mark.To)
-				if from > to {
-					from, to = to, from
+				for at := 1; at < len(model.Columns); at++ {
+					x := r.X + float32(at)*columnWidth
+					p.Fill(ui.Rect{X: x, Y: r.Y + head, W: 1, H: r.H - head}, t.Border.Alpha(0.3), 0)
 				}
-				p.Fill(ui.Rect{X: x - 1, Y: from, W: 2, H: to - from}, color.Alpha(0.6), 1)
-				p.Fill(ui.Rect{X: x - 3, Y: from + (to - from) - 5, W: 6, H: 5}, color.Alpha(0.9), 1.5)
-			}
-		})
-		stage.Children(func() {
-			for at, column := range model.Columns {
-				x := float32(at) * columnWidth
-				accent := model.Lanes[0].Accent
+				center := func(lane int) float32 {
+					return r.Y + head + float32(lane)*laneHeight + laneHeight/2
+				}
 				for _, mark := range model.Marks {
-					if mark.Column == at && mark.From >= 0 {
-						accent = model.Lanes[mark.From].Accent
-						break
+					if mark.From < 0 || mark.To < 0 || mark.From == mark.To {
+						continue
 					}
+					x := r.X + float32(mark.Column)*columnWidth + columnWidth/2
+					color := model.Lanes[mark.From].Accent
+					from, to := center(mark.From), center(mark.To)
+					if from > to {
+						from, to = to, from
+					}
+					p.Fill(ui.Rect{X: x - 1, Y: from, W: 2, H: to - from}, color.Alpha(0.6), 1)
+					p.Fill(ui.Rect{X: x - 3, Y: from + (to - from) - 5, W: 6, H: 5}, color.Alpha(0.9), 1.5)
 				}
-				ui.Row(ctx).Gap(th.Space(0.5)).AlignItems(ui.Center).Absolute().
-					Left(x + columnWidth/2 - th.Space(3)).Top(th.Space(0.5)).Children(func() {
-					ui.Box(ctx).Size(th.Space(1.25), th.Space(1.25)).Radius(th.Space(0.75)).Background(accent)
-					kit.Text(ctx, strconv.Itoa(column.Count), t.Text.Xs).TextColor(t.Muted)
-				})
-			}
-			for _, mark := range model.Marks {
-				mark := mark
-				if mark.From < 0 {
-					continue
+			})
+			stage.Children(func() {
+				for at, column := range model.Columns {
+					x := float32(at) * columnWidth
+					accent := model.Lanes[0].Accent
+					for _, mark := range model.Marks {
+						if mark.Column == at && mark.From >= 0 {
+							accent = model.Lanes[mark.From].Accent
+							break
+						}
+					}
+					ui.Row(ctx).Gap(th.Space(0.5)).AlignItems(ui.Center).Absolute().
+						Left(x + columnWidth/2 - th.Space(3)).Top(th.Space(0.5)).Children(func() {
+						ui.Box(ctx).Size(th.Space(1.25), th.Space(1.25)).Radius(th.Space(0.75)).Background(accent)
+						kit.Text(ctx, strconv.Itoa(column.Count), t.Text.Xs).TextColor(t.Muted)
+					})
 				}
-				half := th.Space(fleetSwimMarkSize/4) / 2
-				x := float32(mark.Column)*columnWidth + columnWidth/2 - half
-				y := head + float32(mark.From)*laneHeight + laneHeight/2 - half
-				color := model.Lanes[mark.From].Accent
-				chip := ui.Box(ctx).Size(half*2, half*2).Radius(th.Space(1)).
-					Background(color.Alpha(0.9)).Border(1, color).Center().Focusable().
-					Label("协作事件 " + mark.ID)
-				chip.Tooltip(fleetSwimMarkLabel(mark, model) + " · " + mark.Text)
-				chip.OnClick(func() {
-					s.fleet.swimPick = mark.ID
-					s.frame()
-				})
-				if s.fleet.swimPick == mark.ID {
-					chip.Border(2, t.Foreground)
+				for _, mark := range model.Marks {
+					mark := mark
+					if mark.From < 0 {
+						continue
+					}
+					half := th.Space(fleetSwimMarkSize/4) / 2
+					x := float32(mark.Column)*columnWidth + columnWidth/2 - half
+					y := head + float32(mark.From)*laneHeight + laneHeight/2 - half
+					color := model.Lanes[mark.From].Accent
+					chip := ui.Box(ctx).Size(half*2, half*2).Radius(th.Space(1)).
+						Background(color.Alpha(0.9)).Border(1, color).Center().Focusable().
+						Label("协作事件 " + mark.ID)
+					chip.Tooltip(fleetSwimMarkLabel(mark, model) + " · " + mark.Text)
+					chip.OnClick(func() {
+						s.fleet.swimPick = mark.ID
+						s.frame()
+					})
+					if s.fleet.swimPick == mark.ID {
+						chip.Border(2, t.Foreground)
+					}
+					chip.Children(func() {
+						kit.Text(ctx, fleetSwimGlyph(mark.Kind), 9).TextColor(t.OnSolid).FontWeight(700)
+					})
+					chip.Absolute().Left(x).Top(y)
 				}
-				chip.Children(func() {
-					kit.Text(ctx, fleetSwimGlyph(mark.Kind), 9).TextColor(t.OnSolid).FontWeight(700)
-				})
-				chip.Absolute().Left(x).Top(y)
-			}
+			})
 		})
 	})
 }

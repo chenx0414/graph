@@ -72,7 +72,32 @@ func groupRunsAt(messages []transcriptMessage, boundaries map[string]bool) []tra
 
 func (c *chatState) runs() []transcriptRun {
 	spoken, _ := splitCollabMessages(c.messages)
-	return groupRunsAt(spoken, c.runBoundaries)
+	return groupRunsAt(spoken, c.runBoundarySnapshot())
+}
+
+func (c *chatState) markRunBoundary(id string) {
+	if id == "" {
+		return
+	}
+	c.boundaryMu.Lock()
+	if c.runBoundaries == nil {
+		c.runBoundaries = map[string]bool{}
+	}
+	c.runBoundaries[id] = true
+	c.boundaryMu.Unlock()
+}
+
+func (c *chatState) runBoundarySnapshot() map[string]bool {
+	c.boundaryMu.RLock()
+	defer c.boundaryMu.RUnlock()
+	if len(c.runBoundaries) == 0 {
+		return nil
+	}
+	copied := make(map[string]bool, len(c.runBoundaries))
+	for id := range c.runBoundaries {
+		copied[id] = true
+	}
+	return copied
 }
 
 func runIdentity(run transcriptRun) any {
@@ -112,6 +137,7 @@ type chatState struct {
 	oldestSeq       int64
 	listFirst       int
 	listLast        int
+	boundaryMu      sync.RWMutex
 	runBoundaries   map[string]bool
 	historySettle   int
 	historyLoading  bool
@@ -119,11 +145,6 @@ type chatState struct {
 	pagedHistory    bool
 	fingerprint     string
 	expanded        map[string]bool
-	// collabQuery and collabEventID hold the swimlane card's search box and
-	// the event whose detail is open. They live on chatState so a redraw or a
-	// scroll keeps the card stable, like the rest of the chat state.
-	collabQuery   string
-	collabEventID string
 	window          *mygo.Window
 	api             apiClient
 	draft           string

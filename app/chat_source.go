@@ -66,10 +66,12 @@ func (source *conversationChatSource) Load(c *chatState) error {
 	c.historyLoading = false
 	c.pagedHistory = false
 	c.historySettle = 0
+	c.boundaryMu.Lock()
 	c.runBoundaries = map[string]bool{}
 	if len(messages) > 0 {
 		c.runBoundaries[messages[0].ID] = true
 	}
+	c.boundaryMu.Unlock()
 	raw, _ := parseConversationRaw(payload)
 	c.oldestSeq = oldestSeqOf(raw)
 	c.noMoreHistory = c.oldestSeq <= 0 || len(raw) < initialMessagePageSize

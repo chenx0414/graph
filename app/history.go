@@ -63,20 +63,22 @@ func (c *chatState) ensureHistory() {
 			c.frame()
 			return
 		}
-		if len(older) > 0 {
-			c.messages = mergeMessages(older, c.messages)
-			c.pagedHistory = true
-			c.runBoundaries[older[0].ID] = true
-		}
-		if oldest > 0 {
-			c.oldestSeq = oldest
-		}
-		if !hasMore {
-			c.noMoreHistory = true
-		}
-		c.historyLoading = false
-		c.historySettle = 2
-		c.frame()
+		onUI(c.window, func() {
+			if len(older) > 0 {
+				c.messages = mergeMessages(older, c.messages)
+				c.pagedHistory = true
+				c.markRunBoundary(older[0].ID)
+			}
+			if oldest > 0 {
+				c.oldestSeq = oldest
+			}
+			if !hasMore {
+				c.noMoreHistory = true
+			}
+			c.historyLoading = false
+			c.historySettle = 2
+			c.frame()
+		})
 	}()
 }
 func olderBefore(messages []transcriptMessage, before int64) []transcriptMessage {
