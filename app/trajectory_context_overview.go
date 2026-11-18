@@ -46,6 +46,19 @@ func contextOverviewParts(composition trajectoryComposition) []contextPart {
 	return parts
 }
 
+// contextOverviewDisplayParts returns the composition the card shows: the parts
+// of the latest request snapshot when the trajectory carries requests, scaled
+// onto the measured occupancy so the legend adds up to the same total the card
+// reports. A trajectory without request snapshots keeps its raw estimated
+// composition, so the card never invents an occupancy split it cannot measure.
+func contextOverviewDisplayParts(data *conversationTrajectory, used int64) []contextPart {
+	parts := contextOverviewParts(contextOverviewComposition(data))
+	if len(data.Requests) == 0 || used <= 0 {
+		return parts
+	}
+	return contextOverviewScaled(parts, used)
+}
+
 func contextPartsTotal(parts []contextPart) int64 {
 	total := int64(0)
 	for _, part := range parts {
@@ -146,20 +159,13 @@ func (s *shellState) panelContextOverview(ctx *ui.Context) {
 	}
 	s.ensureModelMeta()
 	s.ensurePromptRecord()
-	parts := contextOverviewParts(contextOverviewComposition(data))
-	total := contextPartsTotal(parts)
+	used := data.Totals.Context.LastTokens
+	parts := contextOverviewDisplayParts(data, used)
 	model := s.contextOverviewModel()
 	meta, known := s.modelMetaFor(model)
 	window := int64(0)
 	if known {
 		window = meta.contextWindow
-	}
-	used := data.Totals.Context.LastTokens
-	if used <= 0 {
-		used = data.Totals.Context.PeakTokens
-	}
-	if used <= 0 {
-		used = total
 	}
 	card := ui.Column(ctx).FillWidth().PaddingEnd(th.Space(3)).Gap(th.Space(1.5))
 	card.Children(func() {
@@ -178,6 +184,11 @@ func (s *shellState) panelContextOverview(ctx *ui.Context) {
 		s.contextTabRow(ctx)
 		if s.contextTab != contextTabContext {
 			s.contextPromptBody(ctx)
+			return
+		}
+		if used <= 0 {
+			kit.Text(ctx, "暂无真实上下文数据", t.Text.Sm).TextColor(t.Muted).SingleLine()
+			kit.Text(ctx, "模型回报真实占用后这里会显示组成。", t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
 			return
 		}
 		numbers := ui.Row(ctx).FillWidth().Gap(th.Space(1.5)).AlignItems(ui.End)
@@ -201,78 +212,71 @@ func (s *shellState) panelContextOverview(ctx *ui.Context) {
 				})
 			}
 		})
-		s.contextOverviewBar(ctx, parts, total, used, window, meta.maxTokens)
-		s.contextOverviewLegend(ctx, contextOverviewScaled(parts, used), used)
+		s.contextOverviewBar(ctx, contextOverviewBarSegments(parts, used, window))
+		s.contextOverviewLegend(ctx, parts, used)
 	})
 }
 
-func (s *shellState) contextOverviewBar(ctx *ui.Context, parts []contextPart, total, used, window, maxTokens int64) {
-	t, th := gwtheme.Of(ctx), ctx.Theme()
-	bar := ui.Row(ctx).FillWidth().Height(th.Space(4)).Radius(t.Radius.Sm).Clip()
+type contextBarSegment struct {
+	kind   string
+	weight float32
+	color  ui.Color
+}
+
+func contextOverviewBarSegments(parts []contextPart, used, window int64) []contextBarSegment {
 	if window <= 0 {
 		window = used
 	}
 	if window <= 0 {
 		window = 1
 	}
-	usedFraction := float32(used) / float32(window)
-	if usedFraction > 1 {
-		usedFraction = 1
+	if used < 0 {
+		used = 0
 	}
-	if usedFraction < 0 {
-		usedFraction = 0
+	if used > window {
+		used = window
 	}
-	headroom := float32(0)
-	if window > 0 {
-		headroom = float32(window*30/100) / float32(window)
+	if partsTotal := contextPartsTotal(parts); partsTotal > used {
+		parts = contextOverviewScaled(parts, used)
 	}
-	output := float32(0)
-	if maxTokens > 0 {
-		output = float32(maxTokens) / float32(window)
-	}
-	available := 1 - usedFraction
-	if headroom > available {
-		headroom = available
-	}
-	if output > available-headroom {
-		output = available - headroom
-	}
-	free := available - headroom - output
-	bar.Children(func() {
-		partsTotal := contextPartsTotal(parts)
-		if partsTotal > 0 {
-			for _, part := range parts {
-				if part.tokens <= 0 {
-					continue
-				}
-				weight := usedFraction * float32(part.tokens) / float32(partsTotal)
-				ui.Box(ctx).Grow(weight).FillHeight().Background(part.color)
-			}
-			if extra := usedFraction * float32(used-partsTotal) / float32(used); extra > 0 {
-				ui.Box(ctx).Grow(extra).FillHeight().Background(t.Muted)
-			}
+	segments := []contextBarSegment{}
+	assigned := int64(0)
+	for _, part := range parts {
+		if part.tokens <= 0 {
+			continue
 		}
-		if headroom > 0 {
-			contextHatch(ctx, headroom, palette.Amber500.Color(), 0.28)
-		}
-		if output > 0 {
-			contextHatch(ctx, output, palette.Blue500.Color(), 0.28)
-		}
-		if free > 0 {
-			ui.Box(ctx).Grow(free).FillHeight().Background(t.Hover)
-		}
-	})
+		assigned += part.tokens
+		segments = append(segments, contextBarSegment{kind: "part", weight: float32(part.tokens) / float32(window), color: part.color})
+	}
+	if used > assigned {
+		segments = append(segments, contextBarSegment{kind: "unaccounted", weight: float32(used-assigned) / float32(window)})
+	}
+	if free := float32(window-used) / float32(window); free > 0 {
+		segments = append(segments, contextBarSegment{kind: "free", weight: free})
+	}
+	return segments
 }
 
-func contextHatch(ctx *ui.Context, weight float32, color ui.Color, alpha float32) {
-	box := ui.Box(ctx).Grow(weight).FillHeight().Background(gwtheme.Of(ctx).Hover)
-	box.Draw(func(p *ui.Painter, r ui.Rect) {
-		p.Clip(r, 0, func() {
-			step := float32(8)
-			for x := r.X - r.H; x < r.X+r.W; x += step {
-				p.StrokePolyline([][2]float32{{x, r.Y + r.H}, {x + r.H, r.Y}}, 2.4, color.Alpha(alpha))
+// contextOverviewBar paints the segments of one request's context as a single
+// bar: every segment grows by its share of the whole window, so the bar spans
+// the window exactly once instead of stacking one full width band per segment.
+func (s *shellState) contextOverviewBar(ctx *ui.Context, segments []contextBarSegment) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	bar := ui.Row(ctx).FillWidth().Height(th.Space(4)).Radius(t.Radius.Sm).Clip().Label("上下文组成")
+	bar.Children(func() {
+		for _, segment := range segments {
+			if segment.weight <= 0 {
+				continue
 			}
-		})
+			switch segment.kind {
+			case "free":
+				ui.Box(ctx).Grow(segment.weight).FillHeight().Background(t.Hover)
+			case "unaccounted":
+				ui.Box(ctx).Grow(segment.weight).FillHeight().Background(t.Muted)
+			default:
+				ui.Box(ctx).Grow(segment.weight).FillHeight().Background(segment.color)
+			}
+		}
 	})
 }
 

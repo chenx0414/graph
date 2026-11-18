@@ -161,11 +161,19 @@ func (s *shellState) mainAgentCard(ctx *ui.Context) {
 
 func (s *shellState) conversationList(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
-	s.list.Key = func(index int) any { return s.conversations[index].ID }
+	// Render one snapshot of the list: the key function and the row builder then
+	// agree on the same slice even if a poll lands between two frames.
+	conversations := s.conversations
+	s.list.Key = func(index int) any {
+		if index < 0 || index >= len(conversations) {
+			return index
+		}
+		return conversations[index].ID
+	}
 	fade := ui.Box(ctx).Grow(1)
 	fade.Children(func() {
-		ui.List(ctx, &s.list, len(s.conversations), func(index int) {
-			conversation := s.conversations[index]
+		ui.List(ctx, &s.list, len(conversations), func(index int) {
+			conversation := conversations[index]
 			label := s.titleOf(conversation.ID)
 			selected := conversation.ID == s.activeID
 			opts := kit.SidebarItemOpts{Selected: selected}

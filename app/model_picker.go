@@ -99,6 +99,17 @@ func (c *chatState) pickerDuplicate(model modelChoice) bool {
 	return false
 }
 
+func providerMark(ctx *ui.Context, id string, size float32, t gwtheme.Tokens) {
+	if icon := providerBrandIcon(id); icon != nil {
+		ui.Icon(ctx, icon).Size(size, size).TextColor(t.Foreground)
+		return
+	}
+	tint := providerTint(id)
+	ui.Box(ctx).Size(size, size).Radius(t.Radius.Xs).Background(tint.Alpha(0.16)).Center().Children(func() {
+		kit.Text(ctx, providerInitial(id), 9).FontWeight(600).TextColor(tint)
+	})
+}
+
 func (c *chatState) pickerRow(ctx *ui.Context, model modelChoice, index int, t gwtheme.Tokens) {
 	row := ui.Row(ctx).FillWidth().Height(34).PaddingX(12).Gap(8).AlignItems(ui.Center).Label(shortModel(model.id))
 	active := model.id == c.pickerActiveModel().id
@@ -107,11 +118,7 @@ func (c *chatState) pickerRow(ctx *ui.Context, model modelChoice, index int, t g
 	}
 	row.OnClick(func() { c.chooseModel(model) })
 	row.Children(func() {
-		tint := providerTint(c.modelProviderOf(model))
-		tile := ui.Box(ctx).Size(16, 16).Radius(t.Radius.Xs).Background(tint.Alpha(0.16)).Center()
-		tile.Children(func() {
-			kit.Text(ctx, providerInitial(c.modelProviderOf(model)), 9).FontWeight(600).TextColor(tint)
-		})
+		providerMark(ctx, c.modelProviderOf(model), 16, t)
 		label := ui.Row(ctx).Grow(1).Gap(6).AlignItems(ui.Center)
 		label.Children(func() {
 			kit.Text(ctx, shortModel(model.id), t.Text.Xs).FontWeight(500).TextColor(t.Foreground).SingleLine().Ellipsis("…")
@@ -212,10 +219,7 @@ func (c *chatState) modelPickerView(ctx *ui.Context) {
 					c.frame()
 				})
 				button.Children(func() {
-					tint := providerTint(id)
-					ui.Box(ctx).Size(16, 16).Radius(t.Radius.Xs).Background(tint.Alpha(0.18)).Center().Children(func() {
-						kit.Text(ctx, providerInitial(id), 9).FontWeight(600).TextColor(tint)
-					})
+					providerMark(ctx, id, 16, t)
 				})
 			}
 		})

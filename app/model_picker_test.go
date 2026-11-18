@@ -87,6 +87,17 @@ func TestPickingAReasoningLevelChangesTheModel(t *testing.T) {
 		t.Fatalf("pick the high level: %v", err)
 	}
 	tester = frames(tester)
+	// The change goes out from a goroutine so the window never waits on the
+	// console; give it a bounded number of frames to land before asserting, so a
+	// loaded machine cannot turn the read into a flake.
+	sent := func() int {
+		mock.mu.Lock()
+		defer mock.mu.Unlock()
+		return len(mock.selected)
+	}
+	for frame := 0; frame < 200 && sent() == 0; frame++ {
+		tester.Frame()
+	}
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
 	if len(mock.selected) == 0 {

@@ -168,18 +168,6 @@ func codexActivityIcon(kind string) *ui.SVG {
 	return iconSpark
 }
 
-func runElapsed(run transcriptRun) time.Duration {
-	if len(run.messages) < 2 {
-		return 0
-	}
-	start := run.messages[0].CreatedAt
-	end := run.messages[len(run.messages)-1].CreatedAt
-	if start <= 0 || end <= start {
-		return 0
-	}
-	return time.Duration(end-start) * time.Millisecond
-}
-
 func commandFromArgs(args string) string {
 	trimmed := strings.TrimSpace(args)
 	if trimmed == "" {
@@ -207,30 +195,18 @@ func argsText(values []string) string {
 	return strings.Join(kept, "\n")
 }
 
-func codexWorkedFor(elapsed time.Duration) string {
-	seconds := int64(elapsed / time.Second)
-	if seconds <= 0 {
-		seconds = 1
-	}
-	hours := seconds / 3600
-	minutes := (seconds % 3600) / 60
-	rest := seconds % 60
-	switch {
-	case hours > 0:
-		return strconv.FormatInt(hours, 10) + "h " + strconv.FormatInt(minutes, 10) + "m"
-	case minutes > 0:
-		return strconv.FormatInt(minutes, 10) + "m " + strconv.FormatInt(rest, 10) + "s"
-	}
-	return strconv.FormatInt(rest, 10) + "s"
-}
-
 func (c *chatState) toolRow(ctx *ui.Context, run transcriptRun) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	key := runKey(run)
 	expanded := c.expanded[key]
+	active := runActive(run)
+	elapsed, timed := runElapsed(run, ctx.Now())
 	worked := ""
-	if elapsed := runElapsed(run); elapsed > 0 {
+	if timed {
 		worked = codexWorkedFor(elapsed)
+	}
+	if active {
+		ctx.After(time.Second)
 	}
 	label := "用时 " + worked
 	if worked == "" {
@@ -381,6 +357,7 @@ func (c *chatState) messageRow(ctx *ui.Context, message transcriptMessage) {
 	if !mine {
 		th := ctx.Theme()
 		ui.Column(ctx).FillWidth().Gap(th.Space(1)).Children(func() {
+			c.answerClockRow(ctx, message)
 			if markdownHasTable(message.Text) {
 				fade := ui.Box(ctx).FillWidth().MaskLinearGradient(chatRightFade())
 				fade.Children(func() { c.markdownMessage(ctx, message) })

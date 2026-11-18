@@ -2,6 +2,7 @@ package main
 
 import (
 	"sync"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -9,12 +10,14 @@ import (
 )
 
 type transcriptMessageSource struct {
-	Kind     string `json:"kind"`
-	Form     string `json:"form"`
-	Summary  string `json:"summary"`
-	Tool     string `json:"toolName"`
-	ToolCall string `json:"toolCallId"`
-	State    string `json:"state"`
+	Kind           string `json:"kind"`
+	Form           string `json:"form"`
+	Summary        string `json:"summary"`
+	Tool           string `json:"toolName"`
+	ToolCall       string `json:"toolCallId"`
+	State          string `json:"state"`
+	ConversationID string `json:"conversationId"`
+	TaskID         string `json:"taskId"`
 }
 
 type transcriptMessageData struct {
@@ -68,7 +71,8 @@ func groupRunsAt(messages []transcriptMessage, boundaries map[string]bool) []tra
 }
 
 func (c *chatState) runs() []transcriptRun {
-	return groupRunsAt(c.messages, c.runBoundaries)
+	spoken, _ := splitCollabMessages(c.messages)
+	return groupRunsAt(spoken, c.runBoundaries)
 }
 
 func runIdentity(run transcriptRun) any {
@@ -140,9 +144,15 @@ type chatState struct {
 	agentStatus     string
 	status          string
 	loading         bool
-	messages        []transcriptMessage
-	list            ui.ListState
-	md              markdown.Options
+	pollAt          time.Time
+	polling         bool
+	// answerClocks keeps the last stopwatch reading of an answer the window saw
+	// streaming, keyed by message ID, so a settled answer freezes instead of
+	// resetting.
+	answerClocks map[string]int64
+	messages     []transcriptMessage
+	list         ui.ListState
+	md           markdown.Options
 }
 
 func newChatState(address, token string) *chatState {

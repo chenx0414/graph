@@ -107,9 +107,11 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 		return false, nil
 	}
 	defer c.refreshMu.Unlock()
+	still := false
 	if source.version != "" {
 		if version, err := source.currentVersion(); err == nil {
-			if version == source.version {
+			still = version == source.version
+			if still && !c.transcriptInFlight() {
 				return false, nil
 			}
 			source.version = version
@@ -117,7 +119,10 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 	}
 	var newest int64
 	onUI(c.window, func() { newest = newestMessageSeq(c.messages) })
-	incremental := source.version != "" && newest > 0
+	// A transcript with a reply still in flight is read whole: a settled answer
+	// can move a message the console already counted, and the version alone is
+	// not worth trusting until nothing is running any more.
+	incremental := source.version != "" && newest > 0 && !still
 	path := "/api/conversations/" + source.id + "?questions=open&lean=1&limit=" + itoa64(initialMessagePageSize)
 	if incremental {
 		path += "&after=" + itoa64(newest)
@@ -382,6 +387,17 @@ func (source *nodeChatSource) Send(c *chatState, text string) error {
 	body := map[string]string{"text": text, "requestId": requestID("node-chat")}
 	_, err := source.api.post(source.path("/messages"), body)
 	return err
+}
+
+// transcriptInFlight reports whether anything in the transcript is still on its
+// way: a streaming answer, a queued turn or a tool that has not settled yet.
+func (c *chatState) transcriptInFlight() bool {
+	for _, message := range c.messages {
+		if messageActive(message) || messageStreaming(message) || messageQueued(message) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *shellState) activeChatCapabilities() chatCapabilities {

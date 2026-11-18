@@ -218,6 +218,7 @@ func (c *chatState) frame() {
 
 func (c *chatState) view(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
+	c.keepFresh(ctx)
 	ui.Column(ctx).Fill().Children(func() {
 		c.transcript(ctx)
 		if c.status != "" && c.status != chatWaitStatus && !c.loading {
@@ -243,14 +244,22 @@ func (c *chatState) view(ctx *ui.Context) {
 
 func (c *chatState) transcript(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
-	if len(c.messages) == 0 {
+	spoken, collab := splitCollabMessages(c.messages)
+	if len(collab) > 0 {
+		c.collabCard(ctx, collab)
+	}
+	if len(spoken) == 0 {
 		if c.loading {
 			skeletonChatTranscript(ctx)
 			return
 		}
+		message, hint := "还没有对话", "在下面输入第一条消息"
+		if len(collab) > 0 {
+			message, hint = "还没有和你说话的记录", "Agent 之间的协作在上面的卡片里"
+		}
 		ui.Column(ctx).Grow(1).Center().Children(func() {
-			kit.Text(ctx, "还没有对话", t.Text.Base).TextColor(t.Muted)
-			kit.Text(ctx, "在下面输入第一条消息", t.Text.Sm).TextColor(t.Muted)
+			kit.Text(ctx, message, t.Text.Base).TextColor(t.Muted)
+			kit.Text(ctx, hint, t.Text.Sm).TextColor(t.Muted)
 		})
 		return
 	}
@@ -263,17 +272,20 @@ func (c *chatState) transcript(ctx *ui.Context) {
 		}
 		kit.Text(ctx, marker, t.Text.Xs).TextColor(t.Muted).Padding(0, 0, gap, 0)
 	}
-	runs := c.runs()
-	c.list.Key = func(row int) any { return runIdentity(runs[row]) }
+	rows := chatFoldRows(c.runs())
+	c.list.Key = func(row int) any { return rows[row].key }
 	fade := ui.Box(ctx).Grow(1).FillWidth()
 	fade.Children(func() {
-		list := ui.List(ctx, &c.list, len(runs), func(index int) {
-			run := runs[index]
-			if run.tools {
-				c.toolRow(ctx, run)
-				return
+		list := ui.List(ctx, &c.list, len(rows), func(index int) {
+			row := rows[index]
+			switch row.kind {
+			case "tools":
+				c.toolRow(ctx, row.run)
+			case "fold":
+				c.foldRow(ctx, row)
+			default:
+				c.messageRow(ctx, row.run.messages[0])
 			}
-			c.messageRow(ctx, run.messages[0])
 		})
 		list.Grow(1).Padding(0, th.Space(4), th.Space(4), th.Space(4)).Gap(th.Space(3))
 		list.MaskLinearGradient(ui.LinearGradient{Angle: 180, Stops: []ui.GradientStop{

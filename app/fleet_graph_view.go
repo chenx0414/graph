@@ -134,7 +134,7 @@ func (s *shellState) fleetTopologyCard(ctx *ui.Context, data *fleetTopologyData,
 	var duration int64
 	if agent != nil {
 		steps = agent.Requests
-		duration = fleetAgentDurationMs(*agent)
+		duration = fleetAgentClock(ctx, *agent)
 	}
 	card.Children(func() {
 		ui.Row(ctx).FillWidth().Gap(th.Space(0.75)).AlignItems(ui.Center).Children(func() {

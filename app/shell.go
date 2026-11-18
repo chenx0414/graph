@@ -19,6 +19,8 @@ type shellState struct {
 	activeID         string
 	chatMu           sync.Mutex
 	chat             *chatState
+	chats            map[string]*chatState
+	chatOrder        []string
 	settings         *settingsState
 	usage            *usageState
 	resources        *resourceState
@@ -117,19 +119,24 @@ func (s *shellState) probeRowsVersion() string {
 	return parsed.Version
 }
 
-func (s *shellState) loadRows() bool {
+// fetchRows reads the conversation list without touching shell state, so a
+// background poll can ask the console and hand the result to the UI thread.
+func (s *shellState) fetchRows() (list []conversationSummary, status string, ok bool) {
 	payload, err := s.api.get("/api/conversations")
 	if err != nil {
-		s.status = "读不到会话列表：" + err.Error()
-		s.broken = true
-		return false
+		return nil, "读不到会话列表：" + err.Error(), false
 	}
-	list, err := parseConversations(payload)
+	list, err = parseConversations(payload)
 	if err != nil {
-		s.status = "会话列表不是预期的 JSON：" + err.Error()
-		s.broken = true
-		return false
+		return nil, "会话列表不是预期的 JSON：" + err.Error(), false
 	}
+	return list, "", true
+}
+
+// applyRows puts a fetched list on screen. It belongs on the UI thread: a render
+// reads s.conversations, so rebuilding it from a poll goroutine would let the
+// sidebar see a half rebuilt list (and the list state index past its end).
+func (s *shellState) applyRows(list []conversationSummary) bool {
 	s.supervisorID = ""
 	s.conversations = nil
 	for _, conversation := range list {
@@ -149,6 +156,20 @@ func (s *shellState) loadRows() bool {
 	}
 	s.status = ""
 	return true
+}
+
+func (s *shellState) failRows(status string) bool {
+	s.status = status
+	s.broken = true
+	return false
+}
+
+func (s *shellState) loadRows() bool {
+	list, status, ok := s.fetchRows()
+	if !ok {
+		return s.failRows(status)
+	}
+	return s.applyRows(list)
 }
 
 func (s *shellState) load() {
@@ -257,29 +278,49 @@ func (s *shellState) selectConversation(id string) {
 	if state == nil {
 		return
 	}
-	if s.window != nil {
-		s.ensureFleet()
-		s.ensureTrajectory()
-		s.ensureBoardPageData()
-		api := s.api
-		go func() {
-			loaded := newChatState(api.address, api.token)
-			loaded.window = s.window
-			loaded.providerOn = s.providersEnabled
-			loaded.open(id)
-			s.chatMu.Lock()
-			if s.activeID != id {
-				s.chatMu.Unlock()
-				return
-			}
-			s.chat = loaded
-			s.chatMu.Unlock()
-			s.ensureBoardPageData()
-			s.frame()
-		}()
+	if s.window == nil && !s.hasCachedChat(id) {
+		state.open(id)
+		s.rememberChat(state)
+		s.frame()
 		return
 	}
-	state.open(id)
+	s.ensureFleet()
+	s.ensureTrajectory()
+	s.ensureBoardPageData()
+	go s.loadConversationChat(id)
+}
+
+// loadConversationChat fills a conversation in after the switch already painted
+// it, so the window never waits for the console: a conversation that is on hand
+// keeps what it shows and takes the newest replies when they land, and one that
+// is not is read into a fresh chat and swapped in once it has content.
+func (s *shellState) loadConversationChat(id string) {
+	s.chatMu.Lock()
+	current := s.chat
+	cached := s.cachedChatLocked(id)
+	s.chatMu.Unlock()
+	if current == nil || current.active != id {
+		return
+	}
+	if cached != nil {
+		cached.refresh()
+		s.rememberChat(cached)
+		s.frame()
+		return
+	}
+	loaded := newChatState(s.api.address, s.api.token)
+	loaded.window = s.window
+	loaded.providerOn = s.providersEnabled
+	loaded.open(id)
+	s.chatMu.Lock()
+	if s.activeID != id || s.chat != current {
+		s.chatMu.Unlock()
+		return
+	}
+	s.chat = loaded
+	s.chatMu.Unlock()
+	s.rememberChat(loaded)
+	s.ensureBoardPageData()
 	s.frame()
 }
 
@@ -305,9 +346,15 @@ func (s *shellState) refresh() bool {
 	if changed {
 		onUI(s.window, func() { s.refreshTrajectory() })
 	}
-	if reload && s.loadRows() {
-		s.rowsVersion = version
-		changed = true
+	if reload {
+		list, status, ok := s.fetchRows()
+		if ok {
+			s.rowsVersion = version
+			onUI(s.window, func() { s.applyRows(list) })
+			changed = true
+		} else {
+			onUI(s.window, func() { s.failRows(status) })
+		}
 	}
 	return changed
 }

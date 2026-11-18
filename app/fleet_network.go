@@ -119,7 +119,7 @@ func (s *shellState) fleetAgentCard(ctx *ui.Context, agent fleetAgent, width, he
 		s.fleetUsageBar(ctx, agent, accent)
 		steps := fleetAgentSteps(agent)
 		share := s.fleet.shares[agent.ID]
-		bottom := strconv.Itoa(steps) + " 步 · " + formatTrajectoryCompactDuration(fleetAgentDurationMs(agent)) + " · 占比 " + formatTrajectoryPercent(share)
+		bottom := strconv.Itoa(steps) + " 步 · " + formatTrajectoryCompactDuration(fleetAgentClock(ctx, agent)) + " · 占比 " + formatTrajectoryPercent(share)
 		kit.Text(ctx, bottom, t.Text.Xs).TextColor(t.Muted).Grow(1).SingleLine().Ellipsis("…")
 	})
 	return card
