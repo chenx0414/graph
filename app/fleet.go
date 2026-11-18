@@ -137,7 +137,7 @@ type fleetState struct {
 	netKey         string
 	accents        map[string]ui.Color
 	swimQuery      string
-	swimNewest     bool
+	swimOldest     bool
 	swimPick       string
 	shares         map[string]float64
 }

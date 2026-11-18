@@ -58,7 +58,9 @@
   - `app/fleet_page.go`：编队页布局改为「KPI / 网络+任务 / 协作卡通栏 / 事件+产物」。
   - 删除聊天侧的 `chat_collab_swimlane.go`、`collab_swimlane.go` 及其测试；`splitCollabMessages` 保留。
 - **用户可见验收点**：编队页出现通栏泳道卡；泳道数=参与 Agent 数；同 Agent 事件同泳道；
-  发送/接收有连线；时间列按最早/最新有序；点事件看内容；搜索只筛事件并保留两端泳道；空数据不造泳道。
+  发送/接收有带箭头的连线（箭头指向接收方，末端有落点圆点）；时间列默认最新在左、可切最早在左；
+  最多渲染最近 100 条并标出「最近 100 条 · 共 N 条」；点事件跳转到背着这条事件的消息并高亮；
+  搜索只筛事件并保留两端泳道；空数据不造泳道。
 - **验证命令**：`go -C app test -run 'TestTheCollaborationCard' ./...`；`go -C app test ./...`
 - **DSH 复用与偏差**：见 `docs/DSH_COLLAB_CARD_ANALYSIS.md` 与本文「DSH 偏差」一节。
 - **状态**：DONE，真机编队页可见。
@@ -133,6 +135,16 @@ Agent 消息既不进对话流也不进聊天窗；协作信息只在编队页�
 - **真机**：captain 15:39 执行 `graphbuild app` + install 成功，**App health 200**；打开「编队」页可见通栏泳道卡
   （真实数据 200/200 条记录 · 3 条泳道，三条泳道各自显示模型/tokens·成本/任务·事件数，右侧时间列与 marker 正常）。
 
+## 第 3 条的后续三点（captain 直接改）
+
+1. **箭头**：`fleetSwimArrow` 计算 sender 行中心到 receiver 行中心，画竖线 + 三角箭头（`FillPath`），
+   箭头尖端落在接收方泳道，末端补一个落点圆点。方向由事件数据决定，不猜。
+2. **点事件跳会话**：`shellState.openFleetSwimMark` 优先打开接收方（没有接收方时打开发送方）的会话，
+   `chatState.jumpToMessage` 先按事件正文匹配消息，再按时间戳 5 秒内兜底；命中后展开所在折叠并
+   `list.ScrollTo(row, Center)`，该消息带高亮底与「定位到这条消息」标签。
+3. **只看最近 100 条 + 最新在左**：`fleetSwimMarkLimit = 100`，按时间排序后保留最新 100 条，
+   表头显示「最近 100 条 · 共 N+ 条 · K 条泳道」；默认「最新」在左，可切「最早」。
+
 ## DSH 偏差（第 3 条，如实列出）
 
 - DSH 里没有单一「泳道 + 时间列 + 箭头」组件：它是 TeamBoard（Agent/任务行）与 stats 表格（固定列宽、
@@ -142,7 +154,7 @@ Agent 消息既不进对话流也不进聊天窗；协作信息只在编队页�
 - 时间列：DSH 用 CSS 百分比列宽 + `font-variant-numeric: tabular-nums`；Go UI 没有 tabular-nums，
   用等宽字体近似；列宽固定 48px，与 DSH 的窄列一致。
 - 连线：DSH 无箭头绘制代码，语义来自 `send_message`/`team/message/*.jsonl` 的发送方-接收方记录；
-  Graph 侧新增竖向连线 + 端帽矩形，颜色取发送泳道 accent。
+  Graph 侧新增竖向连线 + 三角箭头 + 落点圆点，颜色取发送泳道 accent。
 - marker：DSH 用 `+`/勾选图标；我们用 `+`（委派/派生）、`✓`（结果/投递）、`?`（问题）三个字符，
   尺寸 16px、圆角 4px、实心 accent 底 + 白色符号。
 - 滚动：DSH 横向滚动 + 顶部固定泳道列；Graph 用 `ui.ScrollHorizontal`，泳道栏固定、时间列滚动。

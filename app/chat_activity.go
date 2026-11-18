@@ -349,6 +349,17 @@ func chatRightFade() ui.LinearGradient {
 }
 
 func (c *chatState) messageRow(ctx *ui.Context, message transcriptMessage) {
+	if message.ID != "" && message.ID == c.jumpMessageID {
+		t, th := gwtheme.Of(ctx), ctx.Theme()
+		box := ui.Column(ctx).FillWidth().Padding(th.Space(1), th.Space(1)).
+			Radius(t.Radius.Lg).Background(t.Highlight.Alpha(0.28)).Label("定位到这条消息")
+		box.Children(func() { c.plainMessageRow(ctx, message) })
+		return
+	}
+	c.plainMessageRow(ctx, message)
+}
+
+func (c *chatState) plainMessageRow(ctx *ui.Context, message transcriptMessage) {
 	if message.Data.Source.Form == "notice" || message.Data.Source.Kind == "tool_settled" {
 		c.noticeRow(ctx, message)
 		return

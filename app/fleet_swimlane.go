@@ -13,7 +13,36 @@ const (
 	fleetSwimHeadHeight  = 22
 	fleetSwimRailWidth   = 240
 	fleetSwimMarkSize    = 16
+	fleetSwimMarkLimit   = 100
+	fleetSwimArrowSize   = 7
 )
+
+// fleetSwimArrow is one sender -> receiver connector: TailY sits on the sender
+// row, TipY on the receiver row, so the arrowhead always points at the agent
+// the event went to.
+type fleetSwimArrow struct {
+	Column int
+	From   int
+	To     int
+	X      float32
+	TailY  float32
+	TipY   float32
+	Size   float32
+}
+
+func (arrow fleetSwimArrow) Downward() bool { return arrow.TipY > arrow.TailY }
+
+func fleetSwimArrowFor(mark fleetSwimMark, laneAt func(int) float32, x float32) fleetSwimArrow {
+	return fleetSwimArrow{
+		Column: mark.Column, From: mark.From, To: mark.To, X: x,
+		TailY: laneAt(mark.From), TipY: laneAt(mark.To), Size: fleetSwimArrowSize,
+	}
+}
+
+func fleetSwimArrowLayout(from, to, column int, head, laneHeight, top, x float32) fleetSwimArrow {
+	laneAt := func(lane int) float32 { return top + head + float32(lane)*laneHeight + laneHeight/2 }
+	return fleetSwimArrowFor(fleetSwimMark{Column: column, From: from, To: to}, laneAt, x)
+}
 
 type fleetSwimLane struct {
 	Agent  fleetAgent
@@ -38,11 +67,13 @@ type fleetSwimMark struct {
 }
 
 type fleetSwimlane struct {
-	Lanes   []fleetSwimLane
-	Columns []fleetSwimColumn
-	Marks   []fleetSwimMark
-	Records int
-	Total   int
+	Lanes     []fleetSwimLane
+	Columns   []fleetSwimColumn
+	Marks     []fleetSwimMark
+	Records   int
+	Hidden    int
+	Total     int
+	Truncated bool
 }
 
 func buildFleetSwimlane(data *fleetSnapshot, query string, newest bool) fleetSwimlane {
@@ -51,6 +82,7 @@ func buildFleetSwimlane(data *fleetSnapshot, query string, newest bool) fleetSwi
 		return model
 	}
 	model.Total = len(data.Events)
+	model.Truncated = data.Truncated
 	needle := strings.ToLower(strings.TrimSpace(query))
 	index := fleetIndex(data)
 	named := func(agent fleetAgent) string {
@@ -69,12 +101,23 @@ func buildFleetSwimlane(data *fleetSnapshot, query string, newest bool) fleetSwi
 		return strings.Contains(strings.ToLower(event.Text), needle) || strings.Contains(strings.ToLower(event.Type), needle)
 	}
 	kept := make([]fleetEvent, 0, len(data.Events))
-	participants := map[string]bool{}
 	for _, event := range data.Events {
-		if !matches(event) {
-			continue
+		if matches(event) {
+			kept = append(kept, event)
 		}
-		kept = append(kept, event)
+	}
+	sort.SliceStable(kept, func(i, j int) bool {
+		if kept[i].At != kept[j].At {
+			return kept[i].At < kept[j].At
+		}
+		return kept[i].ID < kept[j].ID
+	})
+	if len(kept) > fleetSwimMarkLimit {
+		model.Hidden = len(kept) - fleetSwimMarkLimit
+		kept = kept[len(kept)-fleetSwimMarkLimit:]
+	}
+	participants := map[string]bool{}
+	for _, event := range kept {
 		participants[event.AgentID] = true
 		if event.TargetAgentID != "" {
 			participants[event.TargetAgentID] = true

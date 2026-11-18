@@ -139,6 +139,7 @@ type chatState struct {
 	listLast        int
 	boundaryMu      sync.RWMutex
 	runBoundaries   map[string]bool
+	jumpMessageID   string
 	historySettle   int
 	historyLoading  bool
 	noMoreHistory   bool

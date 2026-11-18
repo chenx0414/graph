@@ -20,7 +20,7 @@ func (s *shellState) panelFleetCollaboration(ctx *ui.Context) {
 	if data == nil {
 		return
 	}
-	model := buildFleetSwimlane(data, s.fleet.swimQuery, s.fleet.swimNewest)
+	model := buildFleetSwimlane(data, s.fleet.swimQuery, !s.fleet.swimOldest)
 	if model.Total == 0 {
 		kit.Text(ctx, "还没有跨 Agent 协作事件。", t.Text.Sm).TextColor(t.Muted)
 		return
@@ -28,14 +28,14 @@ func (s *shellState) panelFleetCollaboration(ctx *ui.Context) {
 	ui.Row(ctx).FillWidth().Gap(th.Space(1.5)).AlignItems(ui.Center).Children(func() {
 		ui.Icon(ctx, iconNetwork).Size(gwtheme.IconSm, gwtheme.IconSm).TextColor(t.Muted)
 		kit.Text(ctx, "跨 Agent 协作", t.Text.Sm).FontWeight(600).TextColor(t.Foreground)
-		kit.Text(ctx, strconv.Itoa(model.Records)+"/"+strconv.Itoa(model.Total)+" 条记录 · "+strconv.Itoa(len(model.Lanes))+" 条泳道", t.Text.Xs).TextColor(t.Muted)
+		kit.Text(ctx, fleetSwimRecordLine(model), t.Text.Xs).TextColor(t.Muted)
 		ui.Spacer(ctx)
-		fleetChip(ctx, "最早", "最早", !s.fleet.swimNewest, func() {
-			s.fleet.swimNewest = false
+		fleetChip(ctx, "最新", "最新", !s.fleet.swimOldest, func() {
+			s.fleet.swimOldest = false
 			s.frame()
 		})
-		fleetChip(ctx, "最新", "最新", s.fleet.swimNewest, func() {
-			s.fleet.swimNewest = true
+		fleetChip(ctx, "最早", "最早", s.fleet.swimOldest, func() {
+			s.fleet.swimOldest = true
 			s.frame()
 		})
 		input := kit.Input(ctx, &s.fleet.swimQuery, kit.InputOpts{Placeholder: "搜索 Agent…", Flat: true})
@@ -109,12 +109,10 @@ func (s *shellState) fleetSwimGrid(ctx *ui.Context, t gwtheme.Tokens, model flee
 					}
 					x := r.X + float32(mark.Column)*columnWidth + columnWidth/2
 					color := model.Lanes[mark.From].Accent
-					from, to := center(mark.From), center(mark.To)
-					if from > to {
-						from, to = to, from
-					}
-					p.Fill(ui.Rect{X: x - 1, Y: from, W: 2, H: to - from}, color.Alpha(0.6), 1)
-					p.Fill(ui.Rect{X: x - 3, Y: from + (to - from) - 5, W: 6, H: 5}, color.Alpha(0.9), 1.5)
+					arrow := fleetSwimArrowFor(mark, center, x)
+					p.Fill(ui.Rect{X: x - 1, Y: minf(arrow.TailY, arrow.TipY), W: 2, H: absf(arrow.TipY - arrow.TailY)}, color.Alpha(0.55), 1)
+					p.Fill(ui.Rect{X: x - 2, Y: arrow.TipY - 2, W: 4, H: 4}, color.Alpha(0.85), 2)
+					drawFleetSwimArrowhead(p, arrow, color)
 				}
 			})
 			stage.Children(func() {
@@ -148,6 +146,7 @@ func (s *shellState) fleetSwimGrid(ctx *ui.Context, t gwtheme.Tokens, model flee
 					chip.Tooltip(fleetSwimMarkLabel(mark, model) + " · " + mark.Text)
 					chip.OnClick(func() {
 						s.fleet.swimPick = mark.ID
+						s.openFleetSwimMark(mark, model)
 						s.frame()
 					})
 					if s.fleet.swimPick == mark.ID {
@@ -161,6 +160,66 @@ func (s *shellState) fleetSwimGrid(ctx *ui.Context, t gwtheme.Tokens, model flee
 			})
 		})
 	})
+}
+
+func fleetSwimRecordLine(model fleetSwimlane) string {
+	lanes := strconv.Itoa(len(model.Lanes)) + " 条泳道"
+	if model.Hidden > 0 {
+		total := strconv.Itoa(model.Total)
+		if model.Truncated {
+			total += "+"
+		}
+		return "最近 " + strconv.Itoa(model.Records) + " 条 · 共 " + total + " 条 · " + lanes
+	}
+	return strconv.Itoa(model.Records) + "/" + strconv.Itoa(model.Total) + " 条记录 · " + lanes
+}
+
+func absf(v float32) float32 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+func minf(a, b float32) float32 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func drawFleetSwimArrowhead(p *ui.Painter, arrow fleetSwimArrow, color ui.Color) {
+	dir := float32(-1)
+	if arrow.Downward() {
+		dir = 1
+	}
+	tip := arrow.TipY - dir*arrow.Size*0.9
+	path := (&ui.Path{}).MoveTo(arrow.X, tip).
+		LineTo(arrow.X-arrow.Size/2, tip-dir*arrow.Size).
+		LineTo(arrow.X+arrow.Size/2, tip-dir*arrow.Size).Close()
+	p.FillPath(path, color.Alpha(0.95))
+}
+
+func (s *shellState) openFleetSwimMark(mark fleetSwimMark, model fleetSwimlane) {
+	if mark.From < 0 || mark.From >= len(model.Lanes) {
+		return
+	}
+	candidates := []fleetAgent{}
+	if mark.To >= 0 && mark.To < len(model.Lanes) && mark.To != mark.From {
+		candidates = append(candidates, model.Lanes[mark.To].Agent)
+	}
+	candidates = append(candidates, model.Lanes[mark.From].Agent)
+	for _, agent := range candidates {
+		s.openFleetAgentChat(agent)
+		chat := s.active()
+		if chat == nil {
+			continue
+		}
+		if chat.jumpToMessage(mark.At, mark.Text) {
+			chat.frame()
+			return
+		}
+	}
 }
 
 func (s *shellState) fleetSwimPicked(ctx *ui.Context, t gwtheme.Tokens, model fleetSwimlane) {
