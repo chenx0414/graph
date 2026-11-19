@@ -28,9 +28,7 @@ func (s *shellState) windowFloorWidth() int {
 }
 
 func (s *shellState) standardPageLayouts() []boardNode {
-	layouts := []boardNode{defaultBoardLayout()}
-	kinds := trajectoryPageKinds()
-	layouts = append(layouts, trajectoryPageLayout(kinds))
+	layouts := []boardNode{defaultBoardLayout(), trajectoryPageLayout(trajectoryPageKinds())}
 	for _, kind := range boardPanelAllKinds() {
 		if kind == "context-overview" || kind == "agent-network" || kind == "fleet-collaboration" {
 			continue
@@ -38,6 +36,27 @@ func (s *shellState) standardPageLayouts() []boardNode {
 		layouts = append(layouts, boardNode{Kind: "panel", PanelID: kind})
 	}
 	return layouts
+}
+
+func (s *shellState) standardLayoutMinWidth(ctx *ui.Context, node *boardNode) float32 {
+	switch node.Kind {
+	case "panel":
+		return s.boardPanelMinWidth(ctx, &boardPanel{ID: node.PanelID, Kind: node.PanelID})
+	case "split":
+		if node.Axis == "row" {
+			total := float32(0)
+			for index := range node.Children {
+				total += s.standardLayoutMinWidth(ctx, &node.Children[index].Node)
+			}
+			return total
+		}
+		widest := float32(0)
+		for index := range node.Children {
+			widest = max(widest, s.standardLayoutMinWidth(ctx, &node.Children[index].Node))
+		}
+		return widest
+	}
+	return boardDefaultMinWidth
 }
 
 func (s *shellState) trackWindowFloor(ctx *ui.Context) {
@@ -48,7 +67,7 @@ func (s *shellState) trackWindowFloor(ctx *ui.Context) {
 	widest := float32(0)
 	layouts := s.standardPageLayouts()
 	for index := range layouts {
-		widest = max(widest, s.boardNodeMinWidth(ctx, &layouts[index]))
+		widest = max(widest, s.standardLayoutMinWidth(ctx, &layouts[index]))
 	}
 	s.windowFloor = max(whiteboardFloorFloor, widest+chrome)
 	if s.window != nil {

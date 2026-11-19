@@ -294,13 +294,13 @@ func TestSlashNewStartsAFreshAgentContext(t *testing.T) {
 	}
 	tester.Key(0, ui.KeyEnter)
 	deadline := time.Now().Add(2 * time.Second)
-	for len(requests) == 0 && time.Now().Before(deadline) {
+	for state.status != "已开启新的 Agent 上下文" && time.Now().Before(deadline) {
 		tester.Frame()
-	}
-	if len(requests) == 0 {
-		t.Fatalf("the command resets the agent context, status %q", state.status)
 	}
 	if state.status != "已开启新的 Agent 上下文" {
 		t.Fatalf("the command reports the fresh context, status %q", state.status)
+	}
+	if len(requests) == 0 {
+		t.Fatalf("the command resets the agent context, status %q", state.status)
 	}
 }
