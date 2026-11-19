@@ -196,6 +196,9 @@ jobs:
           cache-dependency-path: |
             backend/go.sum
             app/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: 选择范围（PR 只跑 diff 触发的包，main 跑全量）
         id: scope
         run: |

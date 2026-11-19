@@ -46,6 +46,9 @@ jobs:
           cache-dependency-path: |
             backend/go.sum
             app/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: 全量测试（不跳过任何用例）
         run: go -C ${{ matrix.module }} test -count=1 ./...
       - name: 保留日志

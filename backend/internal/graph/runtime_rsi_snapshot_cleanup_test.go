@@ -62,6 +62,9 @@ func TestStaleSnapshotWhoseHolderIsGoneIsReaped(t *testing.T) {
 }
 
 func TestAsyncFullRunKillsTheWholeProcessGroupOnTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("a real node process group and its timeout belong to the slow layer")
+	}
 	root := t.TempDir()
 	pidFile := filepath.Join(root, "grandchild.pid")
 	t.Setenv("GRAPH_TEST_GRANDCHILD_PID_FILE", pidFile)
