@@ -9,6 +9,8 @@ const boardLongFlowMinWidth = float32(240)
 
 const boardDefaultMinWidth = float32(280)
 
+const boardCollaborationMinHeight = float32(260)
+
 func measuredWidth(ctx *ui.Context, text string, size float32, weight int) float32 {
 	if text == "" {
 		return 0
@@ -118,6 +120,8 @@ func (s *shellState) boardPanelMinHeight(ctx *ui.Context, panel *boardPanel) flo
 	switch panel.Kind {
 	case "context-overview":
 		return s.contextOverviewMinHeight(ctx)
+	case "fleet-collaboration":
+		return boardCollaborationMinHeight
 	}
 	return boardMinPaneHeight
 }

@@ -92,3 +92,18 @@ func TestTheContextCardKeepsItsLegendInsideAtEveryWindowSize(t *testing.T) {
 		}
 	}
 }
+
+func TestTheCollaborationCardKeepsRoomForBothLanesAtEveryWindowSize(t *testing.T) {
+	for _, size := range [][2]int{{1598, 928}, {1440, 900}, {1280, 800}} {
+		state := contextOverviewShell(t, contextOverviewSettings)
+		tester := frames(ui.NewTester(state.view, size[0], size[1]))
+		card, ok := tester.Find("跨 Agent 协作窗口")
+		if !ok {
+			t.Fatalf("%dx%d: the collaboration card never rendered, texts %q", size[0], size[1], tester.Texts())
+		}
+		if card.H < boardCollaborationMinHeight {
+			t.Fatalf("%dx%d: the collaboration card is %0.1f high, want at least %.0f for its two lanes",
+				size[0], size[1], card.H, boardCollaborationMinHeight)
+		}
+	}
+}
