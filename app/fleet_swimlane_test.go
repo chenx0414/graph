@@ -279,3 +279,14 @@ func TestTheCollaborationCardHidesLanesWithoutArrows(t *testing.T) {
 		t.Fatalf("the 全部 toggle keeps every lane, got %+v", all.Lanes)
 	}
 }
+
+func TestTheCollaborationCardShowsNothingWhenOnlyNoiseIsLeft(t *testing.T) {
+	data := fleetSnapshot{Agents: []fleetAgent{{ID: "p1", Kind: "project", Name: "项目"}}, Events: []fleetEvent{
+		{ID: "e1", At: 10, Type: "message.tool", AgentID: "p1", Text: "跑工具"},
+		{ID: "e2", At: 20, Type: "provider.transport", AgentID: "p1", Text: "传输"},
+	}}
+	model := buildFleetSwimlane(&data, "", true, false)
+	if model.Records != 0 || len(model.Marks) != 0 || len(model.Lanes) != 0 {
+		t.Fatalf("no collaboration record means an empty card, got %+v", model)
+	}
+}

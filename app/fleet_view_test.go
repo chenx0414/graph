@@ -326,19 +326,19 @@ func TestClickingAFleetArtifactOpensTheSharedArtifactsPanel(t *testing.T) {
 	}
 }
 
-func TestTheFleetCollaborationCardDropsItsSortAndSearchControls(t *testing.T) {
+func TestTheFleetCollaborationCardDropsItsControls(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
 	tester := openFleetTester(t, state)
 	if !tester.HasText("3 条协作 · 4 条泳道") {
 		t.Fatalf("the card counts every collaboration record and lane, texts %q", tester.Texts())
 	}
-	for _, gone := range []string{"最新", "最早", "搜索 Agent"} {
+	for _, gone := range []string{"最新", "最早", "搜索 Agent", "只看协作", "全部事件"} {
 		if tester.HasText(gone) {
 			t.Fatalf("the collaboration card keeps %q, texts %q", gone, tester.Texts())
 		}
 	}
-	if !tester.HasText("只看协作") || !tester.HasText("全部事件") {
-		t.Fatalf("the record filters stay, texts %q", tester.Texts())
+	if !tester.HasText("3 条协作 · 4 条泳道") {
+		t.Fatalf("the card defaults to the collaboration-only record line, texts %q", tester.Texts())
 	}
 }
 

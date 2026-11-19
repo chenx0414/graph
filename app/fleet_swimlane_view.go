@@ -20,8 +20,7 @@ func (s *shellState) panelFleetCollaboration(ctx *ui.Context) {
 	if data == nil {
 		return
 	}
-	model := buildFleetSwimlane(data, s.fleet.swimQuery, !s.fleet.swimOldest, s.fleet.swimAll)
-	model.All = s.fleet.swimAll
+	model := buildFleetSwimlane(data, "", true, false)
 	if model.Total == 0 {
 		kit.Text(ctx, "还没有跨 Agent 协作事件。", t.Text.Sm).TextColor(t.Muted)
 		return
@@ -30,17 +29,6 @@ func (s *shellState) panelFleetCollaboration(ctx *ui.Context) {
 		ui.Icon(ctx, iconNetwork).Size(gwtheme.IconSm, gwtheme.IconSm).TextColor(t.Muted)
 		kit.Text(ctx, "跨 Agent 协作", t.Text.Sm).FontWeight(600).TextColor(t.Foreground)
 		kit.Text(ctx, fleetSwimRecordLine(model), t.Text.Xs).TextColor(t.Muted)
-		ui.Spacer(ctx)
-		if model.Directional > 0 {
-			fleetChip(ctx, "协作", "只看协作", !s.fleet.swimAll, func() {
-				s.fleet.swimAll = false
-				s.frame()
-			})
-			fleetChip(ctx, "全部", "全部事件", s.fleet.swimAll, func() {
-				s.fleet.swimAll = true
-				s.frame()
-			})
-		}
 	})
 	if len(model.Marks) == 0 {
 		kit.Text(ctx, "没有匹配的协作事件。", t.Text.Sm).TextColor(t.Muted)
@@ -164,15 +152,7 @@ func (s *shellState) fleetSwimGrid(ctx *ui.Context, t gwtheme.Tokens, model flee
 }
 
 func fleetSwimRecordLine(model fleetSwimlane) string {
-	lanes := strconv.Itoa(len(model.Lanes)) + " 条泳道"
-	if model.All {
-		total := strconv.Itoa(model.Total)
-		if model.Truncated {
-			total += "+"
-		}
-		return strconv.Itoa(model.Records) + "/" + total + " 条记录 · " + lanes
-	}
-	return strconv.Itoa(model.Records) + " 条协作 · " + lanes
+	return strconv.Itoa(model.Records) + " 条协作 · " + strconv.Itoa(len(model.Lanes)) + " 条泳道"
 }
 
 func absf(v float32) float32 {

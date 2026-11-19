@@ -136,9 +136,6 @@ type fleetState struct {
 	netScroll      ui.ScrollState
 	netKey         string
 	accents        map[string]ui.Color
-	swimQuery      string
-	swimOldest     bool
-	swimAll        bool
 	swimPick       string
 	shares         map[string]float64
 }

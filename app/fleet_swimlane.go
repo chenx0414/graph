@@ -71,7 +71,6 @@ type fleetSwimlane struct {
 	Columns     []fleetSwimColumn
 	Marks       []fleetSwimMark
 	Records     int
-	All         bool
 	Directional int
 	Rescued     int
 	Hidden      int
@@ -127,7 +126,7 @@ func buildFleetSwimlane(data *fleetSnapshot, query string, newest bool, all bool
 	}
 	lanes := kept
 	shown := kept
-	if !all && model.Directional > 0 {
+	if !all {
 		shown = make([]fleetEvent, 0, model.Directional)
 		for _, event := range kept {
 			if fleetSwimDirectional(event) {
