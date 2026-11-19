@@ -148,3 +148,29 @@ func TestTheWhiteboardFloorFitsEveryStandardPage(t *testing.T) {
 		}
 	}
 }
+
+func TestTheWhiteboardTabsStayInsideTheirColumnAtTheWindowFloor(t *testing.T) {
+	probe, _ := paneProbeShell(t, 1440, 900, "")
+	width, height := probe.windowFloorWidth(), windowFloorHeight
+	state := newShellState("http://127.0.0.1:1", "")
+	for _, kind := range []string{"trajectory", "fleet", "capabilities", "resources", "providers", "models", "tasks"} {
+		state.openModule(kind)
+	}
+	tester := frames(ui.NewTester(state.view, width, height))
+	if len(state.board.pages) < 7 {
+		t.Fatalf("the probe needs every tab open, pages %d", len(state.board.pages))
+	}
+	strip, ok := tester.Find("白板标题")
+	if !ok {
+		t.Fatalf("the whiteboard title band never laid out, texts %q", tester.Texts())
+	}
+	for _, page := range state.board.pages {
+		tab, ok := tester.Find("标签页 " + page.Title)
+		if !ok {
+			t.Fatalf("%q never laid out at the floor, texts %q", page.Title, tester.Texts())
+		}
+		if tab.X < strip.X-0.5 || tab.X+tab.W > strip.X+strip.W+0.5 {
+			t.Fatalf("%q runs out of the whiteboard column at the floor: tab %+v strip %+v", page.Title, tab, strip)
+		}
+	}
+}
