@@ -192,8 +192,55 @@ func TestTheDefaultFleetCardsKeepTheirInformationAtBothWindowSizes(t *testing.T)
 		if rects["fleet-network"].H < 150 {
 			t.Fatalf("%dx%d: the network card is %0.1f high, want at least 150 to show the ring", size[0], size[1], rects["fleet-network"].H)
 		}
-		if rects["fleet-collaboration"].H < 360 {
-			t.Fatalf("%dx%d: the collaboration card is %0.1f high, want at least 360 to show its lanes", size[0], size[1], rects["fleet-collaboration"].H)
+		if rects["fleet-collaboration"].H < 260 {
+			t.Fatalf("%dx%d: the collaboration card is %0.1f high, want at least 260 to show two lanes and its head", size[0], size[1], rects["fleet-collaboration"].H)
 		}
+	}
+}
+
+func TestTheDefaultBoardGivesEachCardItsAdmiralShare(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	heights := map[string]float32{}
+	for _, kind := range []string{"context-overview", "agent-network", "fleet-collaboration"} {
+		rect, ok := tester.Find(boardPanelTitle(kind) + "窗口")
+		if !ok {
+			t.Fatalf("%s never rendered, texts %q", kind, tester.Texts())
+		}
+		heights[kind] = rect.H
+	}
+	total := heights["context-overview"] + heights["agent-network"] + heights["fleet-collaboration"]
+	want := map[string]float32{
+		"context-overview":    0.121,
+		"agent-network":       0.564,
+		"fleet-collaboration": 0.315,
+	}
+	for kind, share := range want {
+		got := heights[kind] / total
+		if diff := got - share; diff > 0.02 || diff < -0.02 {
+			t.Fatalf("%s takes %.3f of the board, want %.3f (heights %+v)", kind, got, share, heights)
+		}
+	}
+}
+
+func TestTheFleetCollaborationCardFitsItsLanesInsteadOfStretching(t *testing.T) {
+	state := fleetServerShell(t, fleetSampleServer)
+	state.openModule("fleet")
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	for attempt := 0; attempt < 20 && state.fleet.data == nil && state.fleet.failed == ""; attempt++ {
+		tester.Frame()
+	}
+	frames(tester)
+	collaboration, ok := state.board.rects["fleet-collaboration"]
+	if !ok {
+		t.Fatalf("the collaboration card never laid out, rects %+v", state.board.rects)
+	}
+	kpi := state.board.rects["fleet-kpi"]
+	network := state.board.rects["fleet-network"]
+	if collaboration.H >= network.H*1.6 {
+		t.Fatalf("the collaboration card takes %0.1f against the network card's %0.1f; it must not dominate the page", collaboration.H, network.H)
+	}
+	if collaboration.H > kpi.H*3.4 {
+		t.Fatalf("the collaboration card takes %0.1f against the KPI card's %0.1f; its lanes do not need that much room", collaboration.H, kpi.H)
 	}
 }

@@ -20,8 +20,8 @@ func defaultFleetPanels() []boardPanel {
 
 const (
 	fleetKPIRowWeight           = 1.5
-	fleetNetworkRowWeight       = 2.5
-	fleetCollaborationRowWeight = 5.9
+	fleetNetworkRowWeight       = 3.0
+	fleetCollaborationRowWeight = 3.6
 	fleetEventRowWeight         = 1.5
 	fleetEventColumnWeight      = 3
 	fleetArtifactColumnWeight   = 2

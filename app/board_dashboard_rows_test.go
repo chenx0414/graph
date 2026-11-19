@@ -45,9 +45,15 @@ func TestLoadingAnOldBoardRebalancesTheDashboardRows(t *testing.T) {
 	state := newShellState("http://127.0.0.1:1", "")
 	state.loadBoard(dir)
 	layout := state.boardPage().Layout
-	if layout.Children[0].Weight != 1.75 || layout.Children[1].Weight != 3.25 {
-		t.Fatalf("the old default rows move to the new default, got %v/%v",
-			layout.Children[0].Weight, layout.Children[1].Weight)
+	want := defaultBoardLayout()
+	if len(layout.Children) != len(want.Children) {
+		t.Fatalf("the old board falls back to the current default rows, got %+v", layout.Children)
+	}
+	for index := range want.Children {
+		if layout.Children[index].Weight != want.Children[index].Weight {
+			t.Fatalf("row %d moves to the current default weight %v, got %v",
+				index, want.Children[index].Weight, layout.Children[index].Weight)
+		}
 	}
 }
 

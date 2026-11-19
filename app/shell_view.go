@@ -134,11 +134,14 @@ func (s *shellState) mainAgentCard(ctx *ui.Context) {
 		Gap(th.Space(2)).AlignItems(ui.Center).Radius(t.Radius.Xl).
 		Border(gwtheme.Hairline, t.Border).Background(t.HoverTint).Focusable().Label("main agent 会话")
 	row.Justify(ui.Center)
-	row.OnClick(func() {
+	open := func() {
 		if s.supervisorID != "" {
 			s.selectConversation(s.supervisorID)
+			return
 		}
-	})
+		go s.startMainAgent()
+	}
+	row.OnClick(open)
 	switch {
 	case selected && row.Hovered():
 		row.Background(t.HoverTint.Alpha(2.25))
@@ -150,6 +153,7 @@ func (s *shellState) mainAgentCard(ctx *ui.Context) {
 	row.Children(func() {
 		octoLoader(ctx)
 		name := ui.Row(ctx).Label("main agent 名称").Focusable()
+		name.OnClick(open)
 		name.Children(func() {
 			kit.Text(ctx, "Main Agent", t.Text.Lg).FontWeight(600).TextColor(t.Foreground)
 		})

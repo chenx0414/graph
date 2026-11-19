@@ -457,7 +457,7 @@ func TestNodeChatLoadsOlderPagesWhenTheFirstPageFitsTheViewport(t *testing.T) {
 	}
 }
 
-func TestNodeChatSaysWhenTheHistoryStarts(t *testing.T) {
+func TestNodeChatShowsNoMarkerWhereItsHistoryStarts(t *testing.T) {
 	fleet := ringGraphFleet()
 	node := fleetAgent{ID: "p1-n2", ParentID: "p1", Kind: "node", Name: "fleet-ui", TaskID: "tA", NodeID: "n2", Status: "stopped"}
 	mock := &nodeChatMock{
@@ -467,8 +467,11 @@ func TestNodeChatSaysWhenTheHistoryStarts(t *testing.T) {
 	state, tester := nodeChatShell(t, mock)
 	state.openFleetAgentChat(node)
 	tester = frames(frames(tester))
-	if !tester.HasText("已经是最早的记录") {
-		t.Fatalf("a fully loaded node chat says where its history starts, texts %q", tester.Texts())
+	if tester.HasText("已经是最早的记录") {
+		t.Fatalf("a fully loaded chat carries no marker line, texts %q", tester.Texts())
+	}
+	if !tester.HasText("节点唯一的记录") {
+		t.Fatalf("the chat still shows its only message, texts %q", tester.Texts())
 	}
 }
 

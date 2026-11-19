@@ -275,6 +275,42 @@ func (s *shellState) titleOf(id string) string {
 	return "（无标题）"
 }
 
+func parseThreadConversationID(payload []byte) string {
+	var body struct {
+		ConversationID string `json:"conversationId"`
+	}
+	if err := json.Unmarshal(payload, &body); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(body.ConversationID)
+}
+
+func (s *shellState) startMainAgent() {
+	if s.supervisorID != "" {
+		s.selectConversation(s.supervisorID)
+		return
+	}
+	payload, err := s.api.post("/api/orchestration/global", map[string]string{"requestId": requestID("main-agent")})
+	if err != nil {
+		s.status = "建不了主会话：" + err.Error()
+		s.frame()
+		return
+	}
+	id := parseThreadConversationID(payload)
+	if id == "" {
+		s.status = "主会话没有返回 id"
+		s.frame()
+		return
+	}
+	onUI(s.window, func() {
+		s.loadRows()
+		if s.supervisorID == "" {
+			s.supervisorID = id
+		}
+		s.selectConversation(id)
+	})
+}
+
 func (s *shellState) selectConversation(id string) {
 	state := s.beginConversationSwitch(id)
 	if state == nil {

@@ -257,16 +257,9 @@ func (c *chatState) transcript(ctx *ui.Context) {
 	}
 	if c.historyLoading {
 		kit.SkeletonLine(ctx, 30, th.Space(1.5)).Padding(0, 0, th.Space(1), 0)
-	} else {
-		marker, gap := "", float32(0)
-		if c.noMoreHistory && c.listFirst == 0 && c.listLast >= 0 {
-			marker, gap = "已经是最早的记录", th.Space(1)
-		}
-		kit.Text(ctx, marker, t.Text.Xs).TextColor(t.Muted).Padding(0, 0, gap, 0)
 	}
 	rows := chatFoldRows(c.runs())
 	c.list.Key = func(row int) any { return rows[row].key }
-	top, bottom := fadeInsets(&c.listScroll)
 	fade := ui.Box(ctx).Grow(1).FillWidth()
 	fade.Children(func() {
 		list := ui.List(ctx, &c.list, len(rows), func(index int) {
@@ -280,16 +273,13 @@ func (c *chatState) transcript(ctx *ui.Context) {
 				c.messageRow(ctx, row.run.messages[0])
 			}
 		})
-		list.Grow(1).TrackScroll(&c.listScroll).Padding(0, th.Space(4), th.Space(4), th.Space(4)).Gap(th.Space(3))
+		list.Grow(1).Padding(0, th.Space(4), th.Space(4), th.Space(4)).Gap(th.Space(3))
 		list.MaskLinearGradient(ui.LinearGradient{Angle: 180, Stops: []ui.GradientStop{
 			{Color: ui.Transparent, At: 0},
 			{Color: ui.RGB(0, 0, 0), At: 0.06},
 			{Color: ui.RGB(0, 0, 0), At: 0.94},
 			{Color: ui.Transparent, At: 1},
 		}})
-		if top > 0 || bottom > 0 {
-			list.Padding(top, th.Space(4), th.Space(4)+bottom, th.Space(4))
-		}
 	})
 	first, last := c.list.Visible()
 	c.listFirst, c.listLast = first, last
@@ -376,6 +366,9 @@ func (c *chatState) composer(ctx *ui.Context) {
 				k.SetText("")
 				return true
 			})
+			if c.problem != "" {
+				kit.Text(ctx, c.problem, t.Text.Xs).TextColor(t.Danger).FillWidth().SingleLine().Ellipsis("…")
+			}
 			ui.Row(ctx).FillWidth().AlignItems(ui.Center).Gap(th.Space(1.5)).Children(func() {
 				if c.source != nil && c.source.Capabilities().Attachments {
 					c.attachmentButton(ctx)
@@ -395,9 +388,6 @@ func (c *chatState) composer(ctx *ui.Context) {
 }
 
 func (c *chatState) composerPlaceholder() string {
-	if c.problem != "" {
-		return c.problem
-	}
 	return "想问什么？  @ 文件，$ 技能，/ 命令"
 }
 

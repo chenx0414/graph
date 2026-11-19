@@ -223,7 +223,6 @@ type chatState struct {
 	answerClocks map[string]int64
 	messages     []transcriptMessage
 	list         ui.ListState
-	listScroll   ui.ScrollState
 	md           markdown.Options
 }
 

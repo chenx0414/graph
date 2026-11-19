@@ -66,15 +66,15 @@ func TestAFailedOlderReadReadsInTheComposerPlaceholder(t *testing.T) {
 		t.Fatalf("a failed read reports a problem, status %q", state.status)
 	}
 	tester = frames(tester)
-	if tester.HasText("读不到更早的对话") {
-		t.Fatalf("the failure stays out of the transcript band, texts %q", tester.Texts())
+	if !tester.HasText("读不到更早的对话") {
+		t.Fatalf("the failure reads inside the composer card, texts %q", tester.Texts())
 	}
 	access, ok := tester.Access("消息")
 	if !ok {
 		t.Fatalf("the composer is on screen, texts %q", tester.Texts())
 	}
-	if access.Placeholder != state.problem {
-		t.Fatalf("the failure reads in the composer placeholder, got %q", access.Placeholder)
+	if access.Placeholder != "想问什么？  @ 文件，$ 技能，/ 命令" {
+		t.Fatalf("the failure leaves the prompt hint alone, got %q", access.Placeholder)
 	}
 }
 
@@ -109,5 +109,22 @@ func TestTheComposerStartsTwoLinesTall(t *testing.T) {
 	}
 	if bottom := send.Y + send.H; bottom > 700 {
 		t.Fatalf("the composer stays inside the window, bottom %.2f", bottom)
+	}
+}
+
+func TestAFailureStaysVisibleWhileTheComposerHoldsADraft(t *testing.T) {
+	state := chatWithTwoMessages()
+	state.problem = "读不到更早的对话：不是 JSON"
+	state.draft = "还没发出去的一句话"
+	tester := frames(ui.NewTester(state.view, 900, 700))
+	if !tester.HasText("读不到更早的对话：不是 JSON") {
+		t.Fatalf("a failure must stay readable even when the composer holds a draft, texts %q", tester.Texts())
+	}
+	field, ok := tester.Access("消息")
+	if !ok {
+		t.Fatalf("the composer is on screen, texts %q", tester.Texts())
+	}
+	if field.Placeholder != "想问什么？  @ 文件，$ 技能，/ 命令" {
+		t.Fatalf("the placeholder keeps the prompt hint, got %q", field.Placeholder)
 	}
 }

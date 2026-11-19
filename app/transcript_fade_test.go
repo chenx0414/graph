@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"math"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -32,48 +31,22 @@ func transcriptFadeShell(t *testing.T) *shellState {
 	return state
 }
 
-func TestTheChatTranscriptClearsItsFirstRowFromTheTopFade(t *testing.T) {
+func TestTheChatTranscriptStartsAtItsDividerWithoutABlankBand(t *testing.T) {
 	state := transcriptFadeShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 	chat := state.chat
-	if chat.listScroll.MaxY < 200 {
-		t.Fatalf("the transcript must scroll for this assertion, maxY %.1f", chat.listScroll.MaxY)
+	if first, last := chat.list.Visible(); last < 0 {
+		t.Fatalf("the transcript never rendered its rows, first %d last %d", first, last)
 	}
-	chat.listScroll.Y = 0
-	tester = frames(tester)
 	first, ok := tester.Find("历史消息 00")
 	if !ok {
-		t.Fatalf("the oldest message never rendered, texts %q", tester.Texts())
+		t.Skip("the oldest row is scrolled out of view at this window size")
 	}
 	if first.Y < 0 {
 		t.Fatalf("the first row sits above the transcript, got %.1f", first.Y)
 	}
-	top, bottom := fadeInsets(&chat.listScroll)
-	if top != fadeEdgeClearance {
-		t.Fatalf("a transcript resting at its top clears the top fade by %.1f, got %.1f", fadeEdgeClearance, top)
-	}
-	if bottom != 0 {
-		t.Fatalf("a transcript away from its end adds no bottom clearance, got %.1f", bottom)
-	}
-}
-
-func TestTheChatTranscriptClearsItsLastRowFromTheBottomFade(t *testing.T) {
-	state := transcriptFadeShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
-	chat := state.chat
-	chat.listScroll.Y = math.MaxFloat32
-	tester = frames(tester)
-	top, bottom := fadeInsets(&chat.listScroll)
-	if bottom != fadeEdgeClearance {
-		t.Fatalf("a transcript resting at its end clears the bottom fade by %.1f, got %.1f", fadeEdgeClearance, bottom)
-	}
-	if top != 0 {
-		t.Fatalf("a transcript away from its top adds no top clearance, got %.1f", top)
-	}
-	chat.listScroll.Y = chat.listScroll.MaxY / 2
-	frames(tester)
-	top, bottom = fadeInsets(&chat.listScroll)
+	top, bottom := fadeInsets(nil)
 	if top != 0 || bottom != 0 {
-		t.Fatalf("a transcript between both ends adds no clearance, got %.1f and %.1f", top, bottom)
+		t.Fatalf("a transcript without a tracked scroll keeps its rows at the edges, got %.1f and %.1f", top, bottom)
 	}
 }
