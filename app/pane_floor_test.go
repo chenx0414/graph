@@ -77,7 +77,8 @@ func TestTheWhiteboardTitleLinesUpWithTheCardsBelowIt(t *testing.T) {
 }
 
 func TestTheWindowFloorFitsTheLayout(t *testing.T) {
-	width, height := windowFloorWidth(), windowFloorHeight()
+	floor, _ := paneProbeShell(t, 1440, 900, "trajectory")
+	width, height := windowFloorWidth(floor.whiteboardFloorWidth()), windowFloorHeight
 	if width < 1024 || height < 640 {
 		t.Fatalf("the floor may not undercut the old one: %dx%d", width, height)
 	}
@@ -133,8 +134,8 @@ func TestTheWhiteboardFloorFitsEveryStandardPage(t *testing.T) {
 			tester.Frame()
 			tester.Frame()
 		}
-		if need > whiteboardFloorWidth {
-			t.Fatalf("%s needs %.1f but the whiteboard may shrink to %.1f", paneName(kind), need, whiteboardFloorWidth)
+		if need > state.whiteboardFloorWidth() {
+			t.Fatalf("%s needs %.1f but the whiteboard may shrink to %.1f", paneName(kind), need, state.whiteboardFloorWidth())
 		}
 	}
 }

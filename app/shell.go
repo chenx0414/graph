@@ -52,6 +52,7 @@ type shellState struct {
 	dataReady         atomic.Bool
 	dataPending       atomic.Bool
 	window            *mygo.Window
+	windowFloor       float32
 	list              ui.ListState
 	stateDir          string
 	archiveConfirm    *archiveConfirmState

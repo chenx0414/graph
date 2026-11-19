@@ -135,6 +135,7 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 		drop()
 	}
 	page := s.boardPage()
+	s.trackWindowFloor(ctx)
 	if s.board.rects == nil {
 		s.board.rects = map[string]ui.Rect{}
 	}
