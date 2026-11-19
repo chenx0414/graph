@@ -211,7 +211,11 @@ func TestRemovingANativeProviderDropsItFromTheConfig(t *testing.T) {
 	}
 	tester = frames(tester)
 	if err := tester.Click("移除供应商"); err != nil {
-		t.Fatalf("remove the provider: %v", err)
+		t.Fatalf("arm the removal: %v", err)
+	}
+	tester = frames(tester)
+	if err := tester.Click("确认移除"); err != nil {
+		t.Fatalf("confirm the removal: %v", err)
 	}
 	for attempt := 0; attempt < 80 && len(stub.posted) == 0; attempt++ {
 		tester.Frame()

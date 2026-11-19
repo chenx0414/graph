@@ -42,6 +42,7 @@ type providersPageState struct {
 	nativeFailed string
 	addOpen      bool
 	editing      string
+	removeArmed  bool
 	draft        providerDraft
 	saving       bool
 	saveFailed   string
