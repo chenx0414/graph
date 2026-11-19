@@ -107,3 +107,75 @@ func TestTheCollaborationCardKeepsRoomForBothLanesAtEveryWindowSize(t *testing.T
 		}
 	}
 }
+
+func TestEveryModuleCardKeepsItsHeaderTuckedAwayUntilHover(t *testing.T) {
+	state := contextOverviewShell(t, contextOverviewSettings)
+	state.openModule("trajectory")
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	shown := func() bool {
+		for _, text := range tester.Texts() {
+			if text == "上下文统计" {
+				return true
+			}
+		}
+		return false
+	}
+	if shown() {
+		t.Fatalf("a module card shows a permanent header, texts %q", tester.Texts())
+	}
+	card, ok := tester.Find(boardPanelTitle("trajectory-summary") + "窗口")
+	if !ok {
+		t.Fatalf("the summary card never rendered, texts %q", tester.Texts())
+	}
+	tester.Move(card.X+card.W/2, card.Y+card.H/2)
+	tester.Advance(300 * 1e6)
+	tester = frames(tester)
+	if !shown() {
+		t.Fatalf("hovering a module card reveals its header, texts %q", tester.Texts())
+	}
+}
+
+func TestEveryCardKindDeclaresAMinimumHeight(t *testing.T) {
+	state := fourPaneShell(t)
+	var missing []string
+	var tooSmall []string
+	frames(ui.NewTester(func(ctx *ui.Context) {
+		for _, kind := range boardPanelAllKinds() {
+			panel := &boardPanel{ID: kind, Kind: kind}
+			height := state.boardPanelMinHeight(ctx, panel)
+			if height <= 0 {
+				missing = append(missing, kind)
+				continue
+			}
+			if height < boardMinimumCardHeight {
+				tooSmall = append(tooSmall, kind)
+			}
+		}
+		ui.Column(ctx).Fill()
+	}, 100, 100))
+	if len(missing) > 0 {
+		t.Fatalf("every card kind declares a minimum height, missing %v", missing)
+	}
+	if len(tooSmall) > 0 {
+		t.Fatalf("every card keeps a usable minimum height, too small %v", tooSmall)
+	}
+}
+
+func TestTheBoardScrollsInsteadOfSqueezingCardsBelowTheirMinimum(t *testing.T) {
+	state := contextOverviewShell(t, contextOverviewSettings)
+	frames(ui.NewTester(state.view, 1024, 640))
+	for _, kind := range []string{"context-overview", "agent-network", "fleet-collaboration"} {
+		card, ok := state.board.rects[kind]
+		if !ok {
+			t.Fatalf("%s never laid out at the minimum window, rects %+v", kind, state.board.rects)
+		}
+		var want float32
+		frames(ui.NewTester(func(ctx *ui.Context) {
+			want = state.boardPanelMinHeight(ctx, &boardPanel{ID: kind, Kind: kind})
+			ui.Column(ctx).Fill()
+		}, 100, 100))
+		if card.H < want-1 {
+			t.Fatalf("%s is %0.1f high at the minimum window, want at least %0.1f", kind, card.H, want)
+		}
+	}
+}

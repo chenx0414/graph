@@ -50,6 +50,7 @@ type boardState struct {
 	pressY      float32
 	hoverSince  map[string]time.Time
 	pendingDrop func()
+	viewport    ui.Rect
 }
 
 type boardDrag struct {
@@ -143,7 +144,7 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 	card := ui.Column(ctx).Grow(1).FillWidth().Background(t.Sidebar)
 	card.Children(func() {
 		if page.Kind != "" && len(page.Panels) == 1 {
-			header := boardHeaderAlways
+			header := boardHeaderOnHover
 			if page.Title == boardPanelTitle(page.Panels[0].Kind) {
 				header = boardHeaderNone
 			}
@@ -173,7 +174,7 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 								cell := ui.Column(ctx).Grow(1).FillHeight().
 									MinWidth(s.boardPanelMinWidthWithChrome(ctx, &panel))
 								cell.Children(func() {
-									s.boardPanelView(ctx, &panel, false, boardHeaderAlways)
+									s.boardPanelView(ctx, &panel, false, boardHeaderOnHover)
 								})
 							}
 						})
@@ -188,7 +189,7 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 			return
 		}
 		freeform := page.Kind == ""
-		ui.Column(ctx).Fill().Padding(10).Children(func() {
+		s.boardCanvas(ctx, func() {
 			s.boardNodeView(ctx, &page.Layout, "root", freeform, boardHeaderOnHover)
 		})
 	})
@@ -260,6 +261,19 @@ func (s *shellState) boardNodeView(ctx *ui.Context, node *boardNode, path string
 			}
 		})
 	}
+}
+
+func (s *shellState) boardCanvas(ctx *ui.Context, build func()) {
+	th := ctx.Theme()
+	padding := th.Space(2.5)
+	want := s.boardNodeMinHeight(ctx, &s.boardPage().Layout) + padding*2
+	height := max(s.board.viewport.H, want)
+	scroll := ui.Scroll(ctx).Fill()
+	scroll.Draw(func(p *ui.Painter, r ui.Rect) { s.board.viewport = r })
+	scroll.Children(func() {
+		canvas := ui.Column(ctx).FillWidth().Height(height).Padding(padding)
+		canvas.Children(build)
+	})
 }
 
 func (s *shellState) boardDivider(ctx *ui.Context, node *boardNode, path string, gap int) {
@@ -350,9 +364,7 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform
 	if header != boardHeaderNone {
 		card.Label(boardPanelTitle(panel.Kind) + "窗口")
 	}
-	if header == boardHeaderOnHover {
-		kit.Elevate(ctx, card, shellShadow)
-	}
+	kit.Elevate(ctx, card, shellShadow)
 	card.Draw(func(p *ui.Painter, r ui.Rect) {
 		if freeform {
 			s.board.rects[panel.ID] = r

@@ -9,7 +9,14 @@ const boardLongFlowMinWidth = float32(240)
 
 const boardDefaultMinWidth = float32(280)
 
-const boardCollaborationMinHeight = float32(260)
+const (
+	boardMinimumCardHeight      = float32(110)
+	boardDefaultMinHeight       = float32(180)
+	boardKPIMinHeight           = float32(110)
+	boardStripMinHeight         = float32(120)
+	boardNetworkMinHeight       = float32(200)
+	boardCollaborationMinHeight = float32(260)
+)
 
 func measuredWidth(ctx *ui.Context, text string, size float32, weight int) float32 {
 	if text == "" {
@@ -122,8 +129,27 @@ func (s *shellState) boardPanelMinHeight(ctx *ui.Context, panel *boardPanel) flo
 		return s.contextOverviewMinHeight(ctx)
 	case "fleet-collaboration":
 		return boardCollaborationMinHeight
+	case "fleet-kpi":
+		return boardKPIMinHeight
+	case "fleet-network", "agent-network", "graph-dag", "trajectory-agents":
+		return boardNetworkMinHeight
+	case "fleet-events", "fleet-artifacts":
+		return boardStripMinHeight
 	}
-	return boardMinPaneHeight
+	return boardDefaultMinHeight
+}
+
+func boardPanelAllKinds() []string {
+	return []string{
+		"overview", "conversation", "history", "trajectory",
+		"trajectory-summary", "trajectory-tokens", "trajectory-timing", "context-overview",
+		"trajectory-trend", "trajectory-events", "trajectory-commands", "trajectory-files",
+		"trajectory-composition", "trajectory-requests", "trajectory-agents", "trajectory-request-detail",
+		"tasks", "agent", "providers", "capabilities", "assemblies", "settings",
+		"artifacts", "models", "questions", "fleet-kpi", "fleet-network", "agent-network",
+		"fleet-collaboration", "fleet-events", "fleet-artifacts", "fleet-history-list",
+		"agent-detail", "graph-dag",
+	}
 }
 
 func (s *shellState) boardNodeMinHeight(ctx *ui.Context, node *boardNode) float32 {
@@ -139,6 +165,9 @@ func (s *shellState) boardNodeMinHeight(ctx *ui.Context, node *boardNode) float3
 			total := float32(0)
 			for index := range node.Children {
 				total += s.boardNodeMinHeight(ctx, &node.Children[index].Node)
+			}
+			if len(node.Children) > 1 {
+				total += float32(len(node.Children)-1) * ctx.Theme().Space(2)
 			}
 			return total
 		}
