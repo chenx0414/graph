@@ -326,25 +326,19 @@ func TestClickingAFleetArtifactOpensTheSharedArtifactsPanel(t *testing.T) {
 	}
 }
 
-func TestTheFleetCollaborationSearchesAgents(t *testing.T) {
+func TestTheFleetCollaborationCardDropsItsSortAndSearchControls(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
 	tester := openFleetTester(t, state)
 	if !tester.HasText("3 条协作 · 4 条泳道") {
 		t.Fatalf("the card counts every collaboration record and lane, texts %q", tester.Texts())
 	}
-	if err := tester.Click("搜索 Agent"); err != nil {
-		t.Fatalf("focus the search field: %v", err)
+	for _, gone := range []string{"最新", "最早", "搜索 Agent"} {
+		if tester.HasText(gone) {
+			t.Fatalf("the collaboration card keeps %q, texts %q", gone, tester.Texts())
+		}
 	}
-	tester.Type("planner")
-	tester = frames(tester)
-	if state.fleet.swimQuery != "planner" {
-		t.Fatalf("the search keeps what the user typed, query %q", state.fleet.swimQuery)
-	}
-	if tester.HasText("3 条协作") {
-		t.Fatalf("the search narrows the records, texts %q", tester.Texts())
-	}
-	if !tester.HasText("1 条协作") || !tester.HasText("2 条泳道") {
-		t.Fatalf("one record between planner and worker stays, texts %q", tester.Texts())
+	if !tester.HasText("只看协作") || !tester.HasText("全部事件") {
+		t.Fatalf("the record filters stay, texts %q", tester.Texts())
 	}
 }
 

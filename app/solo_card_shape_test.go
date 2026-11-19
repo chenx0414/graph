@@ -26,7 +26,7 @@ func TestASingleCardModulePageSquaresItsLeftCorners(t *testing.T) {
 	}
 }
 
-func TestTheCardHeaderOffersNoClickableActions(t *testing.T) {
+func TestTheHoverHeaderKeepsItsExpandAndRemoveActions(t *testing.T) {
 	state := fourPaneShell(t)
 	showTaskListBoard(state)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
@@ -38,13 +38,15 @@ func TestTheCardHeaderOffersNoClickableActions(t *testing.T) {
 	tester.Advance(300 * 1e6)
 	tester = frames(tester)
 	for _, action := range []string{"在新标签页打开", "移除"} {
-		if tester.HasText(action) {
-			t.Fatalf("the card header carries the %q action, texts %q", action, tester.Texts())
+		if !tester.HasText(action) {
+			t.Fatalf("the hover header keeps the %q action, texts %q", action, tester.Texts())
 		}
 	}
-	tester.RightClickAt(card.X+card.W/2, card.Y+card.H/2)
-	menu := tester.Menu()
-	if len(menu) == 0 {
-		t.Fatalf("the card keeps its actions in a context menu, menu %q", menu)
+	if err := tester.Click("在新标签页打开"); err != nil {
+		t.Fatalf("click the expand action: %v", err)
+	}
+	frames(tester)
+	if state.activeBoardKind() != "tasks" {
+		t.Fatalf("the expand action opens the card's page, kind %q", state.activeBoardKind())
 	}
 }

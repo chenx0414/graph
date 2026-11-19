@@ -31,14 +31,6 @@ func (s *shellState) panelFleetCollaboration(ctx *ui.Context) {
 		kit.Text(ctx, "跨 Agent 协作", t.Text.Sm).FontWeight(600).TextColor(t.Foreground)
 		kit.Text(ctx, fleetSwimRecordLine(model), t.Text.Xs).TextColor(t.Muted)
 		ui.Spacer(ctx)
-		fleetChip(ctx, "最新", "最新", !s.fleet.swimOldest, func() {
-			s.fleet.swimOldest = false
-			s.frame()
-		})
-		fleetChip(ctx, "最早", "最早", s.fleet.swimOldest, func() {
-			s.fleet.swimOldest = true
-			s.frame()
-		})
 		if model.Directional > 0 {
 			fleetChip(ctx, "协作", "只看协作", !s.fleet.swimAll, func() {
 				s.fleet.swimAll = false
@@ -49,8 +41,6 @@ func (s *shellState) panelFleetCollaboration(ctx *ui.Context) {
 				s.frame()
 			})
 		}
-		input := kit.Input(ctx, &s.fleet.swimQuery, kit.InputOpts{Placeholder: "搜索 Agent…", Flat: true})
-		input.Width(th.Space(26)).Label("搜索 Agent")
 	})
 	if len(model.Marks) == 0 {
 		kit.Text(ctx, "没有匹配的协作事件。", t.Text.Sm).TextColor(t.Muted)

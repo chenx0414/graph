@@ -226,8 +226,86 @@ func (s *shellState) addProviderDraft() {
 	}
 	s.providers.draft = providerDraft{Platform: platform, BaseURL: baseURL}
 	s.providers.addOpen = true
+	s.providers.editing = ""
 	s.providers.saveFailed = ""
 	s.frame()
+}
+
+func (s *shellState) editProvider(id string) {
+	row := s.nativeProviderModel(id)
+	if row == nil {
+		return
+	}
+	s.providers.draft = providerDraft{
+		Platform: row.Platform,
+		Name:     row.Label,
+		BaseURL:  row.BaseURL,
+		Models:   strings.Join(row.Models, ", "),
+	}
+	s.providers.editing = id
+	s.providers.addOpen = false
+	s.providers.saveFailed = ""
+	s.frame()
+}
+
+func (s *shellState) closeProviderEditor() {
+	s.providers.editing = ""
+	s.providers.addOpen = false
+	s.providers.draft = providerDraft{}
+	s.providers.saveFailed = ""
+	s.frame()
+}
+
+func (s *shellState) providerEntryModels(entries []any, credentialID string) []any {
+	kept := make([]any, 0, len(entries))
+	for _, raw := range entries {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			kept = append(kept, raw)
+			continue
+		}
+		if strings.TrimSpace(stringValue(entry["credentialId"])) == credentialID {
+			continue
+		}
+		kept = append(kept, raw)
+	}
+	return kept
+}
+
+func (s *shellState) removeProvider(id string) {
+	document := cloneDocument(s.providers.document)
+	if document == nil || id == "" {
+		return
+	}
+	credentials, _ := document["credentials"].(map[string]any)
+	if credentials != nil {
+		delete(credentials, id)
+	}
+	modelsDoc, _ := document["models"].(map[string]any)
+	if modelsDoc != nil {
+		entries, _ := modelsDoc["entries"].([]any)
+		modelsDoc["entries"] = s.providerEntryModels(entries, id)
+	}
+	s.providers.saving = true
+	s.providers.saveFailed = ""
+	apiClient := s.api
+	revision := s.providers.revision
+	go func() {
+		_, err := apiClient.post("/api/config", map[string]any{"expectedRevision": revision, "document": document})
+		onUI(s.window, func() {
+			s.providers.saving = false
+			if err != nil {
+				s.providers.saveFailed = "移除失败：" + err.Error()
+				s.frame()
+				return
+			}
+			s.providers.editing = ""
+			s.providers.draft = providerDraft{}
+			s.refreshProviders()
+			s.dropCachedModels()
+			s.frame()
+		})
+	}()
 }
 
 func (s *shellState) saveProvider() {
@@ -264,12 +342,26 @@ func (s *shellState) saveProvider() {
 	if api == "" {
 		api = "openai-completions"
 	}
-	credentialID := slugProviderID(name)
-	secretRef := "GRAPH_PROVIDER_" + strings.ToUpper(strings.ReplaceAll(credentialID, "-", "_")) + "_API_KEY"
+	editing := s.providers.editing
+	credentialID := editing
+	secretRef := ""
 	credentials, _ := document["credentials"].(map[string]any)
 	if credentials == nil {
 		credentials = map[string]any{}
 		document["credentials"] = credentials
+	}
+	if editing != "" {
+		if existing, ok := credentials[editing].(map[string]any); ok {
+			secretRef = strings.TrimSpace(stringValue(existing["secretRef"]))
+		}
+	} else {
+		credentialID = slugProviderID(name)
+		secretRef = "GRAPH_PROVIDER_" + strings.ToUpper(strings.ReplaceAll(credentialID, "-", "_")) + "_API_KEY"
+	}
+	if secretRef == "" {
+		s.providers.saveFailed = "这个供应商没有可用的密钥引用"
+		s.frame()
+		return
 	}
 	credentials[credentialID] = map[string]any{"secretRef": secretRef, "platform": platform, "displayName": name}
 	modelsDoc, _ := document["models"].(map[string]any)
@@ -278,6 +370,7 @@ func (s *shellState) saveProvider() {
 		document["models"] = modelsDoc
 	}
 	entries, _ := modelsDoc["entries"].([]any)
+	entries = s.providerEntryModels(entries, credentialID)
 	for _, modelID := range models {
 		entries = append(entries, map[string]any{
 			"id": modelID, "provider": credentialID, "api": api, "baseUrl": baseURL,
@@ -306,6 +399,7 @@ func (s *shellState) saveProvider() {
 				return
 			}
 			s.providers.addOpen = false
+			s.providers.editing = ""
 			s.providers.draft = providerDraft{}
 			s.refreshProviders()
 			s.dropCachedModels()
@@ -369,13 +463,13 @@ func cloneDocument(document map[string]any) map[string]any {
 }
 
 func (s *shellState) nativeProviderRow(ctx *ui.Context, row nativeProviderRow, pal magpiePalette, last bool) {
-	label := "用 " + row.Label + " 的模型"
+	label := "编辑 " + row.Label
 	element := ui.Row(ctx).FillWidth().Height(48).Padding(7, 12, 7, 14).Gap(12).AlignItems(ui.Center).
 		Label(label).Focusable()
 	if element.Hovered() {
 		element.Background(pal.Card2)
 	}
-	element.OnClick(func() { s.openProviderPicker(row.ID) })
+	element.OnClick(func() { s.editProvider(row.ID) })
 	element.Children(func() {
 		handle := ui.Box(ctx).Size(28, 28).Radius(6).Center()
 		if icon := providerBrandIcon(row.ID); icon != nil {
@@ -398,7 +492,7 @@ func (s *shellState) nativeProviderRow(ctx *ui.Context, row nativeProviderRow, p
 					kit.Text(ctx, s.platformLabel(row.Platform), 9.5).FontWeight(600).LetterSpacing(0.2).TextColor(pal.Muted).SingleLine()
 				})
 			})
-			kit.Text(ctx, row.BaseURL+" · "+strconv.Itoa(len(row.Models))+" 个模型", 11.5).TextColor(pal.Muted).SingleLine().Ellipsis("…")
+			kit.Text(ctx, providerHost(row.BaseURL)+" · "+strconv.Itoa(len(row.Models))+" 个模型", 11.5).TextColor(pal.Muted).SingleLine().Ellipsis("…")
 		})
 		state := "已配置"
 		dot, text := pal.Green, pal.Mark
@@ -406,11 +500,17 @@ func (s *shellState) nativeProviderRow(ctx *ui.Context, row nativeProviderRow, p
 			state = "未配置"
 			dot, text = pal.Amber, pal.Amber
 		}
-		pill := ui.Row(ctx).Width(96).Height(22).Radius(6).PaddingX(8).Gap(6).AlignItems(ui.Center)
+		pill := ui.Row(ctx).Width(128).Height(22).Radius(6).PaddingX(8).Gap(6).AlignItems(ui.Center)
+		if !row.Configured {
+			pill.Background(pal.AmberSoft)
+		}
 		pill.Children(func() {
 			ui.Box(ctx).Width(6).Height(6).Radius(10).Background(dot)
 			kit.Text(ctx, state, 11).TextColor(text).SingleLine()
 		})
+		if kit.Button(ctx, "用它", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Label("用 " + row.Label + " 的模型").Clicked() {
+			s.openProviderPicker(row.ID)
+		}
 		ui.Icon(ctx, iconChevron).Size(11, 11).TextColor(pal.Faint)
 	})
 	if !last {
@@ -432,45 +532,48 @@ func (s *shellState) nativeProvidersCard(ctx *ui.Context, pal magpiePalette) {
 	})
 }
 
-func (s *shellState) addProviderForm(ctx *ui.Context, pal magpiePalette) {
+func (s *shellState) providerEditorForm(ctx *ui.Context, pal magpiePalette) {
+	editing := s.providers.editing != ""
+	title := "添加供应商"
+	if editing {
+		title = "编辑 " + s.providers.draft.Name
+	}
 	card := ui.Column(ctx).FillWidth().Gap(10).Padding(14).Background(pal.Card2).Radius(12).
 		Border(gwtheme.Stroke, pal.Line)
 	card.Children(func() {
 		ui.Row(ctx).FillWidth().AlignItems(ui.Center).Children(func() {
-			kit.Text(ctx, "添加供应商", 13).FontWeight(600).TextColor(pal.Foreground).Grow(1)
+			kit.Text(ctx, title, 13).FontWeight(600).TextColor(pal.Foreground).Grow(1)
+			if editing {
+				if kit.Button(ctx, "移除", kit.ButtonOpts{Variant: kit.DestructiveOutline, Size: kit.SizeSm}).Label("移除供应商").Clicked() {
+					go s.removeProvider(s.providers.editing)
+				}
+			}
 			if kit.Button(ctx, "取消", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
-				s.providers.addOpen = false
-				s.frame()
+				s.closeProviderEditor()
 			}
 			if kit.Button(ctx, "保存供应商", kit.ButtonOpts{Variant: kit.Default, Size: kit.SizeSm}).Clicked() {
 				go s.saveProvider()
 			}
 		})
-		kit.Text(ctx, "平台", 11).TextColor(pal.Muted)
-		ui.Row(ctx).FillWidth().Wrap().Gap(6).Children(func() {
-			for _, preset := range s.providers.platforms {
-				if preset.CredentialKind != "" && preset.CredentialKind != "api-key" {
-					continue
-				}
-				selected := s.providers.draft.Platform == preset.ID
-				chip := kit.Button(ctx, preset.Label, kit.ButtonOpts{Variant: kit.Outline, Size: kit.SizeSm})
-				if selected {
-					chip.Background(pal.Pill)
-				}
-				if chip.Clicked() {
-					s.providers.draft.Platform = preset.ID
-					if preset.BaseURL != "" {
-						s.providers.draft.BaseURL = preset.BaseURL
+		if !editing {
+			ui.Row(ctx).FillWidth().Wrap().Gap(2).Children(func() {
+				for _, preset := range s.providers.platforms {
+					if preset.CredentialKind != "" && preset.CredentialKind != "api-key" {
+						continue
 					}
-					s.frame()
+					s.platformTile(ctx, preset, pal)
 				}
-			}
-		})
+			})
+		}
 		name := kit.Input(ctx, &s.providers.draft.Name, kit.InputOpts{Placeholder: "供应商名称"})
 		name.FillWidth().Label("供应商名称")
 		baseURL := kit.Input(ctx, &s.providers.draft.BaseURL, kit.InputOpts{Placeholder: "接口地址，例如 https://api.openai.com/v1"})
 		baseURL.FillWidth().Label("接口地址")
-		key := kit.Input(ctx, &s.providers.draft.APIKey, kit.InputOpts{Placeholder: "API Key", Password: true})
+		keyHint := "API Key"
+		if editing {
+			keyHint = "API Key（留空则不改）"
+		}
+		key := kit.Input(ctx, &s.providers.draft.APIKey, kit.InputOpts{Placeholder: keyHint, Password: true})
 		key.FillWidth().Label("API Key")
 		models := kit.Input(ctx, &s.providers.draft.Models, kit.InputOpts{Placeholder: "模型 id，用逗号分隔"})
 		models.FillWidth().Label("模型列表")
@@ -478,5 +581,51 @@ func (s *shellState) addProviderForm(ctx *ui.Context, pal magpiePalette) {
 			kit.Text(ctx, s.providers.saveFailed, 12).TextColor(pal.Amber)
 		}
 		kit.Text(ctx, "模型 id 原样发给该平台；上下文窗口与最大输出按 128k / 8k 写入，可在配置里改。", 11).TextColor(pal.Faint)
+	})
+}
+
+func providerHost(raw string) string {
+	value := strings.TrimSpace(raw)
+	for _, prefix := range []string{"https://", "http://"} {
+		if strings.HasPrefix(value, prefix) {
+			value = strings.TrimPrefix(value, prefix)
+			break
+		}
+	}
+	if slash := strings.IndexByte(value, '/'); slash >= 0 {
+		value = value[:slash]
+	}
+	if value == "" {
+		return raw
+	}
+	return value
+}
+
+func (s *shellState) platformTile(ctx *ui.Context, preset platformPreset, pal magpiePalette) {
+	selected := s.providers.draft.Platform == preset.ID
+	tile := ui.Row(ctx).Width(196).Height(34).Padding(0, 8).Gap(10).AlignItems(ui.Center).
+		Radius(8).Label(preset.Label).Focusable()
+	if selected {
+		tile.Background(pal.Pill)
+	} else if tile.Hovered() {
+		tile.Background(pal.Card)
+	}
+	tile.OnClick(func() {
+		s.providers.draft.Platform = preset.ID
+		if preset.BaseURL != "" {
+			s.providers.draft.BaseURL = preset.BaseURL
+		}
+		s.frame()
+	})
+	tile.Children(func() {
+		if icon := providerBrandIcon(preset.ID); icon != nil {
+			ui.Icon(ctx, icon).Size(18, 18).TextColor(pal.Foreground)
+		} else {
+			tint := providerTint(preset.ID)
+			ui.Box(ctx).Size(18, 18).Radius(5).Center().Background(tint.Alpha(0.14)).Children(func() {
+				kit.Text(ctx, providerInitial(preset.Label), 10).FontWeight(600).TextColor(tint)
+			})
+		}
+		kit.Text(ctx, preset.Label, 13).TextColor(pal.Foreground).SingleLine().Ellipsis("…")
 	})
 }

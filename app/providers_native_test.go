@@ -175,3 +175,76 @@ func TestMagpieStaysAnOptionalExtension(t *testing.T) {
 		t.Fatalf("the page says magpie's models come through automatically, texts %q", tester.Texts())
 	}
 }
+
+func TestClickingANativeProviderOpensItsEditor(t *testing.T) {
+	stub := &nativeProviderServer{config: nativeProvidersConfig, catalog: nativeProvidersCatalog}
+	server := newNativeProviderServer(t, stub)
+	shell := newShellState(server.URL, "")
+	shell.openModule("providers")
+	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	for attempt := 0; attempt < 40 && len(shell.providers.native) == 0; attempt++ {
+		tester.Frame()
+	}
+	if err := tester.Click("编辑 opencode-go"); err != nil {
+		t.Fatalf("open the provider editor: %v", err)
+	}
+	tester = frames(tester)
+	if shell.providers.editing != "opencode-go" {
+		t.Fatalf("the row opens that provider's editor, editing %q", shell.providers.editing)
+	}
+	if !tester.HasText("编辑 opencode-go") || !tester.HasText("移除供应商") {
+		t.Fatalf("the editor names the provider and offers removal, texts %q", tester.Texts())
+	}
+}
+
+func TestRemovingANativeProviderDropsItFromTheConfig(t *testing.T) {
+	stub := &nativeProviderServer{config: nativeProvidersConfig, catalog: nativeProvidersCatalog}
+	server := newNativeProviderServer(t, stub)
+	shell := newShellState(server.URL, "")
+	shell.openModule("providers")
+	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	for attempt := 0; attempt < 40 && len(shell.providers.native) == 0; attempt++ {
+		tester.Frame()
+	}
+	if err := tester.Click("编辑 opencode-go"); err != nil {
+		t.Fatalf("open the provider editor: %v", err)
+	}
+	tester = frames(tester)
+	if err := tester.Click("移除供应商"); err != nil {
+		t.Fatalf("remove the provider: %v", err)
+	}
+	for attempt := 0; attempt < 80 && len(stub.posted) == 0; attempt++ {
+		tester.Frame()
+	}
+	if len(stub.posted) == 0 {
+		t.Fatalf("the removal never wrote the config")
+	}
+	posted := stub.posted[len(stub.posted)-1]
+	if strings.Contains(posted, "opencode-go") {
+		t.Fatalf("the removed provider is gone from the config, posted %s", posted)
+	}
+}
+
+func TestTheProviderRowOffersItsModelsWithoutOpeningTheEditor(t *testing.T) {
+	stub := &nativeProviderServer{config: nativeProvidersConfig, catalog: nativeProvidersCatalog}
+	server := newNativeProviderServer(t, stub)
+	shell := newShellState(server.URL, "")
+	chat := newChatState(server.URL, "")
+	chat.active = "c1"
+	shell.chat = chat
+	shell.openModule("providers")
+	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	for attempt := 0; attempt < 40 && len(shell.providers.native) == 0; attempt++ {
+		tester.Frame()
+	}
+	if err := tester.Click("用 opencode-go 的模型"); err != nil {
+		t.Fatalf("open the provider's models: %v", err)
+	}
+	frames(tester)
+	if !chat.modelPicker.open || chat.modelPicker.provider != "opencode-go" {
+		t.Fatalf("the row action opens the picker on that provider, got %+v", chat.modelPicker)
+	}
+	if shell.providers.editing != "" {
+		t.Fatalf("the model action does not open the editor, editing %q", shell.providers.editing)
+	}
+}

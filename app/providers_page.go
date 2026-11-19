@@ -41,6 +41,7 @@ type providersPageState struct {
 	revision     int
 	nativeFailed string
 	addOpen      bool
+	editing      string
 	draft        providerDraft
 	saving       bool
 	saveFailed   string
@@ -250,9 +251,6 @@ func (s *shellState) panelProviders(ctx *ui.Context) {
 			kit.Text(ctx, "供应商", 12).TextColor(pal.Foreground2).SingleLine()
 			ui.Spacer(ctx)
 			s.providerSearch(ctx, pal)
-			if kit.Button(ctx, "添加供应商", kit.ButtonOpts{Variant: kit.Default, Size: kit.SizeSm}).Clicked() {
-				s.addProviderDraft()
-			}
 			if kit.IconButton(ctx, iconRefresh, "刷新供应商", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
 				s.refreshProviders()
 			}
@@ -261,8 +259,8 @@ func (s *shellState) panelProviders(ctx *ui.Context) {
 			kit.Text(ctx, "本机供应商写进 graph.config.json · Magpie 是可选的扩展", 11).TextColor(pal.Faint).Grow(1).SingleLine().Ellipsis("…")
 		})
 		ui.Box(ctx).Height(10)
-		if s.providers.addOpen {
-			s.addProviderForm(ctx, pal)
+		if s.providers.addOpen || s.providers.editing != "" {
+			s.providerEditorForm(ctx, pal)
 			ui.Box(ctx).Height(4)
 		}
 		kit.Text(ctx, "本机供应商", 12).FontWeight(600).TextColor(pal.Foreground2)
@@ -270,6 +268,11 @@ func (s *shellState) panelProviders(ctx *ui.Context) {
 			kit.Text(ctx, "读不到配置里的供应商："+s.providers.nativeFailed, 12).TextColor(pal.Amber)
 		}
 		s.nativeProvidersCard(ctx, pal)
+		ui.Row(ctx).FillWidth().Padding(2, 2).Children(func() {
+			if kit.Button(ctx, "添加供应商", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
+				s.addProviderDraft()
+			}
+		})
 		ui.Box(ctx).Height(14)
 		ui.Row(ctx).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 			kit.Text(ctx, "Magpie（扩展）", 12).FontWeight(600).TextColor(pal.Foreground2).Grow(1)

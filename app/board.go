@@ -489,6 +489,15 @@ func (s *shellState) boardPanelHeader(ctx *ui.Context, panel *boardPanel, freefo
 		Gap(th.Space(0.5)).AlignItems(ui.Center).Label(boardPanelTitle(panel.Kind) + "窗口")
 	header.Children(func() {
 		kit.Text(ctx, boardPanelTitle(panel.Kind), t.Text.Sm).TextColor(t.Muted).Grow(1).SingleLine().IgnoreInput(true)
+		if !freeform {
+			return
+		}
+		iconAction(ctx, iconFit, "在新标签页打开", false, 6, func() {
+			s.openModuleWithScope(panel.Kind, panel.Scope)
+		})
+		iconAction(ctx, iconClose, "移除", false, 6, func() {
+			s.closeModule(panel.ID)
+		})
 	})
 	return header
 }
