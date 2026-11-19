@@ -253,9 +253,12 @@ func TestGraphPageInitializesTheFleetAccentsItPaintsWith(t *testing.T) {
 func TestRightClickingAGraphNodeOpensItsDetailPage(t *testing.T) {
 	mock := &fleetGraphMock{topology: fleetTopologySample, fleet: ringGraphFleet()}
 	state, tester := fleetGraphTester(t, mock, ringGraphFleet())
-	if err := tester.RightClick("图节点 Research"); err != nil {
-		t.Fatalf("open the graph node menu: %v", err)
+	card, ok := tester.Find("图节点 Research")
+	if !ok {
+		t.Fatalf("the graph node card never rendered, texts %q", tester.Texts())
 	}
+	tester.RightClickAt(card.X+card.W/2, card.Y+6)
+	tester = frames(tester)
 	menu := tester.Menu()
 	found := false
 	for _, item := range menu {

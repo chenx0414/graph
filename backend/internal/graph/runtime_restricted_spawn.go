@@ -162,6 +162,7 @@ func (executor *sandboxExecutor) spawnAndWait(command RestrictedCommand, launche
 		command.Signal.RemoveEventListener(listener)
 	}
 	state.killTree()
+	awaitProcessGroupGone(pid)
 	ForgetSpawnGroup(pid)
 	if state.aborted {
 		panic(errors.New("Command aborted by user"))

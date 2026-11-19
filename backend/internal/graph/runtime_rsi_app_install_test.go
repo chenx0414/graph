@@ -4,9 +4,17 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+func requireDarwinBundleTools(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "darwin" {
+		t.Skip("an app bundle's identity is read with plutil, which only macOS ships")
+	}
+}
 
 func writeBundle(t *testing.T, bundle, identifier, version string) {
 	t.Helper()
@@ -42,6 +50,7 @@ func destination(t *testing.T) string {
 }
 
 func TestInstallVerdictAcceptsTheSameIdentityEvenThoughSigningChangesBytes(t *testing.T) {
+	requireDarwinBundleTools(t)
 	bundle := builtBundle(t)
 	dest := destination(t)
 	writeBundle(t, dest, "dev.graph.console", "0.2.0")
@@ -55,6 +64,7 @@ func TestInstallVerdictAcceptsTheSameIdentityEvenThoughSigningChangesBytes(t *te
 }
 
 func TestInstallVerdictRefusesAnotherBuildAtTheDestination(t *testing.T) {
+	requireDarwinBundleTools(t)
 	bundle := builtBundle(t)
 	dest := destination(t)
 	writeBundle(t, dest, "dev.graph.console", "0.1.0")
@@ -68,6 +78,7 @@ func TestInstallVerdictRefusesAnotherBuildAtTheDestination(t *testing.T) {
 }
 
 func TestInstallVerdictReportsAnInstallThatFailedAndLanded(t *testing.T) {
+	requireDarwinBundleTools(t)
 	bundle := builtBundle(t)
 	dest := destination(t)
 	writeBundle(t, dest, "dev.graph.console", "0.2.0")
@@ -78,6 +89,7 @@ func TestInstallVerdictReportsAnInstallThatFailedAndLanded(t *testing.T) {
 }
 
 func TestInstallVerdictNamesBothBundlesWhenNothingLanded(t *testing.T) {
+	requireDarwinBundleTools(t)
 	bundle := builtBundle(t)
 	dest := destination(t)
 	verdict := rsiAppInstallVerdict(bundle, dest, "no packaged app", errors.New("no packaged app at "+bundle))
