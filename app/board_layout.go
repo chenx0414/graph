@@ -46,8 +46,8 @@ const boardDefaultTitle = "白板"
 
 const (
 	boardContextRowWeight       = 1.0
-	boardNetworkRowWeight       = 4.67
-	boardCollaborationRowWeight = 2.61
+	boardNetworkRowWeight       = 2.11
+	boardCollaborationRowWeight = 1.42
 )
 
 const boardMinPaneWidth = 140

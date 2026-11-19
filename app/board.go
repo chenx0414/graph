@@ -251,7 +251,8 @@ func (s *shellState) boardNodeView(ctx *ui.Context, node *boardNode, path string
 					cell = ui.Column(ctx).Grow(slot.Weight).FillHeight().
 						MinWidth(s.boardNodeMinWidth(ctx, &slot.Node) + boardCardChrome(ctx))
 				} else {
-					cell = ui.Row(ctx).Grow(slot.Weight).FillWidth()
+					cell = ui.Row(ctx).Grow(slot.Weight).FillWidth().
+						MinHeight(s.boardNodeMinHeight(ctx, &slot.Node))
 				}
 				cell.Children(func() {
 					s.boardNodeView(ctx, &slot.Node, childPath, freeform, header)

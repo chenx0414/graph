@@ -48,3 +48,47 @@ func TestALongFlowCardKeepsABasicWidthAndScrolls(t *testing.T) {
 		t.Fatalf("a long-flow card keeps its basic width %.0f, got %0.1f", boardLongFlowMinWidth, collaboration.W)
 	}
 }
+
+func TestTheContextCardKeepsRoomForItsWholeContent(t *testing.T) {
+	state := contextOverviewShell(t, contextOverviewSettings)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	card, ok := tester.Find("当前上下文窗口")
+	if !ok {
+		t.Fatalf("the context card never rendered, texts %q", tester.Texts())
+	}
+	for _, label := range []string{"当前上下文", "上下文", "620.7k"} {
+		rect, ok := tester.Find(label)
+		if !ok {
+			continue
+		}
+		if rect.Y+rect.H > card.Y+card.H+1 {
+			t.Fatalf("%q runs past the card's bottom edge: label %+v card %+v", label, rect, card)
+		}
+	}
+	if _, ok := tester.Find("系统提示词"); !ok {
+		t.Fatalf("the legend rows fit inside the card, texts %q", tester.Texts())
+	}
+}
+
+func TestTheContextCardKeepsItsLegendInsideAtEveryWindowSize(t *testing.T) {
+	for _, size := range [][2]int{{1440, 900}, {1280, 800}} {
+		state := contextOverviewShell(t, contextOverviewSettings)
+		tester := frames(ui.NewTester(state.view, size[0], size[1]))
+		card, ok := tester.Find("当前上下文窗口")
+		if !ok {
+			t.Fatalf("%dx%d: the context card never rendered, texts %q", size[0], size[1], tester.Texts())
+		}
+		for _, label := range []string{"系统提示词", "注入内容"} {
+			rect, ok := tester.Find(label)
+			if !ok {
+				t.Fatalf("%dx%d: the legend label %q is missing, texts %q", size[0], size[1], label, tester.Texts())
+			}
+			if rect.H <= 0 {
+				t.Fatalf("%dx%d: the legend label %q is clipped to nothing", size[0], size[1], label)
+			}
+			if rect.Y+rect.H > card.Y+card.H+2 {
+				t.Fatalf("%dx%d: %q runs past the card's bottom edge: label %+v card %+v", size[0], size[1], label, rect, card)
+			}
+		}
+	}
+}

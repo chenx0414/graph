@@ -102,3 +102,47 @@ func boardCardChrome(ctx *ui.Context) float32 {
 func (s *shellState) boardPanelMinWidthWithChrome(ctx *ui.Context, panel *boardPanel) float32 {
 	return s.boardPanelMinWidth(ctx, panel) + boardCardChrome(ctx)
 }
+
+func (s *shellState) contextOverviewMinHeight(ctx *ui.Context) float32 {
+	th := ctx.Theme()
+	rows := float32(0)
+	parts := contextOverviewParts(trajectoryComposition{})
+	for start := 0; start < len(parts); start += 3 {
+		rows++
+	}
+	line := th.Space(9)
+	return th.Space(3)*2 + line + line + th.Space(4) + th.Space(2) + rows*line + (rows-1)*th.Space(1.5)
+}
+
+func (s *shellState) boardPanelMinHeight(ctx *ui.Context, panel *boardPanel) float32 {
+	switch panel.Kind {
+	case "context-overview":
+		return s.contextOverviewMinHeight(ctx)
+	}
+	return boardMinPaneHeight
+}
+
+func (s *shellState) boardNodeMinHeight(ctx *ui.Context, node *boardNode) float32 {
+	switch node.Kind {
+	case "panel":
+		panel := s.panelByID(node.PanelID)
+		if panel == nil {
+			return boardMinPaneHeight
+		}
+		return s.boardPanelMinHeight(ctx, panel)
+	case "split":
+		if node.Axis == "column" {
+			total := float32(0)
+			for index := range node.Children {
+				total += s.boardNodeMinHeight(ctx, &node.Children[index].Node)
+			}
+			return total
+		}
+		tallest := float32(0)
+		for index := range node.Children {
+			tallest = max(tallest, s.boardNodeMinHeight(ctx, &node.Children[index].Node))
+		}
+		return tallest
+	}
+	return boardMinPaneHeight
+}

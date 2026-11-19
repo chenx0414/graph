@@ -200,7 +200,7 @@ func TestTheDefaultFleetCardsKeepTheirInformationAtBothWindowSizes(t *testing.T)
 
 func TestTheDefaultBoardGivesEachCardItsAdmiralShare(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(ui.NewTester(state.view, 2000, 1400))
 	heights := map[string]float32{}
 	for _, kind := range []string{"context-overview", "agent-network", "fleet-collaboration"} {
 		rect, ok := tester.Find(boardPanelTitle(kind) + "窗口")
@@ -211,9 +211,9 @@ func TestTheDefaultBoardGivesEachCardItsAdmiralShare(t *testing.T) {
 	}
 	total := heights["context-overview"] + heights["agent-network"] + heights["fleet-collaboration"]
 	want := map[string]float32{
-		"context-overview":    0.121,
-		"agent-network":       0.564,
-		"fleet-collaboration": 0.315,
+		"context-overview":    0.221,
+		"agent-network":       0.466,
+		"fleet-collaboration": 0.313,
 	}
 	for kind, share := range want {
 		got := heights[kind] / total
