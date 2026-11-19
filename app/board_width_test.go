@@ -179,3 +179,27 @@ func TestTheBoardScrollsInsteadOfSqueezingCardsBelowTheirMinimum(t *testing.T) {
 		}
 	}
 }
+
+func TestTheFleetPageScrollsInsteadOfSqueezingCardsBelowTheirMinimum(t *testing.T) {
+	state := fleetServerShell(t, fleetSampleServer)
+	state.openModule("fleet")
+	tester := frames(ui.NewTester(state.view, 1024, 640))
+	for attempt := 0; attempt < 40 && state.fleet.data == nil && state.fleet.failed == ""; attempt++ {
+		tester.Frame()
+	}
+	frames(tester)
+	for _, kind := range []string{"fleet-kpi", "fleet-network", "fleet-collaboration", "fleet-events", "fleet-artifacts"} {
+		card, ok := state.board.rects[kind]
+		if !ok {
+			t.Fatalf("%s never laid out at the minimum window, rects %+v", kind, state.board.rects)
+		}
+		var want float32
+		frames(ui.NewTester(func(ctx *ui.Context) {
+			want = state.boardPanelMinHeight(ctx, &boardPanel{ID: kind, Kind: kind})
+			ui.Column(ctx).Fill()
+		}, 100, 100))
+		if card.H < want-1 {
+			t.Fatalf("%s is %0.1f high at the minimum window, want at least %0.1f", kind, card.H, want)
+		}
+	}
+}

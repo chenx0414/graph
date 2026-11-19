@@ -152,7 +152,7 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 			return
 		}
 		if page.Kind == fleetPageID {
-			ui.Column(ctx).Fill().Padding(10).Children(func() {
+			s.boardCanvas(ctx, func() {
 				s.boardNodeView(ctx, &page.Layout, "root", true, boardHeaderOnHover)
 			})
 			return
