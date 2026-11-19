@@ -1,10 +1,8 @@
 package graph
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync"
 )
 
@@ -14,9 +12,6 @@ type sandboxExecutor struct {
 }
 
 func newSandboxExecutor() *sandboxExecutor {
-	if runtime.GOOS != "darwin" {
-		panic(errors.New("Restricted execution has only been verified on macOS"))
-	}
 	return &sandboxExecutor{}
 }
 

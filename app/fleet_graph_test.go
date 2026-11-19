@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -138,12 +138,13 @@ func fleetGraphTester(t *testing.T, mock *fleetGraphMock, data *fleetSnapshot) (
 	})
 	state.board.active = len(state.board.pages) - 1
 	tester := ui.NewTester(state.view, 1440, 900)
-	for index := 0; index < 30; index++ {
+	tester.Frame()
+	for attempt := 0; attempt < 500 && state.graph.data == nil && state.graph.failed == ""; attempt++ {
+		runtime.Gosched()
 		tester.Frame()
-		if state.graph.data != nil || state.graph.failed != "" {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	}
+	if state.graph.data == nil && state.graph.failed == "" {
+		t.Fatalf("the graph page never finished loading its topology")
 	}
 	return state, tester
 }
