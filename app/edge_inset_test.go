@@ -226,7 +226,7 @@ func TestANearEdgeScrollSettlesInsteadOfFlappingEveryFrame(t *testing.T) {
 	}
 }
 
-func TestShortContentKeepsItsPaddingAndFadeOff(t *testing.T) {
+func TestShortContentKeepsItsEdgeClearance(t *testing.T) {
 	state := fourPaneShell(t)
 	state.conversations = []conversationSummary{{ID: "c1", Title: "唯一会话"}}
 	chat := state.chat
@@ -243,23 +243,32 @@ func TestShortContentKeepsItsPaddingAndFadeOff(t *testing.T) {
 		if scroll.MaxY != 0 {
 			t.Fatalf("%s has nothing to scroll, maxY %0.1f", name, scroll.MaxY)
 		}
-		if top, bottom := scroll.insets(); top != 0 || bottom != 0 {
-			t.Fatalf("%s holds content that fits: no edge needs clearance, got (%0.1f, %0.1f)", name, top, bottom)
+		if scroll.MaxY != 0 {
+			t.Fatalf("%s gains a scroll range from its own clearance, maxY %0.1f", name, scroll.MaxY)
+		}
+		if top, bottom := scroll.insets(); top != fadeEdgeClearance || bottom != fadeEdgeClearance {
+			t.Fatalf("%s holds content that fits: both edges keep their clearance, got (%0.1f, %0.1f)", name, top, bottom)
 		}
 		gradient := scroll.mask()
 		if gradient.Stops[1].At != 0 || gradient.Stops[2].At != 1 {
 			t.Fatalf("%s fades content that cannot scroll: top %0.2f bottom %0.2f", name, gradient.Stops[1].At, gradient.Stops[2].At)
 		}
 	}
-	if message, ok := tester.Find("短消息"); !ok || message.Y <= 0 || message.H <= 0 {
+	message, ok := tester.Find("短消息")
+	if !ok || message.H <= 0 {
 		t.Fatalf("the one message sits on screen, got %+v texts %q", message, tester.Texts())
 	}
-	if row, ok := tester.Find("唯一会话"); !ok || row.Y <= 0 || row.H <= 0 {
+	band, _ := tester.Find("对话标题")
+	if gap := message.Y - (band.Y + band.H); gap < fadeEdgeClearance-1 {
+		t.Fatalf("the one message keeps clear of the title band by %.1f, want %.1f: message %+v band %+v", gap, fadeEdgeClearance, message, band)
+	}
+	row, ok := tester.Find("唯一会话")
+	if !ok || row.Y <= 0 || row.H <= 0 {
 		t.Fatalf("the one conversation sits on screen, got %+v texts %q", row, tester.Texts())
 	}
 }
 
-func TestACardWhoseRowsFitKeepsNoEdgeClearance(t *testing.T) {
+func TestACardWhoseRowsFitKeepsItsEdgeClearance(t *testing.T) {
 	for _, rows := range []int{1, 2} {
 		state := fourPaneShell(t)
 		state.conversations = nil
@@ -283,16 +292,16 @@ func TestACardWhoseRowsFitKeepsNoEdgeClearance(t *testing.T) {
 		if scroll == nil || scroll.MaxY != 0 {
 			t.Fatalf("%d rows fit the card, maxY %0.1f", rows, scroll.MaxY)
 		}
-		if top, bottom := scroll.insets(); top != 0 || bottom != 0 {
-			t.Fatalf("%d rows fit the card: no edge needs clearance, got (%0.1f, %0.1f)", rows, top, bottom)
+		if top, bottom := scroll.insets(); top != fadeEdgeClearance || bottom != fadeEdgeClearance {
+			t.Fatalf("%d rows fit the card: both edges keep their clearance, got (%0.1f, %0.1f)", rows, top, bottom)
 		}
 		row, ok := tester.Find("历史行 00")
 		if !ok {
 			t.Fatalf("%d rows: the first row never rendered, texts %q", rows, tester.Texts())
 		}
 		card, _ := tester.Find(boardPanelTitle("history") + "窗口")
-		if gap := row.Y - card.Y; gap < boardPanelPadding-1 || gap > boardPanelPadding+1 {
-			t.Fatalf("%d rows: the first row keeps the card's own padding only, got %.1f: card %+v row %+v", rows, gap, card, row)
+		if gap := row.Y - card.Y; gap < boardPanelPadding+fadeEdgeClearance-1 || gap > boardPanelPadding+fadeEdgeClearance+1 {
+			t.Fatalf("%d rows: the first row keeps the card's padding plus the edge clearance, got %.1f: card %+v row %+v", rows, gap, card, row)
 		}
 	}
 }
@@ -304,10 +313,66 @@ func TestAnEmptyTranscriptHoldsNoScrollableEdges(t *testing.T) {
 	chat.status = ""
 	chat.loading = false
 	tester := frames(ui.NewTester(state.view, 1440, 900))
-	if top, bottom := chat.track.insets(); top != 0 || bottom != 0 {
-		t.Fatalf("an empty transcript holds no content: no edge needs clearance, got (%0.1f, %0.1f)", top, bottom)
+	if top, bottom := chat.track.insets(); top != fadeEdgeClearance || bottom != fadeEdgeClearance {
+		t.Fatalf("an empty transcript has nothing to scroll: both edges keep their clearance, got (%0.1f, %0.1f)", top, bottom)
+	}
+	if band := chat.track.mask(); band.Stops[1].At != 0 || band.Stops[2].At != 1 {
+		t.Fatalf("an empty transcript fades nothing: top %0.2f bottom %0.2f", band.Stops[1].At, band.Stops[2].At)
 	}
 	if !tester.HasText("还没有对话") {
 		t.Fatalf("an empty transcript says so, texts %q", tester.Texts())
+	}
+}
+
+func TestContentJustUnderOnePageSettlesInsteadOfPopingAScrollbar(t *testing.T) {
+	for _, messages := range []int{1, 10, 12, 13, 14, 20} {
+		state := fourPaneShell(t)
+		chat := state.chat
+		chat.messages = nil
+		for index := 0; index < messages; index++ {
+			chat.messages = append(chat.messages, transcriptMessage{
+				ID: fmt.Sprintf("m%02d", index), Seq: int64(index + 1), Role: "assistant", Kind: "chat",
+				Text: fmt.Sprintf("消息 %02d", index), State: "done", CreatedAt: 1700000000000,
+			})
+		}
+		chat.status = ""
+		chat.loading = false
+		tester := frames(ui.NewTester(state.view, 1440, 900))
+		settled := chat.track.MaxY
+		top, bottom := chat.track.insets()
+		for frame := 0; frame < 8; frame++ {
+			tester.Frame()
+			if chat.track.MaxY != settled {
+				t.Fatalf("%d messages: the transcript reflows on frame %d, maxY %.1f against %.1f", messages, frame, chat.track.MaxY, settled)
+			}
+			if gotTop, gotBottom := chat.track.insets(); gotTop != top || gotBottom != bottom {
+				t.Fatalf("%d messages: the clearance flips on frame %d, (%0.1f, %0.1f) against (%0.1f, %0.1f)", messages, frame, gotTop, gotBottom, top, bottom)
+			}
+		}
+	}
+}
+
+func TestContentThatFillsThePageKeepsTheClearanceThatFits(t *testing.T) {
+	for _, messages := range []int{12, 13, 14} {
+		state := fourPaneShell(t)
+		chat := state.chat
+		chat.messages = nil
+		for index := 0; index < messages; index++ {
+			chat.messages = append(chat.messages, transcriptMessage{
+				ID: fmt.Sprintf("m%02d", index), Seq: int64(index + 1), Role: "assistant", Kind: "chat",
+				Text: fmt.Sprintf("消息 %02d", index), State: "done", CreatedAt: 1700000000000,
+			})
+		}
+		chat.status = ""
+		chat.loading = false
+		tester := frames(ui.NewTester(state.view, 1440, 900))
+		tester.Frame()
+		top, bottom := chat.track.insets()
+		if chat.track.MaxY == 0 && (top != fadeEdgeClearance || bottom != fadeEdgeClearance) {
+			t.Fatalf("%d messages fit the page: both edges keep their clearance, got (%0.1f, %0.1f)", messages, top, bottom)
+		}
+		if top > fadeEdgeClearance || bottom > fadeEdgeClearance {
+			t.Fatalf("%d messages ask for more clearance than the page allows: (%0.1f, %0.1f)", messages, top, bottom)
+		}
 	}
 }

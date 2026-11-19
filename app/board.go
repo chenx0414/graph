@@ -276,7 +276,10 @@ func (s *shellState) boardCanvas(ctx *ui.Context, build func()) {
 	want := s.boardNodeMinHeight(ctx, &s.boardPage().Layout) + padding*2 + top + bottom
 	height := max(s.board.viewport.H, want)
 	scroll := ui.Scroll(ctx).Fill().TrackScroll(&s.board.viewportScroll.ScrollState)
-	scroll.Draw(func(p *ui.Painter, r ui.Rect) { s.board.viewport = r })
+	scroll.Draw(func(p *ui.Painter, r ui.Rect) {
+		s.board.viewport = r
+		s.board.viewportScroll.viewport = r.H
+	})
 	scroll.MaskLinearGradient(s.board.viewportScroll.mask())
 	scroll.Children(func() {
 		canvas := ui.Column(ctx).FillWidth().Height(height).Padding(padding+top, padding, padding+bottom, padding)
@@ -407,6 +410,7 @@ func (s *shellState) boardPanelContent(ctx *ui.Context, panel *boardPanel) {
 	scroll := s.boardScrollOf(panel.ID)
 	top, bottom := scroll.insets()
 	body := ui.Scroll(ctx).Grow(1).Padding(boardPanelPadding).TrackScroll(&scroll.ScrollState)
+	body.Draw(func(p *ui.Painter, r ui.Rect) { scroll.viewport = r.H })
 	body.MaskLinearGradient(scroll.mask())
 	body.Children(func() {
 		content := ui.Column(ctx).FillWidth().Gap(th.Space(2))

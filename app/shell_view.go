@@ -215,7 +215,8 @@ func (s *shellState) conversationList(ctx *ui.Context) {
 			})
 			stack.Margin(0, 0, th.Space(0.5), 0)
 		}).Grow(1).Padding(top, 0, bottom, 0).TrackScroll(&s.listScroll.ScrollState).
-			MaskLinearGradient(s.listScroll.mask())
+			MaskLinearGradient(s.listScroll.mask()).
+			Draw(func(p *ui.Painter, r ui.Rect) { s.listScroll.viewport = r.H })
 	})
 }
 

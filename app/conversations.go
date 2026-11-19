@@ -276,7 +276,8 @@ func (c *chatState) transcript(ctx *ui.Context) {
 		top, bottom := c.track.insets()
 		list.Grow(1).Padding(top, th.Space(4), th.Space(4)+bottom, th.Space(4)).Gap(th.Space(3)).
 			TrackScroll(&c.track.ScrollState)
-		list.MaskLinearGradient(c.track.mask())
+		list.MaskLinearGradient(c.track.mask()).
+			Draw(func(p *ui.Painter, r ui.Rect) { c.track.viewport = r.H })
 	})
 	first, last := c.list.Visible()
 	c.listFirst, c.listLast = first, last
