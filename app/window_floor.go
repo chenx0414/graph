@@ -16,6 +16,10 @@ func (s *shellState) whiteboardPaneMinWidth() float32 {
 	return max(whiteboardPaneMin, s.windowFloor)
 }
 
+func (s *shellState) whiteboardPaneWidth() float32 {
+	return whiteboardPaneMin
+}
+
 func windowFloorWidth(whiteboard float32) int {
 	th := ui.LightTheme()
 	width := railWidth + th.Space(1.25) + listWidth + gwtheme.Stroke +
