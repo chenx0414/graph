@@ -235,8 +235,12 @@ func (s *shellState) chatPane(ctx *ui.Context) {
 
 func (s *shellState) whiteboard(ctx *ui.Context) {
 	t := gwtheme.Of(ctx)
-	column := ui.Column(ctx).Grow(1.35).MinWidth(320).FillHeight().Background(t.Sidebar)
+	column := ui.Column(ctx).Grow(1.35).MinWidth(s.whiteboardMinWidth(ctx)).FillHeight().Background(t.Sidebar)
 	column.Children(func() {
 		s.boardPageView(ctx)
 	})
+}
+
+func (s *shellState) whiteboardMinWidth(ctx *ui.Context) float32 {
+	return max(float32(320), s.boardPageMinWidth(ctx)+ctx.Theme().Space(2.5))
 }

@@ -170,7 +170,8 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 						ui.Row(ctx).FillWidth().Height(boardCardHeight).Gap(10).Children(func() {
 							for index := range panels {
 								panel := panels[index]
-								cell := ui.Column(ctx).Grow(1).FillHeight()
+								cell := ui.Column(ctx).Grow(1).FillHeight().
+									MinWidth(s.boardPanelMinWidthWithChrome(ctx, &panel))
 								cell.Children(func() {
 									s.boardPanelView(ctx, &panel, false, boardHeaderAlways)
 								})
@@ -247,7 +248,8 @@ func (s *shellState) boardNodeView(ctx *ui.Context, node *boardNode, path string
 				childPath := path + "/" + strconv.Itoa(index)
 				var cell ui.Element
 				if node.Axis == "row" {
-					cell = ui.Column(ctx).Grow(slot.Weight).FillHeight()
+					cell = ui.Column(ctx).Grow(slot.Weight).FillHeight().
+						MinWidth(s.boardNodeMinWidth(ctx, &slot.Node) + boardCardChrome(ctx))
 				} else {
 					cell = ui.Row(ctx).Grow(slot.Weight).FillWidth()
 				}
