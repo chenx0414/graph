@@ -259,13 +259,14 @@ func TestTheWhiteboardHeaderSlidesOverItsContentWithoutMovingIt(t *testing.T) {
 	if !ok {
 		t.Fatalf("the task row never rendered, texts %q", tester.Texts())
 	}
-	if tester.HasText("在新标签页打开") {
+	hasTitle := func() bool { return tester.HasText("任务清单标题") }
+	if hasTitle() {
 		t.Fatalf("the card header starts tucked away, texts %q", tester.Texts())
 	}
 	tester.Move(card.X+card.W/2, card.Y+card.H/2)
 	tester.Advance(300 * time.Millisecond)
 	frames(tester)
-	if !tester.HasText("在新标签页打开") {
+	if !hasTitle() {
 		t.Fatalf("hovering reveals the card header, texts %q", tester.Texts())
 	}
 	after, ok := tester.Find("实现四栏页面 · running · executing")

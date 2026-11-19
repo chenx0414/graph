@@ -115,15 +115,12 @@ func TestTheDefaultBoardShowsTheContextNetworkAndCollaboration(t *testing.T) {
 func TestTheFleetCardsRevealTheirHeaderOnHover(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
 	tester := openFleetTester(t, state)
-	hidden := []string{"编队总览", "Agent 网络", "事件检查", "共享产物"}
+	hidden := []string{"编队总览", "Agent 网络", "跨 Agent 协作", "事件检查", "共享产物"}
 	visible := func(tester *ui.Tester) []string {
 		shown := []string{}
 		for _, title := range hidden {
-			for _, text := range tester.Texts() {
-				if text == title {
-					shown = append(shown, title)
-					break
-				}
+			if tester.HasText(title + "标题") {
+				shown = append(shown, title)
 			}
 		}
 		return shown
@@ -131,8 +128,8 @@ func TestTheFleetCardsRevealTheirHeaderOnHover(t *testing.T) {
 	if shown := visible(tester); len(shown) != 0 {
 		t.Fatalf("the fleet cards start with their headers tucked away, shown %q texts %q", shown, tester.Texts())
 	}
-	if tester.HasText("在新标签页打开") {
-		t.Fatalf("the fleet cards keep a permanent header, texts %q", tester.Texts())
+	if shown := visible(tester); len(shown) != 0 {
+		t.Fatalf("the fleet cards keep a permanent header, shown %q", shown)
 	}
 	for _, kind := range []string{"fleet-kpi", "fleet-network", "fleet-collaboration", "fleet-events", "fleet-artifacts"} {
 		rect, ok := state.board.rects[kind]
@@ -142,11 +139,8 @@ func TestTheFleetCardsRevealTheirHeaderOnHover(t *testing.T) {
 		tester.Move(rect.X+rect.W/2, rect.Y+rect.H/2)
 		tester.Advance(300 * 1e6)
 		tester = frames(tester)
-		if !tester.HasText("在新标签页打开") {
-			t.Fatalf("hovering %s must reveal its header, texts %q", kind, tester.Texts())
-		}
-		if shown := visible(tester); len(shown) > 1 {
-			t.Fatalf("only the hovered card shows its header, shown %q", shown)
+		if shown := visible(tester); len(shown) != 1 {
+			t.Fatalf("hovering %s must reveal exactly its header, shown %q texts %q", kind, shown, tester.Texts())
 		}
 	}
 	tester.Move(10, 10)

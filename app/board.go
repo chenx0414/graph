@@ -148,7 +148,8 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 			if page.Title == boardPanelTitle(page.Panels[0].Kind) {
 				header = boardHeaderNone
 			}
-			s.boardPanelView(ctx, &page.Panels[0], false, header)
+			s.boardPanelViewShaped(ctx, &page.Panels[0], false, header,
+				[4]float32{0, t.Radius.Xl, t.Radius.Xl, 0})
 			return
 		}
 		if page.Kind == fleetPageID {
@@ -359,18 +360,32 @@ func iconAction(ctx *ui.Context, icon *ui.SVG, label string, selected bool, size
 
 func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform bool, header boardHeaderMode) {
 	t := gwtheme.Of(ctx)
+	s.boardPanelViewShaped(ctx, panel, freeform, header, [4]float32{t.Radius.Xl, t.Radius.Xl, t.Radius.Xl, t.Radius.Xl})
+}
+
+func (s *shellState) boardPanelViewShaped(ctx *ui.Context, panel *boardPanel, freeform bool, header boardHeaderMode, corners [4]float32) {
+	t := gwtheme.Of(ctx)
 	card := kit.Panel(ctx, t.Radius.Xl)
+	card.Radius(corners[0], corners[1], corners[2], corners[3])
 	card.Fill()
 	if header != boardHeaderNone {
 		card.Label(boardPanelTitle(panel.Kind) + "窗口")
 	}
 	kit.Elevate(ctx, card, shellShadow)
 	card.Draw(func(p *ui.Painter, r ui.Rect) {
-		if freeform {
+		if s.board.rects != nil {
 			s.board.rects[panel.ID] = r
 		}
 	})
 	card.OnClick(func() {})
+	card.ContextMenu(func(m *ui.Menu) {
+		if m.Item("在新标签页打开").Chosen() {
+			s.openModuleWithScope(panel.Kind, panel.Scope)
+		}
+		if m.Item("移除").Chosen() {
+			s.closeModule(panel.ID)
+		}
+	})
 	headerProgress := float32(1)
 	if header == boardHeaderOnHover {
 		target := float32(0)
@@ -432,7 +447,7 @@ func (s *shellState) boardPanelContent(ctx *ui.Context, panel *boardPanel) {
 
 func (s *shellState) boardFloatingHeader(ctx *ui.Context, panel *boardPanel, freeform bool, progress float32) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
-	header := s.boardPanelHeader(ctx, panel, freeform)
+	header := s.boardPanelHeader(ctx, panel, freeform).Label(boardPanelTitle(panel.Kind) + "标题")
 	header.Absolute().Top(0).Left(0).Right(0).Background(t.Background).
 		Translate(0, -(1-progress)*th.Space(9)).Opacity(progress).
 		Hidden(progress <= 0.001).
@@ -474,15 +489,6 @@ func (s *shellState) boardPanelHeader(ctx *ui.Context, panel *boardPanel, freefo
 		Gap(th.Space(0.5)).AlignItems(ui.Center).Label(boardPanelTitle(panel.Kind) + "窗口")
 	header.Children(func() {
 		kit.Text(ctx, boardPanelTitle(panel.Kind), t.Text.Sm).TextColor(t.Muted).Grow(1).SingleLine().IgnoreInput(true)
-		if !freeform {
-			return
-		}
-		iconAction(ctx, iconFit, "在新标签页打开", false, 6, func() {
-			s.openModuleWithScope(panel.Kind, panel.Scope)
-		})
-		iconAction(ctx, iconClose, "移除", false, 6, func() {
-			s.closeModule(panel.ID)
-		})
 	})
 	return header
 }

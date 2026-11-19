@@ -47,7 +47,7 @@ func TestTheProvidersPageReadsMagpie(t *testing.T) {
 		t.Fatalf("every magpie provider is listed, got %d (%q)", len(shell.providers.entries), shell.providers.failed)
 	}
 	for _, want := range []string{
-		"模型", "供应商", "数据源 · Magpie",
+		"模型", "供应商", "Magpie（扩展）",
 		"ChatGPT", "DeepSeek", "Google Gemini",
 		"套餐", "按量付费",
 		"api.deepseek.com · 2 个模型",
@@ -197,13 +197,14 @@ func TestTheProvidersPageDoesNotOfferFakeWriteActions(t *testing.T) {
 	shell.openModule("providers")
 	tester := frames(ui.NewTester(shell.view, 1440, 900))
 	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) > 0 })
-	for _, wrong := range []string{"＋ 添加供应商", "账号打包"} {
-		if tester.HasText(wrong) {
-			t.Fatalf("magpie owns these actions; the page must not show %q, texts %q", wrong, tester.Texts())
-		}
+	if !tester.HasText("添加供应商") {
+		t.Fatalf("the page offers its own provider onboarding, texts %q", tester.Texts())
+	}
+	if tester.HasText("账号打包") {
+		t.Fatalf("the magpie section stays read-only, texts %q", tester.Texts())
 	}
 	if !tester.HasText("供应商与账号都由 Magpie 管理") {
-		t.Fatalf("the page says who owns them, texts %q", tester.Texts())
+		t.Fatalf("the page says who owns the magpie rows, texts %q", tester.Texts())
 	}
 }
 

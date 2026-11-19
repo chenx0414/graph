@@ -81,8 +81,8 @@ func TestTheProvidersPageKeepsAReadFailureUntilRetry(t *testing.T) {
 	shell := newShellState(server.URL, "")
 	shell.openModule("providers")
 	tester := frames(ui.NewTester(shell.view, 1440, 900))
-	providersFrameUntil(t, tester, func() bool { return tester.HasText("读不到供应商") })
-	if !tester.HasText("读不到供应商") {
+	providersFrameUntil(t, tester, func() bool { return tester.HasText("读不到 magpie") })
+	if !tester.HasText("读不到 magpie") {
 		t.Fatalf("a failed read stays visible, texts %q", tester.Texts())
 	}
 	settled := atomic.LoadInt32(&hits)
@@ -100,7 +100,7 @@ func TestTheProvidersPageKeepsAReadFailureUntilRetry(t *testing.T) {
 	if len(shell.providers.entries) != 2 {
 		t.Fatalf("the retry loads the providers, entries %d failed %q", len(shell.providers.entries), shell.providers.failed)
 	}
-	if tester.HasText("读不到供应商") {
+	if tester.HasText("读不到 magpie") {
 		t.Fatalf("a recovered read clears the failure, texts %q", tester.Texts())
 	}
 }

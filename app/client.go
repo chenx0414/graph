@@ -3,9 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -15,6 +15,18 @@ const apiTimeout = 30 * time.Second
 type errStatus string
 
 func (e errStatus) Error() string { return "服务端拒绝：" + string(e) }
+
+type httpStatusError struct {
+	path string
+	code int
+}
+
+func (e httpStatusError) Error() string { return e.path + " 返回 " + strconv.Itoa(e.code) }
+
+func isNotFound(err error) bool {
+	status, ok := err.(httpStatusError)
+	return ok && status.code == http.StatusNotFound
+}
 
 func rejectionMessage(payload []byte) string {
 	var body struct {
@@ -51,7 +63,7 @@ func (c apiClient) get(path string) ([]byte, error) {
 		return payload, err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return payload, fmt.Errorf("%s 返回 %d", path, response.StatusCode)
+		return payload, httpStatusError{path: path, code: response.StatusCode}
 	}
 	return payload, nil
 }

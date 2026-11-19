@@ -34,6 +34,18 @@ type providersPageState struct {
 	source          magpieProvidersPayload
 	notice          string
 	openPath        func(string) error
+
+	native       []nativeProviderRow
+	platforms    []platformPreset
+	document     map[string]any
+	revision     int
+	nativeFailed string
+	addOpen      bool
+	draft        providerDraft
+	saving       bool
+	saveFailed   string
+	appToken     string
+	secretsFile  string
 }
 
 func (s *shellState) providerStateOf(id string) providerState {
@@ -70,13 +82,6 @@ func modelProviderID(id string) string {
 	return id
 }
 
-func (s *shellState) ensureProviders() {
-	if s.providersPhase() != providersIdlePhase {
-		return
-	}
-	s.loadProviders()
-}
-
 func (s *shellState) refreshProviders() {
 	if s.providers.loading {
 		return
@@ -96,38 +101,6 @@ func (s *shellState) dropCachedModels() {
 	s.modelMetaMiss = nil
 	s.modelMetaLoading = false
 	s.modelMetaError = ""
-}
-
-func (s *shellState) loadProviders() {
-	s.providers.loading = true
-	api := s.api
-	go func() {
-		payload, err := api.get("/api/providers/magpie")
-		var entries []providerEntry
-		var enabled map[string]bool
-		var source magpieProvidersPayload
-		if err == nil {
-			entries, enabled, source, err = parseMagpieProviders(payload)
-			if err == nil && !source.Available && source.Error != "" {
-				err = errStatus(source.Error)
-			}
-		}
-		onUI(s.window, func() {
-			s.providers.loading = false
-			s.providers.attempted = true
-			if err != nil {
-				s.providers.failed = err.Error()
-				s.providers.source = source
-				s.frame()
-				return
-			}
-			s.providers.failed = ""
-			s.providers.entries = entries
-			s.providers.enabled = enabled
-			s.providers.source = source
-			s.frame()
-		})
-	}()
 }
 
 func providerInitial(label string) string {
@@ -278,37 +251,50 @@ func (s *shellState) panelProviders(ctx *ui.Context) {
 			kit.Text(ctx, "供应商", 12).TextColor(pal.Foreground2).SingleLine()
 			ui.Spacer(ctx)
 			s.providerSearch(ctx, pal)
-			if kit.Button(ctx, "打开 Magpie 配置", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
-				s.openMagpie()
+			if kit.Button(ctx, "添加供应商", kit.ButtonOpts{Variant: kit.Default, Size: kit.SizeSm}).Clicked() {
+				s.addProviderDraft()
 			}
 			if kit.IconButton(ctx, iconRefresh, "刷新供应商", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
 				s.refreshProviders()
 			}
 		})
-		sources := "数据源 · Magpie"
-		if dir := strings.TrimSpace(s.providers.source.Dir); dir != "" {
-			sources += " · " + dir
-		}
 		ui.Row(ctx).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-			kit.Text(ctx, sources, 11).TextColor(pal.Faint).Grow(1).SingleLine().Ellipsis("…")
-			kit.Text(ctx, "开关在 Magpie 里 · 改完点右上刷新", 11).TextColor(pal.Faint).SingleLine()
+			kit.Text(ctx, "本机供应商写进 graph.config.json · Magpie 是可选的扩展", 11).TextColor(pal.Faint).Grow(1).SingleLine().Ellipsis("…")
 		})
 		ui.Box(ctx).Height(10)
-		phase := s.providersPhase()
-		switch phase {
-		case providersIdlePhase, providersLoadingPhase:
-			skeletonProvidersPage(ctx)
-		case providersFailedPhase:
-			s.providerFailure(ctx, pal)
-		case providersEmptyPhase:
-			s.providerRowsCard(ctx, pal, nil)
-		default:
-			s.providerRowsCard(ctx, pal, providersMatching(s.providers.entries, strings.ToLower(strings.TrimSpace(s.providers.search))))
-			if s.providers.failed != "" {
-				kit.Text(ctx, "读不到供应商："+s.providers.failed, 12).TextColor(pal.Amber)
-			}
+		if s.providers.addOpen {
+			s.addProviderForm(ctx, pal)
+			ui.Box(ctx).Height(4)
 		}
-		kit.Text(ctx, "供应商与账号都由 Magpie 管理 · 这里只读", 11).TextColor(pal.Faint).Padding(8, 2)
+		kit.Text(ctx, "本机供应商", 12).FontWeight(600).TextColor(pal.Foreground2)
+		if s.providers.nativeFailed != "" {
+			kit.Text(ctx, "读不到配置里的供应商："+s.providers.nativeFailed, 12).TextColor(pal.Amber)
+		}
+		s.nativeProvidersCard(ctx, pal)
+		ui.Box(ctx).Height(14)
+		ui.Row(ctx).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+			kit.Text(ctx, "Magpie（扩展）", 12).FontWeight(600).TextColor(pal.Foreground2).Grow(1)
+			if s.providers.source.Available {
+				if kit.Button(ctx, "打开 Magpie 配置", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
+					s.openMagpie()
+				}
+			}
+		})
+		switch {
+		case len(s.providers.entries) > 0:
+			kit.Text(ctx, "Magpie 里已连接的供应商会直接出现在模型选择器里，不需要导入。供应商与账号都由 Magpie 管理 · 开关在 Magpie 里。",
+				11).TextColor(pal.Faint)
+			s.providerRowsCard(ctx, pal, providersMatching(s.providers.entries, strings.ToLower(strings.TrimSpace(s.providers.search))))
+		case s.providers.failed != "":
+			ui.Row(ctx).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+				kit.Text(ctx, "读不到 magpie："+s.providers.failed, 11.5).TextColor(pal.Amber).Grow(1).SingleLine().Ellipsis("…")
+				if kit.Button(ctx, "重试供应商", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
+					s.refreshProviders()
+				}
+			})
+		default:
+			kit.Text(ctx, "没有检测到 Magpie。不影响本机供应商。", 11.5).TextColor(pal.Faint)
+		}
 	})
 }
 
