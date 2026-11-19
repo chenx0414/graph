@@ -235,7 +235,6 @@ func (s *shellState) providerSearch(ctx *ui.Context, pal magpiePalette) {
 	field := ui.TextInputBase(ctx, &s.providers.search)
 	field.Width(220).Height(26).PaddingX(9).Radius(7).Border(gwtheme.Stroke, pal.Line).
 		Background(pal.Card).FontSize(12).Placeholder("查找供应商").Label("查找供应商").FocusRing(false)
-	kit.Text(ctx, "在 Magpie 里添加账号", 11).TextColor(pal.Faint).SingleLine()
 }
 
 func (s *shellState) panelProviders(ctx *ui.Context) {
