@@ -38,19 +38,20 @@ const (
 )
 
 type boardState struct {
-	pages       []boardPage
-	active      int
-	path        string
-	drag        *boardDrag
-	rects       map[string]ui.Rect
-	splits      map[string]ui.Rect
-	scrolls     map[string]*ui.ScrollState
-	press       string
-	pressX      float32
-	pressY      float32
-	hoverSince  map[string]time.Time
-	pendingDrop func()
-	viewport    ui.Rect
+	pages          []boardPage
+	active         int
+	path           string
+	drag           *boardDrag
+	rects          map[string]ui.Rect
+	splits         map[string]ui.Rect
+	scrolls        map[string]*edgeScroll
+	press          string
+	pressX         float32
+	pressY         float32
+	hoverSince     map[string]time.Time
+	pendingDrop    func()
+	viewport       ui.Rect
+	viewportScroll edgeScroll
 }
 
 type boardDrag struct {
@@ -61,13 +62,13 @@ type boardDrag struct {
 	dy      float32
 }
 
-func (s *shellState) boardScrollOf(panelID string) *ui.ScrollState {
+func (s *shellState) boardScrollOf(panelID string) *edgeScroll {
 	if s.board.scrolls == nil {
-		s.board.scrolls = map[string]*ui.ScrollState{}
+		s.board.scrolls = map[string]*edgeScroll{}
 	}
 	scroll := s.board.scrolls[panelID]
 	if scroll == nil {
-		scroll = &ui.ScrollState{}
+		scroll = &edgeScroll{}
 		s.board.scrolls[panelID] = scroll
 	}
 	return scroll
@@ -165,8 +166,10 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 				s.boardScroll.Y = 0
 				s.boardScrollTop = false
 			}
-			ui.Scroll(ctx).Fill().TrackScroll(&s.boardScroll).Children(func() {
-				grid := ui.Column(ctx).FillWidth().Padding(10).Gap(10)
+			top, bottom := s.boardScroll.insets()
+			ui.Scroll(ctx).Fill().TrackScroll(&s.boardScroll.ScrollState).
+				MaskLinearGradient(s.boardScroll.mask()).Children(func() {
+				grid := ui.Column(ctx).FillWidth().Padding(10+top, 10, 10+bottom, 10).Gap(10)
 				grid.Children(func() {
 					rows := boardModuleRows(page.Panels)
 					for _, row := range rows {
@@ -269,12 +272,14 @@ func (s *shellState) boardNodeView(ctx *ui.Context, node *boardNode, path string
 func (s *shellState) boardCanvas(ctx *ui.Context, build func()) {
 	th := ctx.Theme()
 	padding := th.Space(2.5)
-	want := s.boardNodeMinHeight(ctx, &s.boardPage().Layout) + padding*2
+	top, bottom := s.board.viewportScroll.insets()
+	want := s.boardNodeMinHeight(ctx, &s.boardPage().Layout) + padding*2 + top + bottom
 	height := max(s.board.viewport.H, want)
-	scroll := ui.Scroll(ctx).Fill()
+	scroll := ui.Scroll(ctx).Fill().TrackScroll(&s.board.viewportScroll.ScrollState)
 	scroll.Draw(func(p *ui.Painter, r ui.Rect) { s.board.viewport = r })
+	scroll.MaskLinearGradient(s.board.viewportScroll.mask())
 	scroll.Children(func() {
-		canvas := ui.Column(ctx).FillWidth().Height(height).Padding(padding)
+		canvas := ui.Column(ctx).FillWidth().Height(height).Padding(padding+top, padding, padding+bottom, padding)
 		canvas.Children(build)
 	})
 }
@@ -400,14 +405,9 @@ func (s *shellState) boardPanelContent(ctx *ui.Context, panel *boardPanel) {
 		return
 	}
 	scroll := s.boardScrollOf(panel.ID)
-	top, bottom := fadeInsets(scroll)
-	body := ui.Scroll(ctx).Grow(1).Padding(boardPanelPadding).TrackScroll(scroll)
-	body.MaskLinearGradient(ui.LinearGradient{Angle: 180, Stops: []ui.GradientStop{
-		{Color: ui.Transparent, At: 0},
-		{Color: ui.RGB(0, 0, 0), At: 0.08},
-		{Color: ui.RGB(0, 0, 0), At: 0.92},
-		{Color: ui.Transparent, At: 1},
-	}})
+	top, bottom := scroll.insets()
+	body := ui.Scroll(ctx).Grow(1).Padding(boardPanelPadding).TrackScroll(&scroll.ScrollState)
+	body.MaskLinearGradient(scroll.mask())
 	body.Children(func() {
 		content := ui.Column(ctx).FillWidth().Gap(th.Space(2))
 		if top > 0 || bottom > 0 {

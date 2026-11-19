@@ -45,7 +45,7 @@ func TestTheChatTranscriptStartsAtItsDividerWithoutABlankBand(t *testing.T) {
 	if first.Y < 0 {
 		t.Fatalf("the first row sits above the transcript, got %.1f", first.Y)
 	}
-	top, bottom := fadeInsets(nil)
+	top, bottom := (*edgeScroll)(nil).insets()
 	if top != 0 || bottom != 0 {
 		t.Fatalf("a transcript without a tracked scroll keeps its rows at the edges, got %.1f and %.1f", top, bottom)
 	}

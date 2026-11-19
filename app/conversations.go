@@ -273,13 +273,10 @@ func (c *chatState) transcript(ctx *ui.Context) {
 				c.messageRow(ctx, row.run.messages[0])
 			}
 		})
-		list.Grow(1).Padding(0, th.Space(4), th.Space(4), th.Space(4)).Gap(th.Space(3))
-		list.MaskLinearGradient(ui.LinearGradient{Angle: 180, Stops: []ui.GradientStop{
-			{Color: ui.Transparent, At: 0},
-			{Color: ui.RGB(0, 0, 0), At: 0.06},
-			{Color: ui.RGB(0, 0, 0), At: 0.94},
-			{Color: ui.Transparent, At: 1},
-		}})
+		top, bottom := c.track.insets()
+		list.Grow(1).Padding(top, th.Space(4), th.Space(4)+bottom, th.Space(4)).Gap(th.Space(3)).
+			TrackScroll(&c.track.ScrollState)
+		list.MaskLinearGradient(c.track.mask())
 	})
 	first, last := c.list.Visible()
 	c.listFirst, c.listLast = first, last

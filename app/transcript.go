@@ -180,6 +180,7 @@ type chatState struct {
 	oldestSeq          int64
 	listFirst          int
 	listLast           int
+	track              edgeScroll
 	boundaryMu         sync.RWMutex
 	runBoundaries      map[string]bool
 	jumpMessageID      string

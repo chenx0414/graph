@@ -177,6 +177,7 @@ func (s *shellState) conversationList(ctx *ui.Context) {
 	}
 	fade := ui.Box(ctx).Grow(1)
 	fade.Children(func() {
+		top, bottom := s.listScroll.insets()
 		ui.List(ctx, &s.list, len(conversations), func(index int) {
 			conversation := conversations[index]
 			label := s.titleOf(conversation.ID)
@@ -213,7 +214,8 @@ func (s *shellState) conversationList(ctx *ui.Context) {
 				}
 			})
 			stack.Margin(0, 0, th.Space(0.5), 0)
-		}).Grow(1)
+		}).Grow(1).Padding(top, 0, bottom, 0).TrackScroll(&s.listScroll.ScrollState).
+			MaskLinearGradient(s.listScroll.mask())
 	})
 }
 

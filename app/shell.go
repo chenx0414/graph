@@ -47,7 +47,9 @@ type shellState struct {
 	supervisorID      string
 	broken            bool
 	board             boardState
-	boardScroll       ui.ScrollState
+	boardScroll       edgeScroll
+	viewportScroll    edgeScroll
+	listScroll        edgeScroll
 	boardScrollTop    bool
 	dataReady         atomic.Bool
 	dataPending       atomic.Bool
