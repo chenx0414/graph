@@ -215,15 +215,16 @@ func TestTheWhiteboardHasTabsAndNoFloatingToolbar(t *testing.T) {
 }
 
 func TestTheComposerFitsTheMinimumWindow(t *testing.T) {
+	width, height := windowFloorWidth(), windowFloorHeight()
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1024, 640))
+	tester := frames(ui.NewTester(state.view, width, height))
 	for _, label := range []string{"轨迹", "13-Graph", "发送", "白板"} {
 		rect, ok := tester.Find(label)
 		if !ok {
 			t.Fatalf("%s never rendered, texts %q", label, tester.Texts())
 		}
-		if rect.X < 0 || rect.Y < 0 || rect.X+rect.W > 1024 || rect.Y+rect.H > 640 {
-			t.Fatalf("%s sits outside the window: %+v", label, rect)
+		if rect.X < 0 || rect.Y < 0 || rect.X+rect.W > float32(width) || rect.Y+rect.H > float32(height) {
+			t.Fatalf("%s sits outside the window at its minimum size %dx%d: %+v", label, width, height, rect)
 		}
 	}
 }

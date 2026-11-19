@@ -6,7 +6,7 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-func TestASingleCardModulePageSquaresItsLeftCorners(t *testing.T) {
+func TestASingleCardModulePageSitsOnTheWhiteboardBackdrop(t *testing.T) {
 	state := fourPaneShell(t)
 	state.openModule("settings")
 	tester := frames(ui.NewTester(state.view, 1598, 928))
@@ -15,14 +15,20 @@ func TestASingleCardModulePageSquaresItsLeftCorners(t *testing.T) {
 		t.Fatalf("the settings card never laid out, rects %+v", state.board.rects)
 	}
 	img := tester.Image()
-	card := img.RGBAAt(int(rect.X)+1, int(rect.Y)+1)
-	backdrop := img.RGBAAt(int(rect.X)-2, int(rect.Y)+1)
-	if card.R < 250 || card.G < 250 || card.B < 250 {
-		t.Fatalf("the top-left corner is rounded: %v against backdrop %v", card, backdrop)
+	for name, corner := range map[string][2]int{
+		"top-left":     {int(rect.X) + 1, int(rect.Y) + 1},
+		"top-right":    {int(rect.X+rect.W) - 2, int(rect.Y) + 1},
+		"bottom-left":  {int(rect.X) + 1, int(rect.Y+rect.H) - 2},
+		"bottom-right": {int(rect.X+rect.W) - 2, int(rect.Y+rect.H) - 2},
+	} {
+		pixel := img.RGBAAt(corner[0], corner[1])
+		if pixel.R >= 250 && pixel.G >= 250 && pixel.B >= 250 {
+			t.Fatalf("the %s corner must be rounded, got %v", name, pixel)
+		}
 	}
-	right := img.RGBAAt(int(rect.X+rect.W)-2, int(rect.Y)+1)
-	if right.R >= 250 && right.G >= 250 && right.B >= 250 {
-		t.Fatalf("the top-right corner must stay rounded, got %v", right)
+	backdrop := img.RGBAAt(int(rect.X)-4, int(rect.Y)+int(rect.H/2))
+	if backdrop.R >= 250 || backdrop.R < 200 {
+		t.Fatalf("the card sits on the deeper whiteboard backdrop, got %v", backdrop)
 	}
 }
 

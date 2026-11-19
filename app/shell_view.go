@@ -49,7 +49,8 @@ func (s *shellState) titleBand(ctx *ui.Context) {
 			ui.Spacer(ctx).Grow(1)
 		})
 		ui.Box(ctx).Width(gwtheme.Stroke)
-		chatTitle := ui.Row(ctx).Grow(1).FillHeight().AlignItems(ui.Center).Label("对话标题").DragWindow()
+		chatTitle := ui.Row(ctx).Grow(1).MinWidth(chatPaneMinWidth).FillHeight().
+			AlignItems(ui.Center).Label("对话标题").DragWindow()
 		chatTitle.Children(func() {
 			ui.Box(ctx).Width(th.Space(4))
 			title := ""
@@ -63,7 +64,7 @@ func (s *shellState) titleBand(ctx *ui.Context) {
 			ui.Box(ctx).Width(th.Space(4))
 		})
 		ui.Box(ctx).Width(gwtheme.Stroke)
-		ui.Row(ctx).Grow(1.35).FillHeight().Children(func() {
+		ui.Row(ctx).Grow(1.35).MinWidth(whiteboardFloorWidth).FillHeight().Children(func() {
 			s.boardTabBar(ctx)
 		})
 	})
@@ -218,7 +219,7 @@ func (s *shellState) conversationList(ctx *ui.Context) {
 
 func (s *shellState) chatPane(ctx *ui.Context) {
 	t := gwtheme.Of(ctx)
-	pane := ui.Column(ctx).Grow(1).MinWidth(300).FillHeight().Background(t.Background)
+	pane := ui.Column(ctx).Grow(1).MinWidth(chatPaneMinWidth).FillHeight().Background(t.Background)
 	pane.Children(func() {
 		active := s.active()
 		if active == nil {
@@ -235,12 +236,8 @@ func (s *shellState) chatPane(ctx *ui.Context) {
 
 func (s *shellState) whiteboard(ctx *ui.Context) {
 	t := gwtheme.Of(ctx)
-	column := ui.Column(ctx).Grow(1.35).MinWidth(s.whiteboardMinWidth(ctx)).FillHeight().Background(t.Sidebar)
+	column := ui.Column(ctx).Grow(1.35).MinWidth(whiteboardFloorWidth).FillHeight().Background(t.Sidebar)
 	column.Children(func() {
 		s.boardPageView(ctx)
 	})
-}
-
-func (s *shellState) whiteboardMinWidth(ctx *ui.Context) float32 {
-	return max(float32(320), s.boardPageMinWidth(ctx)+ctx.Theme().Space(2.5))
 }

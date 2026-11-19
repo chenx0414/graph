@@ -148,8 +148,9 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 			if page.Title == boardPanelTitle(page.Panels[0].Kind) {
 				header = boardHeaderNone
 			}
-			s.boardPanelViewShaped(ctx, &page.Panels[0], false, header,
-				[4]float32{0, t.Radius.Xl, t.Radius.Xl, 0})
+			s.boardCanvas(ctx, func() {
+				s.boardPanelView(ctx, &page.Panels[0], false, header)
+			})
 			return
 		}
 		if page.Kind == fleetPageID {
@@ -338,13 +339,7 @@ func (s *shellState) resizeBoardSplit(node *boardNode, path string, gap int, dx,
 
 func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform bool, header boardHeaderMode) {
 	t := gwtheme.Of(ctx)
-	s.boardPanelViewShaped(ctx, panel, freeform, header, [4]float32{t.Radius.Xl, t.Radius.Xl, t.Radius.Xl, t.Radius.Xl})
-}
-
-func (s *shellState) boardPanelViewShaped(ctx *ui.Context, panel *boardPanel, freeform bool, header boardHeaderMode, corners [4]float32) {
-	t := gwtheme.Of(ctx)
 	card := kit.Panel(ctx, t.Radius.Xl)
-	card.Radius(corners[0], corners[1], corners[2], corners[3])
 	card.Fill()
 	if header != boardHeaderNone {
 		card.Label(boardPanelTitle(panel.Kind) + "窗口")
