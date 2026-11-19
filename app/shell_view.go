@@ -64,7 +64,7 @@ func (s *shellState) titleBand(ctx *ui.Context) {
 			ui.Box(ctx).Width(th.Space(4))
 		})
 		ui.Box(ctx).Width(gwtheme.Stroke)
-		ui.Row(ctx).Grow(1.35).MinWidth(s.whiteboardFloorWidth()).FillHeight().Children(func() {
+		ui.Row(ctx).Grow(1.35).MinWidth(s.whiteboardPaneMinWidth()).FillHeight().Children(func() {
 			s.boardTabBar(ctx)
 		})
 	})
@@ -236,7 +236,7 @@ func (s *shellState) chatPane(ctx *ui.Context) {
 
 func (s *shellState) whiteboard(ctx *ui.Context) {
 	t := gwtheme.Of(ctx)
-	column := ui.Column(ctx).Grow(1.35).MinWidth(s.whiteboardFloorWidth()).FillHeight().Background(t.Sidebar)
+	column := ui.Column(ctx).Grow(1.35).MinWidth(s.whiteboardPaneMinWidth()).FillHeight().Background(t.Sidebar)
 	column.Children(func() {
 		s.boardPageView(ctx)
 	})

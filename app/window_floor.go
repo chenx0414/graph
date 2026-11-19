@@ -7,22 +7,37 @@ import (
 
 const (
 	chatPaneMinWidth     = float32(300)
-	whiteboardFloorWidth = float32(610)
+	whiteboardPaneMin    = float32(320)
 	windowFloorHeight    = 640
+	whiteboardFloorFloor = float32(320)
 )
 
-func windowFloorWidth(floor float32) int {
+func (s *shellState) whiteboardPaneMinWidth() float32 {
+	return max(whiteboardPaneMin, s.windowFloor)
+}
+
+func windowFloorWidth(whiteboard float32) int {
 	th := ui.LightTheme()
 	width := railWidth + th.Space(1.25) + listWidth + gwtheme.Stroke +
-		chatPaneMinWidth + gwtheme.Stroke + floor + cardGap
+		chatPaneMinWidth + gwtheme.Stroke + whiteboard + cardGap
 	return int(width + 0.5)
 }
 
-func (s *shellState) whiteboardFloorWidth() float32 {
-	if s.windowFloor > 0 {
-		return s.windowFloor
+func (s *shellState) windowFloorWidth() int {
+	return windowFloorWidth(s.whiteboardPaneMinWidth())
+}
+
+func (s *shellState) standardPageLayouts() []boardNode {
+	layouts := []boardNode{defaultBoardLayout()}
+	kinds := trajectoryPageKinds()
+	layouts = append(layouts, trajectoryPageLayout(kinds))
+	for _, kind := range boardPanelAllKinds() {
+		if kind == "context-overview" || kind == "agent-network" || kind == "fleet-collaboration" {
+			continue
+		}
+		layouts = append(layouts, boardNode{Kind: "panel", PanelID: kind})
 	}
-	return whiteboardFloorWidth
+	return layouts
 }
 
 func (s *shellState) trackWindowFloor(ctx *ui.Context) {
@@ -31,13 +46,12 @@ func (s *shellState) trackWindowFloor(ctx *ui.Context) {
 	}
 	chrome := boardCardChrome(ctx) + ctx.Theme().Space(2.5)*2
 	widest := float32(0)
-	for _, kind := range boardPanelAllKinds() {
-		panel := boardPanel{ID: kind, Kind: kind}
-		widest = max(widest, s.boardPanelMinWidth(ctx, &panel))
+	layouts := s.standardPageLayouts()
+	for index := range layouts {
+		widest = max(widest, s.boardNodeMinWidth(ctx, &layouts[index]))
 	}
-	widest = max(widest, boardDefaultMinWidth*2)
-	s.windowFloor = max(whiteboardFloorWidth, widest+chrome)
+	s.windowFloor = max(whiteboardFloorFloor, widest+chrome)
 	if s.window != nil {
-		s.window.SetMinimumSize(windowFloorWidth(s.windowFloor), windowFloorHeight)
+		s.window.SetMinimumSize(s.windowFloorWidth(), windowFloorHeight)
 	}
 }

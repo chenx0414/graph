@@ -217,7 +217,7 @@ func TestTheWhiteboardHasTabsAndNoFloatingToolbar(t *testing.T) {
 func TestTheComposerFitsTheMinimumWindow(t *testing.T) {
 	state := fourPaneShell(t)
 	frames(ui.NewTester(state.view, 1440, 900))
-	width, height := windowFloorWidth(state.whiteboardFloorWidth()), windowFloorHeight
+	width, height := state.windowFloorWidth(), windowFloorHeight
 	tester := frames(ui.NewTester(state.view, width, height))
 	for _, label := range []string{"轨迹", "13-Graph", "发送", "白板"} {
 		rect, ok := tester.Find(label)

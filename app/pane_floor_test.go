@@ -20,6 +20,13 @@ func panePages() []string {
 	return []string{"", "providers", "capabilities", "assemblies", "settings", "resources", "models", "tasks", "questions", "fleet", "trajectory"}
 }
 
+func paneWindowSizes(t *testing.T, state *shellState) [][2]int {
+	t.Helper()
+	floor := state.windowFloorWidth()
+	height := windowFloorHeight
+	return [][2]int{{1440, 900}, {1280, 800}, {floor + 40, height}}
+}
+
 func paneName(kind string) string {
 	if kind == "" {
 		return "whiteboard"
@@ -37,7 +44,8 @@ func dividerRight(t *testing.T, tester *ui.Tester) float32 {
 }
 
 func TestTheDividerStaysPutAcrossPages(t *testing.T) {
-	for _, size := range [][2]int{{1440, 900}, {1280, 800}, {1171, 700}} {
+	probe, _ := paneProbeShell(t, 1440, 900, "")
+	for _, size := range paneWindowSizes(t, probe) {
 		reference := float32(-1)
 		for _, kind := range panePages() {
 			_, tester := paneProbeShell(t, size[0], size[1], kind)
@@ -54,7 +62,8 @@ func TestTheDividerStaysPutAcrossPages(t *testing.T) {
 }
 
 func TestTheWhiteboardTitleLinesUpWithTheCardsBelowIt(t *testing.T) {
-	for _, size := range [][2]int{{1440, 900}, {1280, 800}, {1171, 700}} {
+	probe, _ := paneProbeShell(t, 1440, 900, "")
+	for _, size := range paneWindowSizes(t, probe) {
 		for _, kind := range panePages() {
 			state, tester := paneProbeShell(t, size[0], size[1], kind)
 			tab, ok := tester.Find("标签页 " + state.board.pages[0].Title)
@@ -77,8 +86,8 @@ func TestTheWhiteboardTitleLinesUpWithTheCardsBelowIt(t *testing.T) {
 }
 
 func TestTheWindowFloorFitsTheLayout(t *testing.T) {
-	floor, _ := paneProbeShell(t, 1440, 900, "trajectory")
-	width, height := windowFloorWidth(floor.whiteboardFloorWidth()), windowFloorHeight
+	probe, _ := paneProbeShell(t, 1440, 900, "trajectory")
+	width, height := probe.windowFloorWidth(), windowFloorHeight
 	if width < 1024 || height < 640 {
 		t.Fatalf("the floor may not undercut the old one: %dx%d", width, height)
 	}
@@ -134,8 +143,8 @@ func TestTheWhiteboardFloorFitsEveryStandardPage(t *testing.T) {
 			tester.Frame()
 			tester.Frame()
 		}
-		if need > state.whiteboardFloorWidth() {
-			t.Fatalf("%s needs %.1f but the whiteboard may shrink to %.1f", paneName(kind), need, state.whiteboardFloorWidth())
+		if need > state.windowFloor {
+			t.Fatalf("%s needs %.1f but the window floor gives the whiteboard %.1f", paneName(kind), need, state.windowFloor)
 		}
 	}
 }

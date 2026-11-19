@@ -104,7 +104,7 @@ func (s *shell) openNative() {
 		Title:                "Graph",
 		Width:                1440,
 		Height:               900,
-		MinWidth:             windowFloorWidth(whiteboardFloorWidth),
+		MinWidth:             windowFloorWidth(whiteboardFloorFloor),
 		MinHeight:            windowFloorHeight,
 		StateKey:             "native",
 		TitleBarStyle:        mygo.TitleBarHidden,
