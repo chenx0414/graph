@@ -11,13 +11,14 @@ import (
 )
 
 type platformPreset struct {
-	ID            string   `json:"id"`
-	Label         string   `json:"label"`
-	API           string   `json:"api"`
-	BaseURL       string   `json:"baseUrl"`
-	CredentialRef string   `json:"credentialRef"`
-	Custom        bool     `json:"custom"`
-	Notes         []string `json:"notes"`
+	ID             string   `json:"id"`
+	Label          string   `json:"label"`
+	API            string   `json:"api"`
+	BaseURL        string   `json:"baseUrl"`
+	CredentialRef  string   `json:"credentialRef"`
+	CredentialKind string   `json:"credentialKind"`
+	Custom         bool     `json:"custom"`
+	Notes          []string `json:"notes"`
 }
 
 type nativeProviderRow struct {
@@ -117,11 +118,10 @@ func (s *shellState) platformLabel(id string) string {
 }
 
 func (s *shellState) ensureProviders() {
-	if s.providersPhase() != providersIdlePhase || (len(s.providers.native) == 0 && s.providers.document == nil && !s.providers.attempted) {
-		if !s.providers.attempted || s.providersPhase() == providersIdlePhase {
-			s.loadProviders()
-		}
+	if s.providers.loading || s.providers.attempted {
+		return
 	}
+	s.loadProviders()
 }
 
 func (s *shellState) loadProviders() {
@@ -447,9 +447,9 @@ func (s *shellState) addProviderForm(ctx *ui.Context, pal magpiePalette) {
 			}
 		})
 		kit.Text(ctx, "平台", 11).TextColor(pal.Muted)
-		ui.Row(ctx).FillWidth().Gap(6).Children(func() {
+		ui.Row(ctx).FillWidth().Wrap().Gap(6).Children(func() {
 			for _, preset := range s.providers.platforms {
-				if preset.Custom {
+				if preset.CredentialKind != "" && preset.CredentialKind != "api-key" {
 					continue
 				}
 				selected := s.providers.draft.Platform == preset.ID
