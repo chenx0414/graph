@@ -17,6 +17,9 @@ func TurnFailureText(reason string, kind ...TurnFailureKind) string {
 		return fmt.Sprintf("主 Agent 本轮没有完成回复：已自动重试 %d 次仍失败。", retries) + conversationFailureSuffix(detail)
 	}
 	if failureKind == TurnFailureSetup {
+		if missingModelCredential(reason) {
+			return "主 Agent 本轮没有启动起来：这台机器还没有可用的模型凭据。打开「供应商」页添加一个供应商并填入密钥，然后重新发送。"
+		}
 		return "主 Agent 本轮没有启动起来，回复没有完成。消息已保留，可以再发一次重试。" + conversationFailureSuffix(detail)
 	}
 	if conversationInterruptedPattern.MatchString(reason) {
@@ -359,4 +362,8 @@ func ConversationDigest(store *TaskStore, conversationId string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func missingModelCredential(reason string) bool {
+	return strings.Contains(reason, "No credential bound for") || strings.Contains(reason, "No configured model for a master agent")
 }

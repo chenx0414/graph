@@ -352,6 +352,7 @@ func (s *shellState) loadConversationChat(id string) {
 	loaded := newChatState(s.api.address, s.api.token)
 	loaded.window = s.window
 	loaded.providerOn = s.providersEnabled
+	loaded.openProviders = func() { s.openModule("providers") }
 	loaded.open(id)
 	s.chatMu.Lock()
 	if s.activeID != id || s.chat != current {

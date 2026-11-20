@@ -319,6 +319,10 @@ func (c *chatState) modelPickerView(ctx *ui.Context) ui.Element {
 			ui.Box(ctx).FillWidth().Height(gwtheme.Stroke).Background(t.Border)
 		})
 		list.Children(func() {
+			if len(c.models) == 0 {
+				c.pickerEmptyState(ctx, t)
+				return
+			}
 			ui.Scroll(ctx).Grow(1).Children(func() {
 				models := c.pickerModels()
 				visible := models
@@ -344,4 +348,19 @@ func (c *chatState) modelPickerView(ctx *ui.Context) ui.Element {
 		c.pickerReasoning(ctx, t)
 	})
 	return panel
+}
+
+func (c *chatState) pickerEmptyState(ctx *ui.Context, t gwtheme.Tokens) {
+	th := ctx.Theme()
+	ui.Column(ctx).Grow(1).FillWidth().Center().Gap(th.Space(1.5)).Children(func() {
+		kit.Text(ctx, "还没有可用的模型", t.Text.Sm).TextColor(t.Foreground)
+		kit.Text(ctx, "这份安装没有配置任何供应商凭据，模型列表是空的。", t.Text.Xs).TextColor(t.Muted)
+		if kit.Button(ctx, "去供应商页添加", kit.ButtonOpts{Variant: kit.Outline, Size: kit.SizeSm}).Clicked() {
+			c.modelPicker.open = false
+			c.frame()
+			if c.openProviders != nil {
+				c.openProviders()
+			}
+		}
+	})
 }

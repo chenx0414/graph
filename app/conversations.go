@@ -430,9 +430,12 @@ func composerPlaceholder(ctx *ui.Context, icon *ui.SVG, label string) {
 
 func (c *chatState) modelChip(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
-	text := strings.TrimSpace(shortModel(c.currentModel) + " " + c.currentThinking)
-	if text == "" {
-		text = "模型"
+	text := "模型"
+	if c.currentModel != "" {
+		text = strings.TrimSpace(shortModel(c.currentModel) + " " + c.currentThinking)
+		if text == "" {
+			text = "模型"
+		}
 	}
 	chip := ui.Row(ctx).Gap(th.Space(1)).PaddingX(th.Space(1)).AlignItems(ui.Center).Label("模型").
 		Focusable().Radius(t.Radius.Sm)

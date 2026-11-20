@@ -177,6 +177,7 @@ type chatState struct {
 	currentModel       string
 	currentThinking    string
 	modelTelemetryHold int
+	openProviders      func()
 	oldestSeq          int64
 	listFirst          int
 	listLast           int
