@@ -1,0 +1,8 @@
+{
+  "allowed": [
+    "backend/internal/graph/core_fleet_scale_test.go::TestFleetRunsOneThousandTwentyFourAgentsThroughExecution",
+    "backend/internal/graph/runtime_execution_slots_scale_test.go::TestGraphRunnerHoldsOneThousandSimultaneousExecutionSlots",
+    "backend/internal/graph/runtime_execution_slots_scale_test.go::TestGraphRunnerScaleReport",
+    "backend/internal/graph/runtime_rsi_snapshot_cleanup_test.go::TestAsyncFullRunKillsTheWholeProcessGroupOnTimeout"
+  ]
+}

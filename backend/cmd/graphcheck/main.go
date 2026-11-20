@@ -36,6 +36,12 @@ func main() {
 		os.Exit(runMachines(root, os.Args[2:]))
 	case "evidence":
 		os.Exit(runEvidence(root))
+	case "featuremap":
+		os.Exit(runFeatureMap(root, os.Args[2:]))
+	case "prose":
+		os.Exit(runProse(root, os.Args[2:]))
+	case "slowtests":
+		os.Exit(runSlowTests(root, os.Args[2:]))
 	case "skills":
 		os.Exit(runSkills(root, os.Args[2:]))
 	case "pig":
@@ -55,7 +61,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: graphcheck comments [--changed] | tokens [--changed] [paths...] | ownership [--staged] [paths...] | api | machines [--verbose] | evidence | skills [flags] | pig [flags] | summary [path] | harness [--record] | eval [flags] | all")
+	fmt.Fprintln(os.Stderr, "usage: graphcheck comments [--changed] | tokens [--changed] [paths...] | ownership [--staged] [paths...] | api | machines [--verbose] | evidence | featuremap [--write] | prose [--record] | slowtests [--record] | skills [flags] | pig [flags] | summary [path] | harness [--record] | eval [flags] | all")
 }
 
 func repoRoot() (string, error) {

@@ -399,6 +399,7 @@ def main():
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "tokens", "--changed"),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "harness"),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "evidence"),
+            ("go", "-C", "backend", "run", "./cmd/graphcheck", "prose"),
         )
         with protect_worktree(common):
             for step in static:

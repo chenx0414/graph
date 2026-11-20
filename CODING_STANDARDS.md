@@ -16,7 +16,7 @@
 
 普通测试的截图写入临时目录，不进仓库。明确要更新交付证据时，按 [检查操作指南](docs/guides/checks.md#验收证据)执行并审阅证据差异。
 
-需要配置 pre-push、使用测试夹具、在工作树验证或回溯会话时，读取 [检查操作指南](docs/guides/checks.md)的对应章节；CI 分层、分片与坏测试清单见 [CI 分层、分片与坏测试](docs/guides/ci.md)。
+需要配置 pre-push、使用测试夹具、在工作树验证或回溯会话时，读取 [检查操作指南](docs/guides/checks.md)的对应章节。CI 的 job 分层、慢层测试清单与未覆盖入口见 [FEATURE_MAP.md](FEATURE_MAP.md)，那份文件由代码生成。
 
 ## 测试编写规则
 

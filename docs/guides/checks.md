@@ -24,12 +24,7 @@ GRAPH_UPDATE_EVIDENCE=1 go -C backend test ./...
 
 `graphcheck harness` 进门禁，用替身模型跑冻结用例：免费、确定，判「活儿还能不能干完」。记下新的 harness 面与判决用 `--record`；门禁自己从不改写被跟踪的文件。约 20 秒。
 
-判「提示还管不管用」要真模型，那是 `graphcheck eval` 的事，按需跑、不进门禁（要凭据、要预算）：
-
-```sh
-go -C backend run ./cmd/graphcheck eval --config graph.config.json --case parser
-```
-
+判「提示还管不管用」要真模型，那是 `graphcheck eval` 与 `grapheval` 的事，按需跑、不进门禁（要凭据、要预算）；两者各自的 `--help` 就是它们的说明。
 ## 运行窗口
 
 窗口是 `app/`（Go + MyGo）这一个二进制，没有 Electron：`go -C app run .` 直接开窗，`go -C backend run ./cmd/graphbuild app` 打包成 `/Applications/Graph.app`。`src/runtime/` 的两个 Node worker 是唯一的执行面 JS，跑扩展与模块。
@@ -47,10 +42,6 @@ git config core.hooksPath "$(git rev-parse --show-toplevel)/.githooks"
 ## 在 Git 工作树里验证
 
 `git worktree add` 只带出 tracked 文件，被忽略的构建产物不在其中；Go 的依赖在模块缓存里，`go` 会自己拉，所以工作树里直接跑 `python3 scripts/check-queue.py` 即可，不需要先拷贝任何目录。
-
-## CI 分层、分片与坏测试
-
-CI 的分层、分片、diff 触发、契约测试与坏测试清单单独成篇：[CI 分层、分片与坏测试](ci.md)。
 
 ## 会话回溯
 
