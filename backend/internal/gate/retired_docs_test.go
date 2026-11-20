@@ -8,11 +8,6 @@ import (
 	"testing"
 )
 
-// A markdown file in this repository is either the two documents an agent reads or a
-// description of a surface that a tool already answers. The description is the copy that
-// drifts, so the way to keep a fact true is to ask the tool. This test names the files
-// that must stay gone and the tools that replaced them, so a re-introduction has to argue
-// with the test rather than slip past a reader.
 func TestRemovedReferenceDocsStayGone(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
@@ -48,8 +43,6 @@ func TestRemovedReferenceDocsStayGone(t *testing.T) {
 	}
 }
 
-// The two documents are allowed to exist; anything else that an agent is told to read
-// first would be a third entry point, and the entry point is where drift starts.
 func TestOnlyTwoDocumentsAreEntryPoints(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {

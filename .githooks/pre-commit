@@ -6,3 +6,4 @@ root=$(CDPATH= cd -- "$hook_dir/.." && pwd)
 
 go -C "$root/backend" run ./cmd/graphcheck tokens
 go -C "$root/backend" run ./cmd/graphcheck ownership --staged
+go -C "$root/backend" run ./cmd/graphcheck prose --staged

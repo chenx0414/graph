@@ -7,10 +7,6 @@ import (
 	"testing"
 )
 
-// The state machine vocabulary is content, not prose: machines.json declares it and
-// `graphcheck machines` proves it matches the source. The two documents that used to
-// mirror it were a second copy that could drift, so what remains here is the guarantee
-// that the vocabulary stays complete and readable on its own.
 func TestRegistryCarriesEverythingAReaderNeeds(t *testing.T) {
 	machines := All()
 	if len(machines) == 0 {

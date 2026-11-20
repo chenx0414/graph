@@ -50,6 +50,9 @@ func runAll(root string) int {
 	if code := runProse(root, nil); code != 0 {
 		return code
 	}
+	if code := runProse(root, []string{"--staged"}); code != 0 {
+		return code
+	}
 	if code := runFeatureMap(root, nil); code != 0 {
 		return code
 	}

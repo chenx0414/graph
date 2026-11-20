@@ -8,10 +8,6 @@ import (
 	"testing"
 )
 
-// A specification is a decision record, not a rule: the behaviour it describes is enforced
-// by tests and gates. What stays in the repository is the spec that the running product
-// contract still points at; one that nothing references is a memory, and a memory in a
-// specification directory is indistinguishable from a claim about the present.
 func TestSpecificationsAreReferencedOrGone(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {

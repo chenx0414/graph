@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -125,3 +126,50 @@ func sortStrings(items []string) {
 }
 
 var _ = fmt.Sprintf
+
+type StagedMarkdownEntry struct {
+	Path  string
+	Added bool
+}
+
+func StagedMarkdown(root string) ([]StagedMarkdownEntry, error) {
+	command := exec.Command("git", "status", "--porcelain=v1", "--untracked-files=all", "--", "*.md")
+	command.Dir = root
+	output, err := command.Output()
+	if err != nil {
+		return nil, err
+	}
+	entries := []StagedMarkdownEntry{}
+	for _, line := range strings.Split(string(output), "\n") {
+		if len(line) < 4 {
+			continue
+		}
+		status := line[:2]
+		path := strings.TrimSpace(line[3:])
+		if !strings.HasSuffix(path, ".md") {
+			continue
+		}
+		entries = append(entries, StagedMarkdownEntry{Path: filepath.ToSlash(path), Added: status == "??" || strings.Contains(status, "A")})
+	}
+	return entries, nil
+}
+
+func ProseExempt(path string) (bool, error) {
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	for _, line := range strings.Split(string(payload), "\n") {
+		index := strings.Index(line, ProseExemptDirective)
+		if index < 0 {
+			continue
+		}
+		reason := line[index+len(ProseExemptDirective):]
+		reason = strings.TrimSuffix(strings.TrimSpace(reason), "-->")
+		reason = strings.TrimSuffix(strings.TrimSpace(reason), "*/")
+		if strings.TrimSpace(reason) != "" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
