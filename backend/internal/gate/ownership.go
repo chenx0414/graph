@@ -174,3 +174,13 @@ func PackageWrites(pkgDir string, files []string) []TableOffender {
 	}
 	return offenders
 }
+
+func OwnerOfTable(table string) string {
+	if owner, named := ownedTables[table]; named {
+		return owner
+	}
+	if strings.HasPrefix(table, "kernel_") {
+		return "a core_kernel_*.go file"
+	}
+	return ""
+}

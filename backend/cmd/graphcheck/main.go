@@ -330,6 +330,8 @@ func reportTokens(findings gate.TokenFindings, limit int) {
 	fmt.Fprintln(os.Stderr, "If a file genuinely cannot be split, state why at the top of that file:")
 	fmt.Fprintln(os.Stderr, "  graph:allow-large-file: <reason>")
 	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "The limit is a default: GRAPH_FILE_TOKEN_LIMIT overrides it for one run.")
+	fmt.Fprintln(os.Stderr, "Generated code, vendored trees, lock files and binaries are skipped.")
 	if len(findings.Skipped) > 0 {
 		fmt.Fprintf(os.Stderr, "Skipped as not agent-authored: %d file(s)\n", len(findings.Skipped))
 		shown := 0
@@ -364,6 +366,13 @@ func runOwnership(root string, args []string) int {
 		offenders = gate.PackageWrites(pkg, files)
 	}
 	if len(offenders) == 0 {
+		return reportTableOwnership(root, offenders, staged, given)
+	}
+	return reportTableOwnership(root, offenders, staged, given)
+}
+
+func reportTableOwnership(root string, offenders []gate.TableOffender, staged bool, given []string) int {
+	if len(offenders) == 0 {
 		scope := "the package"
 		if staged {
 			scope = "the staged change"
@@ -384,6 +393,9 @@ func runOwnership(root string, args []string) int {
 			relative = offender.File
 		}
 		fmt.Fprintf(os.Stderr, "  %s: writes %s\n", filepath.ToSlash(relative), offender.Table)
+		if owner := gate.OwnerOfTable(offender.Table); owner != "" {
+			fmt.Fprintf(os.Stderr, "    owner: %s\n", owner)
+		}
 	}
 	names := make([]string, 0, len(tables))
 	for table := range tables {

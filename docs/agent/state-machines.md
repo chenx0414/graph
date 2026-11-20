@@ -21,12 +21,7 @@ go -C backend run ./cmd/graphcheck machines --verbose  # 逐条证据：表.列 
 GRAPH_UPDATE_ATLAS=1 go -C backend test ./statemachine -run Atlas -count=1  # 注册表变了就重写两张清单
 ```
 
-文档被手改而注册表未动时，`go test` 可能命中缓存；带 `-count=1` 才能当场看出漂移。
-
-`graphcheck machines` 校验三件事：注册表自身合法（id 不重复、标点齐全、初始状态与每条转移的两端都已声明）、
-源码里出现的每个状态字面量都已在注册表里声明（含迁移约束里的读写值）、源码里能读出起止的字面量转移
-都在注册表里合法。三者任一不成立，它列出具体条目并返回非零；反向不检查（`SET state=?` 这类参数写入
-本来就没有字面量），逐条证据用 `--verbose` 看。
+文档被手改而注册表未动时，`go test` 可能命中缓存；带 `-count=1` 才能当场看出漂移。门禁判定什么、失败了怎么改，看它自己的输出。
 
 ## 总表
 

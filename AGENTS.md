@@ -21,7 +21,7 @@
 
 ## 门禁分层
 
-`python3 scripts/check-queue.py` 是**激活门禁**（快层）：`go -C backend run ./cmd/graphbuild backend` 起后端起二进制，`go vet` 与 `go test` 各跑两遍（`backend/`、`app/` 是两个 module），再加静态门禁（评论预算、表归属、源文件体量、证据未变）与行为门禁 `go -C backend run ./cmd/graphcheck harness`。
+`python3 scripts/check-queue.py` 是**激活门禁**（快层）：`go -C backend run ./cmd/graphbuild backend` 起后端起二进制，`go vet` 与 `go test` 各跑两遍（`backend/`、`app/` 是两个 module），再加静态门禁与行为门禁 `go -C backend run ./cmd/graphcheck harness`。每道门禁判定什么、失败了怎么改，看它自己的输出。
 
 跑测试的那一半会起守护进程、用共享暂存目录，仍走 `check-queue.py` 的机器级 slot；其余只写本工作区，两个会话可以同时跑。以前整个快层都在那把锁里，所以别人一在检查，你的激活就得等——等的还不是共享资源。
 

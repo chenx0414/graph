@@ -22,6 +22,10 @@ func runAPI(root string) int {
 		for _, problem := range problems {
 			fmt.Fprintf(os.Stderr, "api request ids: %s\n", problem)
 		}
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "A lifecycle POST reloads or rewrites a project thread, so a retry must not run it twice.")
+		fmt.Fprintln(os.Stderr, "Put a stable requestId in the JSON body so the server can replay the same call with one receipt:")
+		fmt.Fprintln(os.Stderr, `  api.post("/api/projects/p1/archive", map[string]any{"requestId": id})`)
 		return 1
 	}
 	fmt.Println("api request ids: ok")

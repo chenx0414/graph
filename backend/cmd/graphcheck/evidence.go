@@ -25,10 +25,17 @@ func runEvidence(root string) int {
 		fmt.Println("Acceptance evidence is unchanged.")
 		return 0
 	}
+	return reportEvidenceProblems(problems)
+}
+
+func reportEvidenceProblems(problems []string) int {
 	fmt.Fprintln(os.Stderr, "Tracked acceptance evidence changed during a normal run:")
 	for _, problem := range problems {
 		fmt.Fprintf(os.Stderr, "- %s\n", problem)
 	}
-	fmt.Fprintln(os.Stderr, "Set GRAPH_UPDATE_EVIDENCE=1 only when intentionally updating evidence.")
+	fmt.Fprintln(os.Stderr, "Acceptance evidence is a frozen record of what the product did; a normal run must not rewrite it.")
+	fmt.Fprintln(os.Stderr, "Update it deliberately, then review the diff before committing:")
+	fmt.Fprintln(os.Stderr, "  GRAPH_UPDATE_EVIDENCE=1 go -C backend test ./...")
+	fmt.Fprintln(os.Stderr, "  git diff -- acceptance-evidence")
 	return 1
 }
