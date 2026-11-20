@@ -57,6 +57,12 @@ agent-desktop binary exists and its accessibility permission is `granted`; and t
 launchd service are untouched (fingerprinted before and after). A `3` exit from `doctor` means stop and fix the
 environment — do not record a product failure.
 
+## Which features exist
+
+Read `features/index.json`; it is the list, and `FEATURE_MAP.md` at the repository root renders each entry against
+the routes and handlers in the code. Do not keep a second copy of the list in this document — it would drift the
+moment a feature is added, which is exactly the failure this skill exists to catch.
+
 ## Drive
 
 Four lanes, pick the one the feature needs. Each one asserts on the real thing. `verify --all` runs the headless
@@ -239,9 +245,10 @@ and age (`--older-than`, default 120s). Review first with `--orphans --dry-run`.
 
 - `verification/verify-graph` — the entry point shell. Builds `.run/bin/verify-graph` when the sources are newer,
   then execs it. Same arguments either way.
-- `verification/skills/verify-graph/features/` — the feature map: `index.json` plus one file per feature, each with
-  `Sub-features`, `How to get to it (user POV)`, `Driving it with verify-graph`, `Gotchas`. Start here to find the
-  journey for the feature you are checking.
+- `verification/skills/verify-graph/features/index.json` — the feature list: each entry carries its id, title, entry
+  point, the API it touches and the scenario that proves it. `verification/scenarios/<id>.json` is the executable
+  version of "how you drive this feature", and `verification/verify-graph verify --journey <id>` is how you run it.
+  `FEATURE_MAP.md` at the repository root renders the same list against the code, so it cannot drift.
 - `verification/controls/` — `inventory.json` (every stable control), `ledger.json` (witnesses/exclusions),
   `coverage.json` and `COVERAGE.generated.md` (the audited verdict). Schema and worked example in `CONTROLS.md`.
 - `verification/internal/seed` — the stub model and the seeded conversation described under **Drive**.

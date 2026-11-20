@@ -112,7 +112,7 @@ func CheckAgainst(skillDir string, commands []string) (Report, error) {
 		}
 	}
 
-	report.Problems = append(report.Problems, checkIndex(featureDir, files)...)
+	report.Problems = append(report.Problems, checkIndex(featureDir, scenarioDir(skillDir))...)
 	sort.Slice(report.Problems, func(i, j int) bool {
 		if report.Problems[i].File != report.Problems[j].File {
 			return report.Problems[i].File < report.Problems[j].File
@@ -130,10 +130,7 @@ func featureFiles(featureDir string) ([]string, error) {
 	}
 	names := []string{}
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-			continue
-		}
-		if entry.Name() == "README.md" {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") || entry.Name() == "README.md" {
 			continue
 		}
 		names = append(names, entry.Name())
@@ -210,40 +207,45 @@ type indexFile struct {
 }
 
 type indexFeature struct {
-	ID   string `json:"id"`
-	File string `json:"file"`
+	ID       string   `json:"id"`
+	Scenario string   `json:"scenario"`
+	Drive    []string `json:"drive"`
 }
 
-func checkIndex(featureDir string, files []string) []Problem {
+// A feature is its executable scenario. The prose page that used to sit beside each one
+// restated what the scenario already encodes, so the index points at the scenario and the
+// check is that every feature has one that exists.
+// scenarioDir is where the executable scenarios live: two levels above the skill
+// directory that holds features/, because a scenario is versioned with the harness
+// rather than with the document that used to describe it.
+func scenarioDir(skillDir string) string {
+	return filepath.Join(skillDir, "..", "..", "scenarios")
+}
+
+func checkIndex(featureDir string, scenarios string) []Problem {
 	path := filepath.Join(featureDir, "index.json")
 	payload, err := os.ReadFile(path)
 	if err != nil {
 		return []Problem{{Code: "index-missing", File: "features/index.json",
-			Detail: "no machine-readable index; tooling cannot map a feature id to its file"}}
+			Detail: "no machine-readable index; tooling cannot map a feature id to its scenario"}}
 	}
 	var index indexFile
 	if err := json.Unmarshal(payload, &index); err != nil {
 		return []Problem{{Code: "index-invalid", File: "features/index.json", Detail: err.Error()}}
 	}
 	problems := []Problem{}
-	listed := map[string]bool{}
 	for _, feature := range index.Features {
-		base := filepath.Base(strings.TrimSpace(feature.File))
-		if base == "" || base == "." {
-			problems = append(problems, Problem{Code: "index-invalid", File: "features/index.json",
-				Detail: fmt.Sprintf("feature %q has no file", feature.ID)})
+		name := filepath.Base(strings.TrimSpace(feature.Scenario))
+		if name == "" || name == "." {
+			if len(feature.Drive) == 0 {
+				problems = append(problems, Problem{Code: "index-invalid", File: "features/index.json",
+					Detail: fmt.Sprintf("feature %q has neither a scenario nor a drive command, so nothing can carry it out", feature.ID)})
+			}
 			continue
 		}
-		listed[base] = true
-		if !contains(files, base) {
+		if _, statErr := os.Stat(filepath.Join(filepath.Dir(featureDir), "..", "..", "scenarios", name)); statErr != nil {
 			problems = append(problems, Problem{Code: "index-dangling", File: "features/index.json",
-				Detail: fmt.Sprintf("feature %q points at %s, which does not exist", feature.ID, base)})
-		}
-	}
-	for _, name := range files {
-		if !listed[name] {
-			problems = append(problems, Problem{Code: "index-incomplete", File: "features/" + name,
-				Detail: "the file is not listed in features/index.json, so nothing can look it up by id"})
+				Detail: fmt.Sprintf("feature %q points at %s, which does not exist", feature.ID, name)})
 		}
 	}
 	return problems

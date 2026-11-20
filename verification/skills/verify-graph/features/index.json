@@ -42,7 +42,6 @@
     {
       "id": "F-01",
       "title": "启动与就绪",
-      "file": "features/F-01-launch-and-readiness.md",
       "priority": "P1",
       "mode": "daemon+api",
       "surface": [
@@ -72,7 +71,6 @@
     {
       "id": "F-02",
       "title": "模块导航（侧栏 7 项）",
-      "file": "features/F-02-module-navigation.md",
       "priority": "P1",
       "mode": "window+api",
       "surface": [
@@ -119,7 +117,6 @@
     {
       "id": "F-03",
       "title": "会话列表与切换",
-      "file": "features/F-03-conversations-list.md",
       "priority": "P1",
       "mode": "window+api",
       "surface": [
@@ -155,7 +152,6 @@
     {
       "id": "F-04",
       "title": "对话流渲染与消息操作",
-      "file": "features/F-04-conversation-rendering.md",
       "priority": "P1",
       "mode": "window+api",
       "surface": [
@@ -193,7 +189,6 @@
     {
       "id": "F-05",
       "title": "输入区（composer）",
-      "file": "features/F-05-composer.md",
       "priority": "P1",
       "mode": "window+api",
       "surface": [
@@ -228,7 +223,6 @@
     {
       "id": "F-06",
       "title": "上下文窗口三页签",
-      "file": "features/F-06-context-window.md",
       "priority": "P1",
       "mode": "window+api",
       "surface": [
@@ -261,7 +255,6 @@
     {
       "id": "F-07",
       "title": "白板布局与面板管理",
-      "file": "features/F-07-board-layout.md",
       "priority": "P1",
       "mode": "window+api",
       "surface": [
@@ -299,7 +292,6 @@
     {
       "id": "F-08",
       "title": "轨迹页（12 个量化面板）",
-      "file": "features/F-08-trajectory-page.md",
       "priority": "P1",
       "mode": "window+api",
       "surface": [
@@ -347,7 +339,6 @@
     {
       "id": "F-09",
       "title": "洞察页",
-      "file": "features/F-09-insights-page.md",
       "priority": "P1",
       "mode": "window+api",
       "surface": [
@@ -387,7 +378,6 @@
     {
       "id": "F-10",
       "title": "编队页",
-      "file": "features/F-10-fleet-page.md",
       "priority": "P1",
       "mode": "window+api",
       "surface": [
@@ -434,7 +424,6 @@
     {
       "id": "F-11",
       "title": "供应商页",
-      "file": "features/F-11-providers-page.md",
       "priority": "P1",
       "mode": "window+api",
       "surface": [
@@ -471,7 +460,6 @@
     {
       "id": "F-12",
       "title": "资源（能力）页",
-      "file": "features/F-12-resources-page.md",
       "priority": "P1",
       "mode": "window+api",
       "surface": [
@@ -505,7 +493,6 @@
     {
       "id": "F-13",
       "title": "装配页",
-      "file": "features/F-13-assemblies-page.md",
       "priority": "P1",
       "mode": "window+api",
       "surface": [
@@ -539,7 +526,6 @@
     {
       "id": "F-14",
       "title": "设置页",
-      "file": "features/F-14-settings-page.md",
       "priority": "P1",
       "mode": "window+api",
       "surface": [
@@ -575,7 +561,6 @@
     {
       "id": "F-15",
       "title": "托盘与系统通知",
-      "file": "features/F-15-tray-and-notifications.md",
       "priority": "P2",
       "mode": "window+api",
       "surface": [
@@ -605,7 +590,6 @@
     {
       "id": "F-16",
       "title": "空态与错误态",
-      "file": "features/F-16-empty-and-error-states.md",
       "priority": "P1",
       "mode": "daemon+api+window",
       "surface": [
@@ -642,8 +626,20 @@
   "verifiedAt": "2026-11-17T15:48+08:00",
   "lastVerifiedRun": {
     "at": "2026-11-17T15:47:58+08:00",
-    "headless": { "run": "a8290242", "executeRun": "e353d253", "passed": 23, "total": 23, "durationMs": 56000 },
-    "window": { "run": "6473fb09", "executeRun": "c0405509", "passed": 23, "total": 23, "durationMs": 274000 },
+    "headless": {
+      "run": "a8290242",
+      "executeRun": "e353d253",
+      "passed": 23,
+      "total": 23,
+      "durationMs": 56000
+    },
+    "window": {
+      "run": "6473fb09",
+      "executeRun": "c0405509",
+      "passed": 23,
+      "total": 23,
+      "durationMs": 274000
+    },
     "evidenceVerify": "104 + 6 files, problems: []（headless）；104 + 6（window）"
   },
   "verifyAllCommand": "cd verification && ./verify-graph verify --all",

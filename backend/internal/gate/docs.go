@@ -7,6 +7,8 @@ import (
 
 const FeatureMapPath = "FEATURE_MAP.md"
 
+const GateFeatureMapPath = FeatureMapPath
+
 var agentInstructionRoots = []string{
 	"AGENTS.md",
 	FeatureMapPath,

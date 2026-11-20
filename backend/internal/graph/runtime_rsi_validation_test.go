@@ -116,7 +116,7 @@ func TestAppChangesRebuildTheShellThatCarriesThem(t *testing.T) {
 		}
 	}
 	for _, path := range []string{
-		"docs/agent/capabilities.md",
+		"FEATURE_MAP.md",
 		"README.md",
 	} {
 		if rsiNeedsAppBuild([]string{path}) {

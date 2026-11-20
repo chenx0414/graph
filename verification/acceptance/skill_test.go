@@ -1,6 +1,7 @@
 package acceptance
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -34,6 +35,9 @@ func canonicalSkillRoot(t *testing.T) string {
 	return ""
 }
 
+// A feature is its executable scenario. The skill has to teach the command that runs a
+// scenario and to name every feature the index maps, but the steps themselves live in
+// the scenario JSON, where running them proves them.
 func TestSkillTeachesEveryMappedFeature(t *testing.T) {
 	skillRoot := canonicalSkillRoot(t)
 	body, err := os.ReadFile(filepath.Join(skillRoot, "SKILL.md"))
@@ -44,52 +48,31 @@ func TestSkillTeachesEveryMappedFeature(t *testing.T) {
 		t.Fatalf("SKILL.md is too short to onboard a cold agent (%d bytes)", len(body))
 	}
 	featuresDir := filepath.Join(skillRoot, "features")
-	entries, err := os.ReadDir(featuresDir)
+	payload, err := os.ReadFile(filepath.Join(featuresDir, "index.json"))
 	if err != nil {
-		t.Fatalf("skill has no features directory: %v", err)
+		t.Fatalf("the feature index is the map: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(featuresDir, "README.md")); err != nil {
-		t.Fatalf("features/README.md (the map index) is missing")
+	index := struct {
+		Features []struct {
+			ID       string `json:"id"`
+			Title    string `json:"title"`
+			Scenario string `json:"scenario"`
+			Drive    []string `json:"drive"`
+		} `json:"features"`
+	}{}
+	if err := json.Unmarshal(payload, &index); err != nil {
+		t.Fatalf("parse features/index.json: %v", err)
 	}
-	files := 0
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") || entry.Name() == "README.md" {
-			continue
-		}
-		files++
-		path := filepath.Join(featuresDir, entry.Name())
-		payload, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
-		text := string(payload)
-		headings := map[string]bool{}
-		for _, match := range h2Pattern.FindAllStringSubmatch(text, -1) {
-			headings[strings.TrimSpace(match[1])] = true
-		}
-		for _, required := range requiredFeature {
-			if !headings[required] {
-				t.Fatalf("%s misses the H2 %q; every feature file uses the same four sections", entry.Name(), required)
-			}
-		}
-		driving := false
-		for heading := range headings {
-			if strings.HasPrefix(heading, "Driving it with ") {
-				driving = true
-			}
-		}
-		if !driving {
-			t.Fatalf("%s misses \"Driving it with <harness>\"", entry.Name())
-		}
-		if !strings.Contains(text, "verify-graph ") {
-			t.Fatalf("%s has no verify-graph command a reader can run", entry.Name())
-		}
+	if len(index.Features) == 0 {
+		t.Fatalf("%s maps no feature", featuresDir)
 	}
-	if files < 3 {
-		t.Fatalf("the feature map covers only %d features; the app has at least 7 rail modules", files)
+	text := string(body)
+	for _, want := range []string{"features/index.json", "FEATURE_MAP.md", "verify --journey"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("SKILL.md never points at %q, so a cold agent cannot reach the feature list", want)
+		}
 	}
 }
-
 func TestSkillCommandsExistInHelp(t *testing.T) {
 	skillRoot := canonicalSkillRoot(t)
 	help, _ := helpText(t)

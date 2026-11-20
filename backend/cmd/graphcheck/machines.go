@@ -44,9 +44,10 @@ func reportMachineProblems(problems []gate.RegistryProblem) int {
 		fmt.Fprintf(os.Stderr, "[machines] %s: %s\n", problem.Kind, problem.Detail)
 	}
 	fmt.Fprintf(os.Stderr, "[machines] %d problems; declare every state and transition in backend/statemachine/machines.json\n", len(problems))
-	fmt.Fprintln(os.Stderr, "  The registry is authored by hand; docs/agent/state-machines.md maps it and docs/agent/state-machines-reference.md is generated from it.")
-	fmt.Fprintln(os.Stderr, "  Regenerate the Atlas after editing:  GRAPH_UPDATE_ATLAS=1 go -C backend test ./statemachine -run Atlas")
-	fmt.Fprintln(os.Stderr, "  Recheck with:  go -C backend run ./cmd/graphcheck machines")
+	fmt.Fprintln(os.Stderr, "  The registry is the only state vocabulary; nothing else mirrors it.")
+	fmt.Fprintln(os.Stderr, "  Declare a new state in its shard under backend/statemachine/machines/, then name it here in code.")
+	fmt.Fprintln(os.Stderr, "  Print the whole vocabulary:  go -C backend run ./cmd/graphcheck machines --verbose")
+	fmt.Fprintln(os.Stderr, "  Over HTTP, the console serves the same registry at GET /api/state-machines.")
 	return 1
 }
 

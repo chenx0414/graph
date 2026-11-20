@@ -162,7 +162,7 @@ func TestMachineFailureNamesTheRegistryAndTheRegeneration(t *testing.T) {
 	for _, want := range []string{
 		"undeclared-state",
 		"backend/statemachine/machines.json",
-		"GRAPH_UPDATE_ATLAS=1 go -C backend test ./statemachine -run Atlas",
+		"machines --verbose",
 	} {
 		if !strings.Contains(output, want) {
 			t.Errorf("failure output does not mention %q:\n%s", want, output)

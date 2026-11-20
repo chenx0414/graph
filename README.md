@@ -9,7 +9,7 @@
 ## 从这里开始
 
 - [工程规范](CODING_STANDARDS.md)：探索、实施、审查与交付的读取规则。
-- [Agent 文档入口](docs/agent/README.md)：Agent 角色、执行模型、能力、恢复、Git 与自配置。
+- [Feature Map](FEATURE_MAP.md)：功能清单、入口、背后的处理函数与未覆盖路由，由代码生成。
 - [原生图指南](docs/agent/graph-v2.md)：图形状、节点指令、控制与观察。
 - [重构规格](docs/specs/graph-rebuild-v2.md)：v2 的产品契约。
 - [领域术语](CONTEXT.md)：Agent 定义、实例、节点、任务与额度的准确含义。

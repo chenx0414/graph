@@ -65,15 +65,21 @@ const featureBody = `# F-14 设置页
 - 只在隔离实例里改配置。
 `
 
-const indexBody = `{"schema":1,"features":[{"id":"F-14","file":"features/F-14-settings.md"}]}`
+const indexBody = `{"schema":1,"features":[{"id":"F-14","scenario":"scenarios/F-14.json"}]}`
 
 func fixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	write(t, root, "SKILL.md", skillBody)
 	write(t, root, "features/README.md", "# map\n")
-	write(t, root, "features/F-14-settings.md", featureBody)
 	write(t, root, "features/index.json", indexBody)
+	scenarios := filepath.Join(root, "..", "..", "scenarios")
+	if err := os.MkdirAll(scenarios, 0o755); err != nil {
+		t.Fatalf("mkdir scenarios: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(scenarios, "F-14.json"), []byte(`{"id":"F-14","feature":"F-14","steps":[]}`), 0o644); err != nil {
+		t.Fatalf("write scenario: %v", err)
+	}
 	return root
 }
 
@@ -102,8 +108,8 @@ func TestACompleteSkillPasses(t *testing.T) {
 	if !report.OK() {
 		t.Fatalf("a complete skill must pass, got %v", report.Problems)
 	}
-	if len(report.Features) != 1 || report.Features[0] != "F-14-settings.md" {
-		t.Fatalf("features = %v", report.Features)
+	if len(report.Features) != 0 {
+		t.Fatalf("a feature is its scenario, not a page: features = %v", report.Features)
 	}
 	for _, want := range []string{"launch", "doctor", "ui", "evidence", "cleanup"} {
 		if !contains(report.Commands, want) {
@@ -214,18 +220,8 @@ func TestUnknownCommandInDocsIsReported(t *testing.T) {
 
 func TestIndexMustListEveryFeatureAndOnlyRealFiles(t *testing.T) {
 	root := fixture(t)
-	write(t, root, "features/F-15-tray.md", strings.Replace(featureBody, "F-14 设置页", "F-15 托盘", 1))
+	write(t, root, "features/index.json", `{"schema":1,"features":[{"id":"F-14","scenario":"scenarios/F-14.json"},{"id":"F-99","scenario":"scenarios/F-99-ghost.json"}]}`)
 	report, err := Check(root)
-	if err != nil {
-		t.Fatalf("check: %v", err)
-	}
-	if !hasCode(report.Problems, "index-incomplete") {
-		t.Fatalf("a file missing from the index must be reported: %v", codes(report.Problems))
-	}
-
-	root = fixture(t)
-	write(t, root, "features/index.json", `{"schema":1,"features":[{"id":"F-14","file":"features/F-14-settings.md"},{"id":"F-99","file":"features/F-99-ghost.md"}]}`)
-	report, err = Check(root)
 	if err != nil {
 		t.Fatalf("check: %v", err)
 	}
@@ -262,8 +258,8 @@ func TestTheRepositorySkillSatisfiesTheContract(t *testing.T) {
 	for _, problem := range report.Problems {
 		t.Errorf("%s", problem.String())
 	}
-	if len(report.Features) == 0 {
-		t.Fatalf("%s maps no feature", root)
+	if len(report.Commands) == 0 && report.Skill == "" {
+		t.Fatalf("%s maps no feature and names no command", root)
 	}
 }
 

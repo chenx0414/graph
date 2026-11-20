@@ -1,7 +1,7 @@
 # Agent instructions
 
 - 探索、设计、修改或审查代码，以及提交或推送前，读取 [CODING_STANDARDS.md](CODING_STANDARDS.md)，按当前工作阶段执行。
-- 改状态、状态显示或状态转移前，读取 [状态机地图](docs/agent/state-machines.md)：注册表在 `backend/statemachine/machines.json`，`go -C backend run ./cmd/graphcheck machines` 判定源码与注册表是否一致。
+- 改状态、状态显示或状态转移前：注册表在 `backend/statemachine/machines.json`，`go -C backend run ./cmd/graphcheck machines` 判定源码与注册表是否一致；`--verbose` 打印全部取值与证据，`GET /api/state-machines` 返回同一份。
 
 - 测试：单元、集成、E2E 都可以，唯一前提是**先写测试再写代码**；先红后绿，回归必须先演示失败。适用于我和所有子 Agent，细则见 [测试编写规则](CODING_STANDARDS.md#测试编写规则)。
 
