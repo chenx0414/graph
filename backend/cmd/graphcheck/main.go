@@ -133,6 +133,15 @@ func runComments(root string, args []string) int {
 		for _, problem := range problems {
 			fmt.Fprintf(os.Stderr, "comment budget: %s\n", problem)
 		}
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "A comment counts as explanatory unless the tooling can act on it.")
+		fmt.Fprintln(os.Stderr, "  1. Delete it: the name, the type and the test already say what the code does.")
+		fmt.Fprintln(os.Stderr, "  2. Or turn it into a machine directive, which this gate accepts:")
+		fmt.Fprintln(os.Stderr, "     // graph:   //go:   // @ts-   // eslint   // nolint   // prettier   /// <reference")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintf(os.Stderr, "Limits: %d explanatory comments per file, %d in the whole repository.\n", gate.ExplainBudgetPerFile, gate.TotalBudget)
+		fmt.Fprintln(os.Stderr, "A change may only remove them: --changed fails when the count goes up.")
+		fmt.Fprintln(os.Stderr, "Recheck with:  go -C backend run ./cmd/graphcheck comments --changed")
 		return 1
 	}
 	suffix := ""

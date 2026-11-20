@@ -25,7 +25,3 @@
 ## 可验证性
 
 写代码的第一要义是 make this fully verifiable：每段代码都要有一条命令能判定它对不对。新增行为先有一条会失败的用例；无法被用例、门禁或真机断言判定的代码不提交。审核时把"这段代码怎么证明它对"作为必答项。
-
-## 注释
-
-禁止解释性注释：代码通过命名、类型与测试说明自己做了什么。只保留机器读取的指令行——`// graph:table-writes-exempt:`、`// graph:allow-large-file:`、`//go:build`、`//go:embed`、`//go:generate`、`// @ts-expect-error`、`/// <reference />`。门禁 `go -C backend run ./cmd/graphcheck comments` 要求每个源文件解释性注释 ≤ 8 行、全仓 ≤ 40 行；`go -C backend run ./cmd/graphcheck comments --changed` 要求本次改动只能减少不能增加。说明书留在 docs/，不留在大括号里。
