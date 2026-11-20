@@ -123,6 +123,22 @@ func TestEvidenceProblemsListsChangedFiles(t *testing.T) {
 	}
 }
 
+func TestRepoSkillsAreGraphAuthored(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repo root: %v", err)
+	}
+	allowlisted := map[string]bool{"agent-desktop": true}
+	directories := append(FindSkills(filepath.Join(root, ".agents", "skills")), FindSkills(filepath.Join(root, ".pi", "skills"))...)
+	for _, directory := range directories {
+		skill, ok := InspectSkill(directory)
+		if !ok || skill.Authored || allowlisted[skill.ID] {
+			continue
+		}
+		t.Errorf("%s: shipped skill is not authored by %s; a vendored bundle belongs outside the repository", skill.Path, SkillsAuthoredBy)
+	}
+}
+
 func TestRepoAuthoredSkillsLintClean(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {

@@ -3,7 +3,6 @@
 - 探索、设计、修改或审查代码，以及提交或推送前，读取 [CODING_STANDARDS.md](CODING_STANDARDS.md)，按当前工作阶段执行。
 - 操作 GitHub Issues、Pull Requests 或辨认 `#编号` 前，读取 [任务平台约定](docs/guides/issue-tracker.md)。
 - 分诊或调整分诊标签前，读取 [标签映射](docs/guides/triage-labels.md)。
-- 用 pstack 技能（`/skill:poteto-mode` 及其 playbook）给节点分配模型或思考档位前，读取 [pstack 角色与模型映射](docs/agent/pstack-models.md)。
 - 找实现、追调用链、判断改动影响面，先用 CodeGraph 索引：MCP 工具 `mcp__codegraph__codegraph_explore`，或 CLI `codegraph explore "<问题>"`；细则见下文「代码导航」。
 - 改状态、状态显示或状态转移前，读取 [状态机地图](docs/agent/state-machines.md)：注册表在 `backend/statemachine/machines.json`，`go -C backend run ./cmd/graphcheck machines` 判定源码与注册表是否一致。
 

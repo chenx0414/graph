@@ -2,7 +2,6 @@
 
 - 提交与推送规则：[工程规范](../CODING_STANDARDS.md#验证与交付)。
 - 测试环境和依赖准备：[检查操作指南](../docs/guides/checks.md)。
-- 技能来源与本地适配：[harness 维护](../docs/guides/harness.md)。
 
 ## 只读诊断脚本（diag-a / diag-b / diag-c）
 

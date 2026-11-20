@@ -13,7 +13,7 @@
 - [原生图指南](docs/agent/graph-v2.md)：图形状、节点指令、控制与观察。
 - [重构规格](docs/specs/graph-rebuild-v2.md)：v2 的产品契约。
 - [领域术语](CONTEXT.md)：Agent 定义、实例、节点、任务与额度的准确含义。
-- [检查操作](docs/guides/checks.md)、[harness 维护](docs/guides/harness.md)。
+- [检查操作](docs/guides/checks.md)。
 - [运行示例](examples/graphs/)：可直接照抄的图定义形状。
 
 ## 启动
