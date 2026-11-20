@@ -31,4 +31,4 @@
 
 ## 决策与证据
 
-决策记录位于 `docs/reports/fleet-collaboration-1000.tsv`。各实现单元记录失败测试命令、失败原因、修复后命令及输出位置。最终验收明确区分 VERIFIED、NOT VERIFIED 与 INCONCLUSIVE。
+各实现单元记录失败测试命令、失败原因、修复后命令及输出位置。最终验收明确区分 VERIFIED、NOT VERIFIED 与 INCONCLUSIVE。

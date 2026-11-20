@@ -47,8 +47,7 @@ presets/       immutable bootstrap prompts and definitions
 ## Where things live
 
 The repository was reorganised on 2026-11-08: `docs/agents` became `docs/guides`,
-the old `docs/planning` tree was deleted, and `deliverables/`, `notes/`, `plans/`
-lived in folders that are gone (git history keeps them). The old `perf/` measurements went
-with the browser console when that was retired.
+and `deliverables/`, `notes/`, `plans/`, `perf/` lived in folders that are gone
+(git history keeps them).
 A path in an older document that no longer resolves is one of those moves, not a
 missing feature.
