@@ -70,9 +70,6 @@ dist/app-mygo/
 # Go build artifact of the native app module
 /app/app
 
-# CodeGraph 本地索引（codegraph init 生成，机器相关）
-.codegraph/
-
 # 多 Agent 协调状态（会话日志与对象，机器相关，不入库）
 .emergence/
 # Agent-population working ledger; not product code.
