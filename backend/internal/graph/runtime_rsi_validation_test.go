@@ -116,7 +116,7 @@ func TestAppChangesRebuildTheShellThatCarriesThem(t *testing.T) {
 		}
 	}
 	for _, path := range []string{
-		"docs/adr/0042-kernel-0.7-state-presentation.md",
+		"docs/agent/capabilities.md",
 		"README.md",
 	} {
 		if rsiNeedsAppBuild([]string{path}) {

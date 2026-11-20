@@ -2,7 +2,7 @@
 
 <!-- graph:allow-large-file: 领域术语表是唯一查找入口，按主题拆分会让同一概念散落在多个文件 -->
 
-用于编排 Agent、协作完成已有项目中功能开发任务的领域术语。当前执行模型以 [Graph v2 规格](docs/specs/graph-rebuild-v2.md) 和 [ADR 0030](docs/adr/0030-graph-v2-interface-delivery-kernel.md) 为准；旧 ADR 保留历史决策，不把旧 DAG 概念继续当作当前模型。
+用于编排 Agent、协作完成已有项目中功能开发任务的领域术语。当前执行模型以 [Graph v2 规格](docs/specs/graph-rebuild-v2.md) 与代码本身为准，不把旧 DAG 概念继续当作当前模型。
 
 ## Language
 

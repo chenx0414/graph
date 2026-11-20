@@ -105,7 +105,7 @@ GRAPH_UPDATE_ATLAS=1 go -C backend test ./statemachine -run Atlas -count=1  # �
 
 ## 相关
 
-- 决策与取舍：[ADR 0044](../adr/0044-declared-state-machine-registry.md)。
+- 注册表本身即规范：`backend/statemachine/machines.json`，`go -C backend run ./cmd/graphcheck machines` 判定源码与注册表是否一致。
 - 界面运行期状态机的盘点、隐性缺陷与收口顺序：[隐式状态机](../specs/implicit-state-machines.md)。
 - 运行中的机器可读副本：`GET /api/state-machines`（见 [server_app_routes.go](../../backend/internal/graph/server_app_routes.go)）。
 - 门禁：`go -C backend run ./cmd/graphcheck machines`；本文件与明细文档由 `go -C backend test ./statemachine` 盯住不漂移。

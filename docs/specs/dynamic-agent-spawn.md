@@ -1,6 +1,6 @@
 # 动态子 Agent 规格
 
-本规格落实 [ADR 0043](../adr/0043-unified-agent-runtime-and-fleet.md) 第 3 条：任何层级的 Agent 都能 `spawn` 子 Agent。它只定义新增行为，不改变既有主管、graph 节点与执行账本的语义。
+本规格落实「任何层级的 Agent 都能 `spawn` 子 Agent」：它只定义新增行为，不改变既有主管、graph 节点与执行账本的语义。
 
 ## 身份
 
@@ -56,7 +56,7 @@ spawn_agent({
 - `limits.maxAgents`：项目总 Agent 数上限，默认 1024（含 global/project/node/child）。
 - `limits.spawnDepth`：从 global 算起的最大生成深度，默认 4。
 - `limits.childrenPerAgent`：单个 Agent 直接子级上限，默认 16。
-- `limits.agentExecutions`：同时活跃执行上限，见 ADR 0043。
+- `limits.agentExecutions`：同时活跃执行上限。
 
 达到限制时 `spawn_agent` 返回确定性错误并点名哪条限制；不静默排队，不返回假成功。
 

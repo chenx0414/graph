@@ -34,7 +34,7 @@
 
 `go -C backend run ./cmd/graphcheck all` 是**全量确认**（慢层）：同一批步骤再走一遍。**重载确认后它会自己跑**：`AckRestart` 确认提交生效时启动后台会全量，日志落在 `state/rsi/reports/async-full-<activationId>.log`；失败会往本会话追一条带来源标记的消息、标出「回归」还是「环境故障」，并唤醒主控——所以不再需要人记得手动跑。（守护进程在跑之前重启会丢掉这次后台确认，那就靠下一次激活补上。）判定不靠「整份日志里有没有环境故障字样」：它按 `backend/internal/graph/testdata/env-known-reds.json` 逐条匹配失败包与错误摘要，只有所有失败都命中才判「环境故障」，任何未命中的失败都算回归并在卡片里点名（包 + 错误摘要）；新增已知环境项必须写进这个文件并写清理由，不能靠口头约定。
 
-仓库里没有自有的 TypeScript/JavaScript：界面、daemon、构建与门禁工具链都是 Go。例外只有两处——`src/runtime/` 的两个 Node 执行面 worker（扩展与模块；宿主命令与检查解析已由 Go 直接执行，见 ADR 0046），以及 `.agents/skills/` 的第三方技能脚本。
+仓库里没有自有的 TypeScript/JavaScript：界面、daemon、构建与门禁工具链都是 Go。例外只有两处——`src/runtime/` 的两个 Node 执行面 worker（扩展与模块；宿主命令与检查解析已由 Go 直接执行），以及 `.agents/skills/` 的第三方技能脚本。
 
 ## 测试只许断言确定的事实
 

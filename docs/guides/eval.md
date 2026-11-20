@@ -112,7 +112,7 @@ go -C backend run ./cmd/grapheval
 
 - `sandbox` 两条 case 已启用，钉的是开放模式的两条契约：所有 agent 走同一个执行面
   （`OpenWorkspaceCommandRunner`），且该执行面完全访问（工作区外的宿主文件可读、可写落地）。
-  见 ADR 0045。真正需要隔离的容器后端（CubeSandbox）尚未接入，届时在这里补一条
+  真正需要隔离的容器后端（CubeSandbox）尚未接入，届时在这里补一条
   「切换后端后同一条 case 仍然通过」的契约。
 - `graph` 组缺一条「失败节点 + 重试」的 happy path：需要可控的失败注入，现有夹具没有这个能力，
   强行造会变成测假实现。当前 graph 三条覆盖创建、校验、拓扑与控制，**执行与汇聚未覆盖**。

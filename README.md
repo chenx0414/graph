@@ -13,7 +13,6 @@
 - [原生图指南](docs/agent/graph-v2.md)：图形状、节点指令、控制与观察。
 - [重构规格](docs/specs/graph-rebuild-v2.md)：v2 的产品契约。
 - [领域术语](CONTEXT.md)：Agent 定义、实例、节点、任务与额度的准确含义。
-- [决策记录](docs/adr/)：已作选择的理由与权衡（含工具链 Go 化与内核 0.7 的边界）。
 - [检查操作](docs/guides/checks.md)、[harness 维护](docs/guides/harness.md)。
 - [运行示例](examples/graphs/)：可直接照抄的图定义形状。
 
@@ -37,7 +36,7 @@ go -C backend run ./cmd/graphbuild install   # 装到 /Applications，退出重�
 ## 打包产物零外部依赖
 
 `Graph.app` 里只有一个二进制，presets 与运行时脚本都编在它里面，拷到别的 Mac 上行为一致
-（ADR 0046）：
+：
 
 - `presets/`（bootstrap manifest 与 master prompt）与 `src/runtime/` 的脚本用 `//go:embed` 编进二进制。
   磁盘上有真文件时优先用磁盘（开发时改 prompt 不必重编译），没有就解压内嵌副本到

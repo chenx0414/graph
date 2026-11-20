@@ -7,7 +7,7 @@
 | 内容 | 权威位置 | 何时读取 |
 | --- | --- | --- |
 | 工程规则 | `CODING_STANDARDS.md` | 探索、实施、审查及提交或推送前 |
-| 领域语言与决策 | `CONTEXT.md`、`docs/adr/` | 按工程规则读取相关区域 |
+| 领域语言 | `CONTEXT.md` | 按工程规则读取相关区域 |
 | 任务平台 | [issue-tracker.md](issue-tracker.md) | 操作 GitHub 任务或 PR 前 |
 | 分诊标签 | [triage-labels.md](triage-labels.md) | 分诊或修改分诊标签前 |
 | 检查操作 | [checks.md](checks.md) | 准备测试环境、更新证据或排障时 |

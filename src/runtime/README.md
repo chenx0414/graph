@@ -16,7 +16,7 @@ TypeScript 侧的运行时实现在 `eb5ef9c8` 归档删除（`src/runtime/*.ts`
 （`runtime_pig_extensions.go`），本仓库没有它的调用者。
 
 `host-command-worker.mjs` 已删除：宿主命令改由 Go 原生执行（`runtime_host_command.go`），
-不再需要 Node 与 JSON-over-stdio 握手协议。详见 ADR 0045。
+不再需要 Node 与 JSON-over-stdio 握手协议。
 
 这些脚本在磁盘上没有时，daemon 从二进制内嵌副本解压到 `~/.graph/assets/` 使用
 （`runtime_assets.go`）。改这里的文件要同步 `backend/internal/graph/embedded/runtime/`，

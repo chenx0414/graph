@@ -50,7 +50,7 @@ go -C backend run ./cmd/graphcheck eval --config graph.config.json --case parser
 
 窗口是 `app/`（Go + MyGo）这一个二进制，没有 Electron：`go -C app run .` 直接开窗，
 `go -C backend run ./cmd/graphbuild app` 打包成 `/Applications/Graph.app`。
-`src/runtime/` 的两个 Node worker 是唯一的执行面 JS，跑扩展与模块。宿主命令与检查解析已由 Go 直接执行（ADR 0046）。
+`src/runtime/` 的两个 Node worker 是唯一的执行面 JS，跑扩展与模块。宿主命令与检查解析已由 Go 直接执行。
 
 ## Pre-commit Hook
 

@@ -112,7 +112,7 @@ OK: every referenced subcommand, file path and script chain resolves.
 **与这三个脚本无关，是集成/工作副本的环境问题，不要当成整合质量问题。**
 
 实测：Graph 的工作副本把 `node_modules` 做成指向主仓的**软链**。`src/runtime/project-dependencies.ts`
-会把项目 `node_modules` 的 realpath 作为沙箱读取授权交给 Agent（ADR 0027），而软链的
+会把项目 `node_modules` 的 realpath 作为沙箱读取授权交给 Agent，而软链的
 realpath 越出了工作副本自身，于是沙箱里的 Agent 子进程收不到模型请求，表现为
 `provider.requests[0]` 为 `undefined` 一类断言失败。
 
