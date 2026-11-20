@@ -1,6 +1,6 @@
 # Graph v2 管理入口
 
-完整契约见 [已确认规格](../specs/graph-rebuild-v2.md)；代码修改需要 worktree、宿主检查与独立审查时，参阅 [完整代码交付示例](code-delivery.md)。
+完整契约见 [已确认规格](../specs/graph-rebuild-v2.md)。
 
 ## 先选形状，再写节点
 

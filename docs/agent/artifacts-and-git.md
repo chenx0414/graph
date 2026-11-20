@@ -1,6 +1,6 @@
 # Artifacts, Handoff and Git
 
-完整建图与投递步骤见 [代码交付示例](code-delivery.md)，覆盖实际代码 artifact、integration commit、宿主检查与独立 reviewer 报告。
+完整建图与投递步骤见 [graph-v2.md](graph-v2.md)，覆盖实际代码 artifact、integration commit、宿主检查与独立 reviewer 报告。
 
 ## 工作位置与代码交付
 

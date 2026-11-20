@@ -11,14 +11,6 @@
 
 main 在 graph 外部，可以拥有多个 graph。聊天与接口投递共用节点串行队列，沿用聊天历史。接口具名，概览只画一个入口与出口；判断及路由交由模块。
 
-## 接线时检查
-
-- 需要先审计划再开工时，把 reviewer 的通过输出经路由接到 worker；planner 同时连 reviewer 和 worker 表示并行开始，不表示等待审查。需要计划返工时显式把不通过输出接回 planner。
-- 多份报告需要合成一次 synth 输入时，在 synth 前使用 `once` 汇合模块和 `requiredInputs`，输出映射包含各份报告引用。三个 reviewer 直接连 synth 会触发三次执行；第一次缺报告也会按 synth 的必需输出要求验收，不能用 prompt 把它变成隐含汇合。
-- 返工路由传递 `enable:true`、`passed:false`。重开汇合保留旧输入，只等待下一条投递；main 应决定复用哪些旧结论并核对它们实际审查的 commit，不能把重开理解为自动收齐一整轮新报告。
-- `workspace.command` 在 graph 集成目录检查。worker 的 submit 不等于 Git 已集成；检查要在 main 完成显式集成后投递，不能直接挂在尚未集成的 worker 输出上。
-- `submit` 是实际发送，不用于试探协议；合法的 probe 也会启动下游并消耗本次有效提交。使用完整 `outputs` 参数，并以 `accepted:true` 回执确认成功，成功后不要继续猜形状重发。
-
 ## 独立任务
 
 两个 agent 分别接收一次输入，通过公开输出交回 main。main 可以连续投递 api 与 risks；实际并发服从运行名额。
