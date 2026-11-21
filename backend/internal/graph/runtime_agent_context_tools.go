@@ -38,9 +38,6 @@ func (assembly *AgentContextAssembly) compose(identity string, tools []AgentCont
 		composeInput.RulesRuntime = *assembly.runtimeRules
 	}
 	composeInput.ExperienceContext = assembly.experience
-	if assembly.fullAccess && assembly.Role == "main" {
-		composeInput.IdentityContext = DEFAULT_MAIN_FULL_ACCESS_IDENTITY
-	}
 	if assembly.rsi && assembly.Role == "main" {
 		if os.Getenv("GRAPH_CLASSIFY_HARNESS_FRICTION") == "1" {
 			composeInput.HarnessContext = CLASSIFIED_MAIN_RSI_IDENTITY

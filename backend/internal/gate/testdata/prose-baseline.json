@@ -15,9 +15,7 @@
     "scripts/README.md",
     "src/runtime/README.md",
     "verification/CONTROL_COVERAGE.md",
-    "verification/The Complete Guide to pstack Pt. 1.md",
     "verification/VERIFICATION_REPORT.md",
-    "verification/controls/COVERAGE.generated.md",
     "verification/skills/verify-graph/CONTROLS.md",
     "verification/skills/verify-graph/SKILL.md",
     "verification/task.md"

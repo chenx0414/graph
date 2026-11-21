@@ -18,6 +18,10 @@ var vendoredMarkdownRoots = []string{
 	".agents/skills/",
 }
 
+var generatedMarkdown = []string{
+	"verification/controls/COVERAGE.generated.md",
+}
+
 var embeddedPromptFiles = []string{
 	"presets/bootstrap/master/agent.md",
 	"backend/internal/graph/embedded/presets/bootstrap/master/agent.md",
@@ -33,6 +37,11 @@ func DocumentationAllowed(path string) (bool, string) {
 	for _, root := range vendoredMarkdownRoots {
 		if strings.HasPrefix(clean, root) {
 			return true, "vendored capability documentation"
+		}
+	}
+	for _, allowed := range generatedMarkdown {
+		if clean == allowed {
+			return true, "generated report, rewritten by verify-graph cover audit"
 		}
 	}
 	for _, allowed := range embeddedPromptFiles {
