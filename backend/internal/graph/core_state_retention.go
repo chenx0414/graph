@@ -85,12 +85,14 @@ func PlanRetention(db *sql.DB, options RetentionOptions) RetentionPlan {
 	return RetentionPlan{Events: events, Capabilities: capabilities, Handoffs: handoffs, Bytes: bytes}
 }
 
+// ApplyRetention runs the sweep on a database this process does not otherwise transact on.
+// Inside the graph store use TaskStore.ApplyRetention: it joins the store's transaction
+// discipline instead of opening a second one on the same shared connection.
 func ApplyRetention(db *sql.DB, options RetentionOptions) RetentionApplied {
-	sqlText := doomed(options)
 	if _, err := db.Exec("BEGIN IMMEDIATE"); err != nil {
 		panic(err)
 	}
-	applied, err := applyRetentionLocked(db, sqlText)
+	applied, err := applyRetentionLocked(db, doomed(options))
 	if err != nil {
 		_, _ = db.Exec("ROLLBACK")
 		panic(err)
@@ -103,9 +105,32 @@ func ApplyRetention(db *sql.DB, options RetentionOptions) RetentionApplied {
 }
 
 func (s *TaskStore) ApplyRetention(options RetentionOptions) RetentionApplied {
-	s.txMu.Lock()
-	defer s.txMu.Unlock()
-	return ApplyRetention(s.DB, options)
+	// Retention deletes rows, so it belongs to the store's transaction discipline instead of
+	// issuing its own BEGIN/COMMIT on the shared connection: taking txMu alone deadlocks when
+	// a transaction is already open in this goroutine, and racing one from another goroutine
+	// lets a COMMIT land inside the other's transaction ("cannot commit - no transaction is
+	// active", reported by an unrelated caller as SQLITE_BUSY). Inside a transaction the
+	// sweep simply joins it, which is the same rows with the same ordering.
+	// Transaction takes txMu before it checks for an open transaction, so entering it from
+	// inside one self-deadlocks; the sweep therefore joins the caller's transaction when there
+	// is one and opens its own only when the store is idle.
+	applied := RetentionApplied{}
+	run := func() {
+		won, err := applyRetentionLocked(s.DB, doomed(options))
+		if err != nil {
+			panic(err)
+		}
+		applied = won
+	}
+	if s.InTransaction() {
+		run()
+		return applied
+	}
+	s.Transaction(func() any {
+		run()
+		return nil
+	})
+	return applied
 }
 
 func applyRetentionLocked(db *sql.DB, sqlText retentionDoomed) (RetentionApplied, error) {
