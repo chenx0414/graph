@@ -73,6 +73,9 @@ func (s *TaskStore) setTx(active bool) {
 }
 
 func (s *TaskStore) Transaction(action any) any {
+	if s.InTransaction() {
+		return storeTransactionAction(action)
+	}
 	s.txMu.Lock()
 	defer s.txMu.Unlock()
 	if s.InTransaction() {
