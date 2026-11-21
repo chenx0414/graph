@@ -24,9 +24,9 @@
       "operation": {
         "action": "workspace.command",
         "version": 1,
-        "command": "node",
+        "command": "go",
         "args": [
-          "--version"
+          "version"
         ],
         "output": "result"
       }

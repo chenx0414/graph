@@ -14,8 +14,8 @@ func TestRsiIsAvailableThroughASymlinkedCheckout(t *testing.T) {
 	if result := Git(real, []string{"init", "-q", "-b", "main"}, nil, nil); result.Code != 0 {
 		t.Fatalf("git init: %s", result.Stderr)
 	}
-	if err := os.WriteFile(filepath.Join(real, "package.json"), []byte("{\"name\":\"x\"}\n"), 0o644); err != nil {
-		t.Fatalf("write package.json: %v", err)
+	if err := os.WriteFile(filepath.Join(real, "go.mod"), []byte("module probe\n"), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
 	}
 	link := filepath.Join(t.TempDir(), "linked")
 	if err := os.Symlink(real, link); err != nil {
@@ -38,8 +38,8 @@ func TestRsiResolvesTheConfiguredRootThroughTheEnvironment(t *testing.T) {
 	if result := Git(real, []string{"init", "-q", "-b", "main"}, nil, nil); result.Code != 0 {
 		t.Fatalf("git init: %s", result.Stderr)
 	}
-	if err := os.WriteFile(filepath.Join(real, "package.json"), []byte("{\"name\":\"x\"}\n"), 0o644); err != nil {
-		t.Fatalf("write package.json: %v", err)
+	if err := os.WriteFile(filepath.Join(real, "go.mod"), []byte("module probe\n"), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
 	}
 	root := ResolveRsiRoot(map[string]string{"GRAPH_RSI_ROOT": real}, t.TempDir())
 	if root == nil {
@@ -47,6 +47,6 @@ func TestRsiResolvesTheConfiguredRootThroughTheEnvironment(t *testing.T) {
 	}
 	service := OpenRsiService(RsiServiceOptions{Root: root, StateDir: t.TempDir()})
 	if !service.Available {
-		t.Fatalf("a configured checkout with package.json reports no self-improvement surface: root=%v repo=%v", *root, DetectRepo(*root))
+		t.Fatalf("a configured Git checkout without package.json reports no self-improvement surface: root=%v repo=%v", *root, DetectRepo(*root))
 	}
 }

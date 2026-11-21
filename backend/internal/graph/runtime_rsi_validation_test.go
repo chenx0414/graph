@@ -13,17 +13,17 @@ import (
 // the whole gate; running it again before activation doubled every commit - the
 // measured cost of one apply was two full gates plus the build.
 func TestDefaultGateIsNotRepeatedWhenTheChecksAlreadyNameIt(t *testing.T) {
-	gate := RsiCommand{Command: "node", Args: []string{"--run", "check"}}
+	gate := rsiActivationGate()
 	if rsiNeedsDefaultGate([]RsiCommand{gate}, true) {
 		t.Fatal("the gate the checks already ran must not run a second time")
 	}
 	if !rsiNeedsDefaultGate(nil, true) {
 		t.Fatal("a change without checks still needs the default gate before activation")
 	}
-	if !rsiNeedsDefaultGate([]RsiCommand{{Command: "node", Args: []string{"--run", "check:backend"}}}, true) {
+	if !rsiNeedsDefaultGate([]RsiCommand{{Command: "go", Args: []string{"-C", "backend", "test", "./internal/gate"}}}, true) {
 		t.Fatal("a narrower check is not the default gate")
 	}
-	if !rsiNeedsDefaultGate([]RsiCommand{{Command: "node", Args: []string{"--run", "app:build"}}}, true) {
+	if !rsiNeedsDefaultGate([]RsiCommand{rsiAppBuildCommand()}, true) {
 		t.Fatal("a build is not the default gate")
 	}
 	// A rehearsal without activation returns after the caller's checks, so the
@@ -169,5 +169,27 @@ func TestRSIAcceptsNativeVerificationCommands(t *testing.T) {
 	}
 	if rsiNeedsDefaultGate(checks, true) {
 		t.Fatal("the listed activation gate should run once")
+	}
+}
+
+// The activation gate has exactly one spelling: python3 scripts/check-queue.py.
+// The old `node --run check` spelling survived only as a forwarded launcher in
+// package.json, and the repository is deleting that file, so a caller that names the
+// dead spelling is not naming this gate and must not suppress it.
+func TestTheActivationGateHasOneSpelling(t *testing.T) {
+	gate := rsiActivationGate()
+	if gate.Command != "python3" || strings.Join(gate.Args, " ") != "scripts/check-queue.py" {
+		t.Fatalf("the activation gate is %s %v, want python3 scripts/check-queue.py", gate.Command, gate.Args)
+	}
+	if rsiNeedsDefaultGate([]RsiCommand{gate}, true) {
+		t.Fatal("a caller that already ran the gate must not run it twice")
+	}
+	for _, dead := range []RsiCommand{
+		{Command: "node", Args: []string{"--run", "check"}},
+		{Command: "npm", Args: []string{"run", "check"}},
+	} {
+		if !rsiNeedsDefaultGate([]RsiCommand{dead}, true) {
+			t.Fatalf("%s %v is not this gate, so the default gate is still owed", dead.Command, dead.Args)
+		}
 	}
 }

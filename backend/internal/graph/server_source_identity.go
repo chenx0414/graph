@@ -2,10 +2,7 @@ package graph
 
 import (
 	"os/exec"
-	"path/filepath"
 	"strings"
-
-	"os"
 )
 
 type SourceIdentity struct {
@@ -27,7 +24,7 @@ func sourceIdentityRun(root string, args ...string) (ok bool, out string) {
 }
 
 func ReadSourceIdentity(root string) SourceIdentity {
-	if _, err := os.Stat(filepath.Join(root, "package.json")); err != nil {
+	if repo := DetectRepo(root); repo == nil {
 		return SourceIdentity{Root: root}
 	}
 	commitOK, commitOut := sourceIdentityRun(root, "rev-parse", "HEAD")

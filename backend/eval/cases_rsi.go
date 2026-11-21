@@ -35,9 +35,6 @@ func newRsiRepo(t *T, files map[string]string) rsiRepo {
 	if err := os.MkdirAll(repo.StateDir, 0o700); err != nil {
 		t.Fatal("rsi-state", err)
 	}
-	if err := os.WriteFile(filepath.Join(repo.Root, "package.json"), []byte("{\"name\":\"eval-fixture\"}\n"), 0o600); err != nil {
-		t.Fatal("rsi-package-json", err)
-	}
 	for name, content := range files {
 		path := filepath.Join(repo.Root, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

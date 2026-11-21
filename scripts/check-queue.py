@@ -413,6 +413,7 @@ def main():
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "prose"),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "prose", "--staged"),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "softrules"),
+            ("go", "-C", "backend", "run", "./cmd/graphcheck", "scriptfiles"),
             # Contract tests over the gate itself. They live in scripts/, so nothing in ./...
             # runs them: a rule nothing executes is the same prose this repository is deleting.
             ("python3", "-m", "unittest", "scripts.test_data_freshness"),

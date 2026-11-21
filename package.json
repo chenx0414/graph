@@ -1,8 +1,0 @@
-{
-  "name": "graph",
-  "private": true,
-  "description": "Launcher only: the RSI check command is invoked as `node --run check`, so it forwards to the Go gate. Every other RSI step runs a Go command directly.",
-  "scripts": {
-    "check": "python3 scripts/check-queue.py"
-  }
-}

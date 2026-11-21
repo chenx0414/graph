@@ -385,8 +385,8 @@ func (service *RsiService) rsiUnavailableReason() string {
 	if service.Root == nil {
 		return "No Graph source checkout was found. Set GRAPH_RSI_ROOT to the checkout the app runs from."
 	}
-	if _, err := os.Stat(filepath.Join(*service.Root, "package.json")); err != nil {
-		return *service.Root + " has no package.json, so it is not a Graph source checkout."
+	if repo := DetectRepo(*service.Root); repo == nil || *repo != *service.Root {
+		return *service.Root + " is not a Git checkout root; run Graph from a source checkout to enable self-improvement."
 	}
 	return *service.Root + " is not a Git checkout root; run Graph from a source checkout to enable self-improvement."
 }

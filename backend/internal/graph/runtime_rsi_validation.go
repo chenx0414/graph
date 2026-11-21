@@ -141,7 +141,7 @@ func rsiSummarizeValidation(result RsiValidationResult) RsiValidationResult {
 
 func rsiNeedsAppBuild(paths []string) bool {
 	for _, path := range paths {
-		if strings.HasPrefix(path, "app/") || path == "package.json" ||
+		if strings.HasPrefix(path, "app/") ||
 			strings.HasPrefix(path, "backend/") || strings.HasPrefix(path, "build/") {
 			return true
 		}
@@ -230,9 +230,7 @@ func rsiNeedsDefaultGate(checks []RsiCommand, activate bool) bool {
 	}
 	gate := rsiActivationGate()
 	for _, check := range checks {
-		canonical := check.Command == gate.Command && len(check.Args) == 1 && check.Args[0] == gate.Args[0]
-		legacy := check.Command == "node" && len(check.Args) == 2 && check.Args[0] == "--run" && check.Args[1] == "check"
-		if canonical || legacy {
+		if check.Command == gate.Command && len(check.Args) == 1 && check.Args[0] == gate.Args[0] {
 			return false
 		}
 	}

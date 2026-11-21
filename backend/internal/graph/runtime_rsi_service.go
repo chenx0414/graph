@@ -21,11 +21,8 @@ func NewRsiService(options RsiServiceOptions) *RsiService {
 		service.validate = rsiDefaultValidate
 	}
 	if service.Root != nil {
-		packageJSON := filepath.Join(*service.Root, "package.json")
-		if _, err := os.Stat(packageJSON); err == nil {
-			if repo := DetectRepo(*service.Root); repo != nil && *repo == *service.Root {
-				service.Available = true
-			}
+		if repo := DetectRepo(*service.Root); repo != nil && *repo == *service.Root {
+			service.Available = true
 		}
 	}
 	if service.Available {
@@ -66,9 +63,6 @@ func ResolveRsiRoot(env map[string]string, cwd string) *string {
 	}
 	for _, candidate := range []string{cwd, GraphApplicationRoot()} {
 		root := rsiResolveRoot(candidate)
-		if _, err := os.Stat(filepath.Join(root, "package.json")); err != nil {
-			continue
-		}
 		if repo := DetectRepo(root); repo != nil && *repo == root {
 			return &root
 		}

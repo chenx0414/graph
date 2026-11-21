@@ -11,7 +11,7 @@
       "recipe": "coder@1",
       "model": "work",
       "task": "Commit a failing check for the parser contract",
-      "instructions": "Write parse-config.check.mjs against the existing parseConfig API. Assert that blank lines are ignored and X=a=b keeps a=b. Emit Parser behavior mismatch when either assertion fails. Commit only parse-config.check.mjs using workspace_commit. Report the verification commit to main.",
+      "instructions": "Write config_test.go against the existing ParseConfig function. Assert that blank lines are ignored and X=a=b keeps a=b. Fail with the message Parser behavior mismatch when either assertion fails. Commit only config_test.go using workspace_commit. Report the verification commit to main.",
       "workspace": {
         "base": "worktree"
       },
@@ -26,8 +26,8 @@
     "work": {
       "recipe": "coder@1",
       "model": "work",
-      "task": "Repair config.js, commit and publish the code artifact",
-      "instructions": "Read the supplied failing baseline commit and config.js. Ignore blank lines and preserve equals signs inside values. Preserve parse-config.check.mjs. Implement in this worktree, run node parse-config.check.mjs, call workspace_commit for config.js, then artifact_publish with namespace deliverables, name parser, sourcePath config.js and metadata.kind code. Report the commit and exact artifact reference.",
+      "task": "Repair config.go, commit and publish the code artifact",
+      "instructions": "Read the supplied failing baseline commit and config.go. Ignore blank lines and preserve equals signs inside values. Preserve config_test.go. Implement in this worktree, run go test ./..., call workspace_commit for config.go, then artifact_publish with namespace deliverables, name parser, sourcePath config.go and metadata.kind code. Report the commit and exact artifact reference.",
       "workspace": {
         "base": "worktree"
       },
@@ -70,9 +70,10 @@
       "operation": {
         "action": "workspace.command",
         "version": 1,
-        "command": "node",
+        "command": "go",
         "args": [
-          "parse-config.check.mjs"
+          "test",
+          "./..."
         ],
         "output": "result"
       }
@@ -106,10 +107,12 @@
       "module": "check",
       "verification": {
         "paths": [
-          "parse-config.check.mjs"
+          "config_test.go"
         ],
         "failureText": "Parser behavior mismatch",
-        "implementationNodes": ["work"]
+        "implementationNodes": [
+          "work"
+        ]
       }
     },
     {
