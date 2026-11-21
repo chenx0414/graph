@@ -158,3 +158,16 @@ func TestExistingNodeRejectsADirectory(t *testing.T) {
 		t.Fatalf("an empty path was accepted: %q", node)
 	}
 }
+
+func TestRSIAcceptsNativeVerificationCommands(t *testing.T) {
+	checks := rsiNormalizeChecks([]any{
+		map[string]any{"command": "go", "args": []any{"-C", "backend", "test", "./internal/graph", "-run", "TestVerification"}},
+		map[string]any{"command": "python3", "args": []any{"scripts/check-queue.py"}},
+	}, true)
+	if len(checks) != 2 || checks[0].Command != "go" || checks[1].Command != "python3" {
+		t.Fatalf("each verification step must execute the requested program: %+v", checks)
+	}
+	if rsiNeedsDefaultGate(checks, true) {
+		t.Fatal("the listed activation gate should run once")
+	}
+}

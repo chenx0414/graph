@@ -201,7 +201,7 @@ func rsiDefaultValidate(input RsiValidateInput) []RsiValidationResult {
 		return results
 	}
 	if rsiNeedsDefaultGate(input.Checks, input.Activate) {
-		check := rsiRunCheckWithEnvironmentRetry(input.Root, RsiCommand{Command: "node", Args: []string{"--run", "check"}}, RSI_CHECK_TIMEOUT_MS)
+		check := rsiRunCheckWithEnvironmentRetry(input.Root, rsiActivationGate(), RSI_CHECK_TIMEOUT_MS)
 		results = append(results, check)
 		if check.Status == "failed" || !input.Activate {
 			return results
@@ -220,12 +220,19 @@ func rsiAppBuildCommand() RsiCommand {
 	return RsiCommand{Command: "go", Args: []string{"-C", "backend", "run", "./cmd/graphbuild", "app"}}
 }
 
+func rsiActivationGate() RsiCommand {
+	return RsiCommand{Command: "python3", Args: []string{"scripts/check-queue.py"}}
+}
+
 func rsiNeedsDefaultGate(checks []RsiCommand, activate bool) bool {
 	if !activate {
 		return false
 	}
+	gate := rsiActivationGate()
 	for _, check := range checks {
-		if check.Command == "node" && len(check.Args) == 2 && check.Args[0] == "--run" && check.Args[1] == "check" {
+		canonical := check.Command == gate.Command && len(check.Args) == 1 && check.Args[0] == gate.Args[0]
+		legacy := check.Command == "node" && len(check.Args) == 2 && check.Args[0] == "--run" && check.Args[1] == "check"
+		if canonical || legacy {
 			return false
 		}
 	}

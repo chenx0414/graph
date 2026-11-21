@@ -168,8 +168,11 @@ func rsiNormalizeChecks(value any, present bool) []RsiCommand {
 		if record == nil {
 			Raise("invalid_input", fmt.Sprintf("checks[%d] must be an object", index))
 		}
-		if rsiText(record["command"]) != "node" {
-			Raise("invalid_input", fmt.Sprintf("checks[%d].command must be \"node\"", index))
+		command := rsiText(record["command"])
+		switch command {
+		case "go", "python3", "node":
+		default:
+			Raise("invalid_input", fmt.Sprintf("checks[%d].command must be go, python3 or node", index))
 		}
 		rawArgs, ok := rsiAsArrayOf(record["args"])
 		if !ok {
@@ -183,7 +186,7 @@ func rsiNormalizeChecks(value any, present bool) []RsiCommand {
 			}
 			args = append(args, text)
 		}
-		checks = append(checks, RsiCommand{Command: "node", Args: args})
+		checks = append(checks, RsiCommand{Command: command, Args: args})
 	}
 	return checks
 }
