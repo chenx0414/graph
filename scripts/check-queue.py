@@ -390,6 +390,17 @@ def main():
             ("go", "-C", "backend", "run", "./cmd/graphbuild", "backend"),
             ("go", "-C", "backend", "vet", "./..."),
             ("go", "-C", "backend", "test", "-short", "./..."),
+            # Go keys its test cache on files inside the package's own module, and these
+            # packages read data that lives outside it - verification/ is a separate module,
+            # and the rest read docs, presets or the repository root. Measured 2026-11-21: a
+            # broken soft-rule witness kept passing as "(cached)" because only that data file
+            # changed. So the packages that read outside their module run fresh every time;
+            # the rest of ./... stays cached. scripts/test_data_freshness.py fails when a
+            # package starts reading outside backend/ without being listed here, and when this
+            # list names a package that does not.
+            ("go", "-C", "backend", "test", "-short", "-count=1",
+             "./cmd/graphcheck", "./internal/gate", "./internal/graph",
+             "./internal/graph/embedded", "./internal/appinstall", "./internal/harness"),
             ("go", "-C", "app", "vet", "./..."),
             ("go", "-C", "app", "test", "-short", "./..."),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "comments"),
@@ -402,6 +413,9 @@ def main():
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "prose"),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "prose", "--staged"),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "softrules"),
+            # Contract tests over the gate itself. They live in scripts/, so nothing in ./...
+            # runs them: a rule nothing executes is the same prose this repository is deleting.
+            ("python3", "-m", "unittest", "scripts.test_data_freshness"),
         )
         with protect_worktree(common):
             for step in static:
