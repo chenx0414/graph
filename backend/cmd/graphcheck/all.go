@@ -56,6 +56,9 @@ func runAll(root string) int {
 	if code := runFeatureMap(root, nil); code != 0 {
 		return code
 	}
+	if code := runSoftRules(root, nil); code != 0 {
+		return code
+	}
 	fmt.Println("[check] ok")
 	return 0
 }

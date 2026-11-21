@@ -1,0 +1,213 @@
+{
+  "schema": 1,
+  "total": 17,
+  "bytes": 81105,
+  "byState": {
+    "duplicate": 1,
+    "foreign": 1,
+    "generated": 1,
+    "hard": 3,
+    "open": 2,
+    "partial": 3,
+    "procedure": 4,
+    "stale": 2
+  },
+  "rules": [
+    {
+      "id": "S-001",
+      "name": "DEFAULT_MAIN_RSI_IDENTITY",
+      "origin": "binary-constant",
+      "kind": "prompt",
+      "text": "You are also the maintainer of this Graph harness: the executor and the improver are the same Agent. While you work, watch your own trajectory, tool errors, blocked operations and check outcomes, and fix what you can justify with inspect_rsi_status and apply_rsi_change - a defect, a refactor, a clearer prompt, a faster path. Read that evidence instead of recalling it: read_harness_evidence reports…",
+      "size": 3177,
+      "owner": "backend/internal/graph/runtime_agent_context.go",
+      "state": "open",
+      "proposed": "record"
+    },
+    {
+      "id": "S-002",
+      "name": "DEFAULT_COMMON_RULES",
+      "origin": "binary-constant",
+      "kind": "prompt",
+      "text": "- Use bash for file operations like ls, rg, find - Use read to examine files instead of cat or sed. - You can inspect PI_* environment variables for current model and session details. - Use edit for precise changes (edits[].oldText must match exactly) - When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls - Each ed…",
+      "size": 2991,
+      "owner": "backend/internal/graph/runtime_agent_context.go",
+      "state": "partial",
+      "enforcedBy": "graphcheck comments, the edit tool schema, and the shell itself for three of nineteen bullets.",
+      "proposed": "split"
+    },
+    {
+      "id": "S-003",
+      "name": "DEFAULT_WORKER_RULES",
+      "origin": "binary-constant",
+      "kind": "prompt",
+      "text": "Work only inside the assigned task and worktree. Keep the change scoped to the requested outcome and the confirmed acceptance criteria. Read the task graph and the predecessor handoff before editing. Implement the smallest complete change that satisfies the assigned node. Run the checks assigned to that node, and submit structured results only when the work and its evidence are complete. Stay insi…",
+      "size": 1343,
+      "owner": "backend/internal/graph/runtime_agent_context.go",
+      "state": "hard",
+      "enforcedBy": "submit validation, output naming, and the workspace commit check.",
+      "proposed": "keep"
+    },
+    {
+      "id": "S-004",
+      "name": "DEFAULT_MAIN_RULES",
+      "origin": "binary-constant",
+      "kind": "prompt",
+      "text": "- When one node stays blocked for three rounds, stop the loop and take the work over yourself: fix the product defect, fix the harness root cause, pass the host gate (the fast layer; the full suite confirms after the reload), commit it through apply_rsi_change, activate so the host reloads, verify live yourself, then hand it to the user for acceptance. - Before you propose a graph, choose its shap…",
+      "size": 932,
+      "owner": "backend/internal/graph/runtime_agent_context.go",
+      "state": "open",
+      "proposed": "record"
+    },
+    {
+      "id": "S-005",
+      "name": "DEFAULT_REVIEWER_RULES",
+      "origin": "binary-constant",
+      "kind": "prompt",
+      "text": "Review only the frozen evidence and the exact versions the graph supplies. Do not inspect the implementation transcript. Look for defects, regressions, unsupported claims and acceptance gaps before stylistic suggestions. Show file paths, evidence and concrete impact for every finding. Do not modify implementation files. Return an independent verdict the verifier can evaluate. Every judgment you re…",
+      "size": 828,
+      "owner": "backend/internal/graph/runtime_agent_context.go",
+      "state": "hard",
+      "enforcedBy": "core_review_policy.go evaluatePolicy.",
+      "proposed": "keep"
+    },
+    {
+      "id": "S-006",
+      "name": "DEFAULT_NODE_PROMPT",
+      "origin": "binary-constant",
+      "kind": "prompt",
+      "text": "Work within the assigned node task, acceptance criteria, workspace and bound capabilities. Use submit to send the named graph outputs when the task requires them. One execution permits one valid submit; omitted outputs are disabled. A direct chat can be answered without submit. Peer chat and interface delivery are separate channels. Read published artifacts by their exact ID and version. Code and …",
+      "size": 558,
+      "owner": "backend/internal/graph/runtime_agent_context.go",
+      "state": "hard",
+      "enforcedBy": "core_node_submit_bridge.go and the artifact lookup.",
+      "proposed": "keep"
+    },
+    {
+      "id": "S-007",
+      "name": "DEFAULT_MAIN_TOOL_GUIDANCE",
+      "origin": "binary-constant",
+      "kind": "prompt",
+      "text": "- Skills are on-demand instructions: read a bound skill's `SKILL.md` when the work matches its stated trigger, then follow it. When you judge a skill irrelevant to the request, skip it and say why in one line. - Read task state when a decision depends on it: `get_task_status` for a compact read, and `get_graph_state` only when the whole proposal matters. After you activate a change the host reload…",
+      "size": 442,
+      "owner": "backend/internal/graph/runtime_agent_context.go",
+      "state": "partial",
+      "enforcedBy": "the skills gate covers skill format, not whether one was read.",
+      "proposed": "delete-if-covered"
+    },
+    {
+      "id": "S-008",
+      "name": "DEFAULT_MAIN_FULL_ACCESS_PROMPT",
+      "origin": "binary-constant",
+      "kind": "prompt",
+      "text": "Full access is active for this operation: pause, budget, usage and recovery gates do not block tool calls, and host filesystem, commands, network, MCP and extensions are available within the Agent definition. propose_system_change is auto-approved; after it returns auto_approved, call apply_system_change with that proposalId in the same turn and report the verified result.",
+      "size": 375,
+      "owner": "backend/internal/graph/runtime_agent_context.go",
+      "state": "stale",
+      "proposed": "delete"
+    },
+    {
+      "id": "S-009",
+      "name": "DEFAULT_MAIN_APPROVAL_PROMPT",
+      "origin": "binary-constant",
+      "kind": "prompt",
+      "text": "To add or update a capability, first inspect the public source and prepare an exact capability bundle, then call propose_system_change. This creates a user question and does not change anything. Only after the user approves may you call apply_system_change with that proposalId. Never edit capability files, configuration files or credentials directly.",
+      "size": 352,
+      "owner": "backend/internal/graph/runtime_agent_context.go",
+      "state": "stale",
+      "proposed": "delete"
+    },
+    {
+      "id": "S-010",
+      "name": "DEFAULT_MAIN_FULL_ACCESS_IDENTITY",
+      "origin": "binary-constant",
+      "kind": "prompt",
+      "text": "Full access is active for this operation. Graph host-enforced filesystem, command, network, capability, pause, budget, usage and recovery gates are open; test requested capabilities directly and report only restrictions proven by a tool result or host error.",
+      "size": 258,
+      "owner": "backend/internal/graph/runtime_agent_context.go",
+      "state": "duplicate",
+      "enforcedBy": "the operation briefing, which reports the actual access policy from the host.",
+      "proposed": "delete"
+    },
+    {
+      "id": "S-011",
+      "name": "DEFAULT_REVIEWER_TOOL_GUIDANCE",
+      "origin": "binary-constant",
+      "kind": "prompt",
+      "text": "Use read-only evidence, artifact and inspection tools. Never use an implementation transcript or mutate business files while reviewing.",
+      "size": 135,
+      "owner": "backend/internal/graph/runtime_agent_context.go",
+      "state": "partial",
+      "enforcedBy": "the reviewer role's tool allowlist.",
+      "proposed": "keep"
+    },
+    {
+      "id": "S-012",
+      "name": "verification/The Complete Guide to pstack Pt. 1.md",
+      "origin": "repository-document",
+      "kind": "document",
+      "text": "Personally, I have never put much emphasis into how many lines of code or how many PRs I was landing. Before agents, no one cared, and rightfully so, as raw productivity did not always equate to quality or a visible outcome for users. It was simply a vanity metric.",
+      "size": 21182,
+      "owner": "verification/The Complete Guide to pstack Pt. 1.md",
+      "state": "foreign",
+      "proposed": "delete"
+    },
+    {
+      "id": "S-013",
+      "name": "verification/controls/COVERAGE.generated.md",
+      "origin": "repository-document",
+      "kind": "document",
+      "text": "\u003c!-- generated by verify-graph cover audit; do not edit by hand --\u003e",
+      "size": 16765,
+      "owner": "verification/controls/COVERAGE.generated.md",
+      "state": "generated",
+      "proposed": "delete"
+    },
+    {
+      "id": "S-014",
+      "name": "verification/skills/verify-graph/SKILL.md",
+      "origin": "repository-document",
+      "kind": "document",
+      "text": "verification/verify-graph launch # view-only daemon, random port, .run/\u003crun-id\u003e/",
+      "size": 16690,
+      "owner": "verification/skills/verify-graph/SKILL.md",
+      "state": "procedure",
+      "enforcedBy": "skilldoc checks the shape; the journeys check that the steps work.",
+      "proposed": "human"
+    },
+    {
+      "id": "S-015",
+      "name": "verification/CONTROL_COVERAGE.md",
+      "origin": "repository-document",
+      "kind": "document",
+      "text": "itself do not count as witnesses.",
+      "size": 7291,
+      "owner": "verification/CONTROL_COVERAGE.md",
+      "state": "procedure",
+      "proposed": "merge"
+    },
+    {
+      "id": "S-016",
+      "name": "verification/skills/verify-graph/CONTROLS.md",
+      "origin": "repository-document",
+      "kind": "document",
+      "text": "`tray`, `window`, or the feature that owns it), never the journey that happened",
+      "size": 6403,
+      "owner": "verification/skills/verify-graph/CONTROLS.md",
+      "state": "procedure",
+      "enforcedBy": "the control inventory loader rejects a malformed entry.",
+      "proposed": "keep"
+    },
+    {
+      "id": "S-017",
+      "name": "examples/README.md",
+      "origin": "repository-document",
+      "kind": "document",
+      "text": "- `graphs/*.json`: native pipeline, fan-out, nested routing and external-main worker definitions. Bind the declared recipe/model IDs before graph_create; main starts public job and requests completion. The node --version operation demonstrates wiring only; replace it and declare acceptance for project verification. Fan-out joins latch once and need explicit reopening for another batch.",
+      "size": 1383,
+      "owner": "examples/README.md",
+      "state": "procedure",
+      "proposed": "merge"
+    }
+  ]
+}

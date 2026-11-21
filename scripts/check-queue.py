@@ -401,6 +401,7 @@ def main():
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "evidence"),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "prose"),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "prose", "--staged"),
+            ("go", "-C", "backend", "run", "./cmd/graphcheck", "softrules"),
         )
         with protect_worktree(common):
             for step in static:
