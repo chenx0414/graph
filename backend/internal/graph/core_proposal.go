@@ -75,6 +75,13 @@ func ValidateProposal(proposal any) {
 			(criterion.Kind == "review" && criterion.Node != checkNode) {
 			invalid("Draft acceptance IDs, descriptions and check targets must match the graph definition")
 		}
+		if criterion.Verification != nil {
+			if len(criterion.Verification.Paths) == 0 || strings.TrimSpace(criterion.Verification.FailureText) == "" {
+				invalid("Acceptance " + id + " must declare verification paths and failureText")
+			}
+		} else if len(parsed.Nodes) > 0 {
+			invalid("Acceptance " + id + " must declare verification: this graph has implementation nodes, so one check must be proven to fail before it passes")
+		}
 	}
 }
 
@@ -139,3 +146,4 @@ func numberValue(value any) float64 {
 		return 0
 	}
 }
+

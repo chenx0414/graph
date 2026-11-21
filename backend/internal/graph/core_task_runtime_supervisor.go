@@ -91,6 +91,26 @@ func (supervisor *TaskRuntimeSupervisor) ControlTask(input TaskRuntimeControlInp
 				"cursor": runtime.execution.Abandon(target, &reason, true),
 			}
 		})
+	case "archive", "restore":
+		archived := input.Action == "archive"
+		return runtime.store.Command(scope, input.RequestId, map[string]any{"type": input.Action, "taskId": target}, func() any {
+			changed := runtime.store.RestoreTask(target)
+			if archived {
+				changed = runtime.store.ArchiveTask(target)
+			}
+			if !changed {
+				Raise("invalid_state", "Task "+target+" cannot be "+input.Action+"d in its current phase")
+			}
+			return map[string]any{"taskId": target, "archived": archived, "listed": runtime.store.ListedTaskCount()}
+		})
+	case "delete":
+		return runtime.store.Command(scope, input.RequestId, map[string]any{"type": "delete", "taskId": target}, func() any {
+			removed, err := runtime.store.DeleteTask(target)
+			if err != nil {
+				Raise("invalid_state", err.Error())
+			}
+			return map[string]any{"taskId": target, "rows": removed.Rows}
+		})
 	case "steer":
 		nodeId := ""
 		if input.NodeId != nil {

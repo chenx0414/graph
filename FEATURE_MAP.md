@@ -114,10 +114,12 @@ index, or the route is dead and should go.
 | `GET /api/skill-stats` | serveSkillStats (server_app_usage.go) |
 | `POST /api/skills/promote` | serveSkillPromote (server_app_usage.go) |
 | `GET /api/state-machines` | serveStateMachines (server_app_state_machines.go) |
+| `DELETE /api/tasks/{taskId}` | serveTaskDelete (server_app_conversations.go) |
 | `GET /api/tasks/{taskId}` | serveTask (server_app_tasks.go) |
 | `POST /api/tasks/{taskId}/abandon` | serveTaskAbandon (server_app_tasks.go) |
 | `POST /api/tasks/{taskId}/accept` | serveTaskAccept (server_app_tasks.go) |
 | `POST /api/tasks/{taskId}/answer` | serveTaskAnswer (server_app_tasks.go) |
+| `POST /api/tasks/{taskId}/archive` | serveTaskArchive (server_app_conversations.go) |
 | `GET /api/tasks/{taskId}/artifacts` | serveTaskArtifacts (server_app_artifacts.go) |
 | `GET /api/tasks/{taskId}/artifacts/{artifactId}` | serveArtifact (server_app_artifacts.go) |
 | `GET /api/tasks/{taskId}/artifacts/{artifactId}/{version}/content` | serveArtifactContent (server_app_artifacts.go) |
@@ -137,6 +139,7 @@ index, or the route is dead and should go.
 | `GET /api/tasks/{taskId}/nodes/{nodeId}/run` | serveNodeRun (server_app_graph.go) |
 | `GET /api/tasks/{taskId}/operations` | serveOperations (server_app_graph.go) |
 | `POST /api/tasks/{taskId}/pause` | serveTaskPause (server_app_tasks.go) |
+| `POST /api/tasks/{taskId}/restore` | serveTaskRestore (server_app_conversations.go) |
 | `POST /api/tasks/{taskId}/resume` | serveTaskResume (server_app_tasks.go) |
 | `POST /api/tasks/{taskId}/say` | serveTaskSay (server_app_tasks.go) |
 | `GET /api/tool-stats` | serveToolStats (server_app_usage.go) |
@@ -146,10 +149,10 @@ index, or the route is dead and should go.
 
 ## Counts
 
-- 127 registered routes
+- 130 registered routes
 - 17 features in the index
 - 23 routes claimed by a feature
-- 104 routes unclaimed
+- 107 routes unclaimed
 
 ## CI layers
 

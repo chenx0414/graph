@@ -94,6 +94,11 @@ CREATE INDEX IF NOT EXISTS messages_conversation_updated ON messages(conversatio
 PRAGMA user_version=64;
 `
 
+const schemaV65 = `
+CREATE INDEX IF NOT EXISTS tasks_archived ON tasks(archived_at) WHERE archived_at IS NOT NULL;
+PRAGMA user_version=65;
+`
+
 const schemaV61 = `
 CREATE TABLE conversations_next(
   id TEXT PRIMARY KEY,

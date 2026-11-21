@@ -419,3 +419,38 @@ func (app *GraphApp) serveConversationNewContext(w http.ResponseWriter, r *http.
 	body := appJSONBody(w, r)
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().NewContext(conversationID, appBodyString(body, "requestId")))
 }
+
+func (app *GraphApp) serveTaskArchive(w http.ResponseWriter, r *http.Request) {
+	app.serveTaskLifecycle(w, r, "archive")
+}
+
+func (app *GraphApp) serveTaskRestore(w http.ResponseWriter, r *http.Request) {
+	app.serveTaskLifecycle(w, r, "restore")
+}
+
+func (app *GraphApp) serveTaskDelete(w http.ResponseWriter, r *http.Request) {
+	body := appJSONBody(w, r)
+	taskID := r.PathValue("taskId")
+	removed, err := app.runtime.store.DeleteTask(taskID)
+	if err != nil {
+		writeJSON(w, http.StatusConflict, map[string]any{"code": "invalid_state", "message": err.Error()})
+		return
+	}
+	_ = body
+	writeJSON(w, http.StatusOK, map[string]any{"taskId": taskID, "rows": removed.Rows})
+}
+
+func (app *GraphApp) serveTaskLifecycle(w http.ResponseWriter, r *http.Request, action string) {
+	body := appJSONBody(w, r)
+	_ = body
+	taskID := r.PathValue("taskId")
+	changed := app.runtime.store.RestoreTask(taskID)
+	if action == "archive" {
+		changed = app.runtime.store.ArchiveTask(taskID)
+	}
+	if !changed {
+		writeJSON(w, http.StatusConflict, map[string]any{"code": "invalid_state", "message": "That task cannot be " + action + "d in its current phase"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"taskId": taskID, "archived": action == "archive", "listed": app.runtime.store.ListedTaskCount()})
+}

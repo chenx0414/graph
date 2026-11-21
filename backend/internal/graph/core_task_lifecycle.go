@@ -1,5 +1,10 @@
 package graph
 
+import (
+	"database/sql"
+	"errors"
+)
+
 func (s *TaskStore) SetTaskPhase(taskID, phase string) {
 	kernelExec(s.DB, "UPDATE tasks SET phase=? WHERE id=?", phase, taskID)
 }
@@ -226,4 +231,183 @@ func (s *TaskStore) FinishGraphPreparation(taskID string, mayResume bool) bool {
 		return true
 	}
 	return false
+}
+
+type DeletedTask struct {
+	Rows int
+}
+
+func (s *TaskStore) ArchiveTask(taskID string) bool {
+	return s.archiveOrRestore(taskID, NowMillis())
+}
+
+func (s *TaskStore) RestoreTask(taskID string) bool {
+	return s.archiveOrRestore(taskID, 0)
+}
+
+func (s *TaskStore) archiveOrRestore(taskID string, at int64) bool {
+	return s.Transaction(func() any {
+		row := kernelRow(s.Db, "SELECT phase FROM tasks WHERE id=? AND deleted_at IS NULL", taskID)
+		if row == nil {
+			return false
+		}
+		if at != 0 && taskPhaseWorking(GraphPhase(kernelString(row["phase"]))) && !taskPhaseFinished(GraphPhase(kernelString(row["phase"]))) {
+			return false
+		}
+		var stamp *int64
+		if at != 0 {
+			stamp = &at
+		}
+		changes, _ := g5Exec(s.Db, "UPDATE tasks SET archived_at=? WHERE id=? AND deleted_at IS NULL", stamp, taskID)
+		if changes == 0 {
+			return false
+		}
+		s.Event(taskID, "task.archived", map[string]any{"archived": at != 0, "at": at})
+		return true
+	}).(bool)
+}
+
+func (s *TaskStore) DeleteTask(taskID string) (DeletedTask, error) {
+	result := s.Transaction(func() any {
+		row := kernelRow(s.Db, "SELECT phase FROM tasks WHERE id=?", taskID)
+		if row == nil {
+			return DeletedTask{}
+		}
+		phase := GraphPhase(kernelString(row["phase"]))
+		if !taskPhaseFinished(phase) {
+			return errors.New("only a finished task can be deleted; archive it instead, or stop it first")
+		}
+		s.Event(taskID, "task.deleted", map[string]any{"at": NowMillis()})
+
+		rows := 0
+		tables, byColumn := s.taskScopedTables()
+		tables = s.orderTablesLeavesFirst(tables)
+		for pass := 0; pass <= len(tables)+1; pass++ {
+			progressed := false
+			for _, table := range tables {
+				removed, refused := deleteIgnoringRefusal(s.Db, "DELETE FROM "+table+" WHERE "+byColumn[table]+"=?", taskID)
+				if refused {
+					continue
+				}
+				if removed > 0 {
+					progressed = true
+					rows += int(removed)
+				}
+			}
+			if removed, refused := deleteIgnoringRefusal(s.Db, "DELETE FROM tasks WHERE id=?", taskID); !refused {
+				return DeletedTask{Rows: rows + int(removed)}
+			}
+			if !progressed {
+				return errors.New("deleting that task would leave rows pointing at it")
+			}
+		}
+		return errors.New("deleting that task did not converge")
+	})
+	switch value := result.(type) {
+	case DeletedTask:
+		return value, nil
+	case error:
+		return DeletedTask{}, value
+	}
+	return DeletedTask{}, nil
+}
+
+func (s *TaskStore) taskScopedTables() ([]string, map[string]string) {
+	rows := kernelRows(s.Db, "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+	tables := []string{}
+	byColumn := map[string]string{}
+	for _, row := range rows {
+		name := kernelString(row["name"])
+		if name == "tasks" {
+			continue
+		}
+		if kernelRow(s.Db, "SELECT 1 FROM pragma_table_info(?) WHERE name='task_id'", name) != nil {
+			tables = append(tables, name)
+			byColumn[name] = "task_id"
+			continue
+		}
+		for _, key := range kernelRows(s.Db, "SELECT \"table\" AS target, \"from\" AS column_name FROM pragma_foreign_key_list(?)", name) {
+			if kernelString(key["target"]) == "tasks" {
+				tables = append(tables, name)
+				byColumn[name] = kernelString(key["column_name"])
+				break
+			}
+		}
+	}
+	return tables, byColumn
+}
+
+func (s *TaskStore) ListedTaskCount() int {
+	row := kernelRow(s.Db, "SELECT COUNT(*) AS n FROM tasks WHERE archived_at IS NULL AND deleted_at IS NULL")
+	return int(kernelInt(row["n"]))
+}
+
+func (s *TaskStore) ArchivedTaskCount() int {
+	row := kernelRow(s.Db, "SELECT COUNT(*) AS n FROM tasks WHERE archived_at IS NOT NULL AND deleted_at IS NULL")
+	return int(kernelInt(row["n"]))
+}
+
+func deleteIgnoringRefusal(db *sql.DB, query string, args ...any) (removed int64, refused bool) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			removed, refused = 0, true
+		}
+	}()
+	res, err := db.Exec(query, args...)
+	if err != nil {
+		return 0, true
+	}
+	changed, changedErr := res.RowsAffected()
+	if changedErr != nil {
+		return 0, true
+	}
+	return changed, false
+}
+
+func (s *TaskStore) orderTablesLeavesFirst(tables []string) []string {
+	member := map[string]bool{}
+	for _, table := range tables {
+		member[table] = true
+	}
+	references := map[string][]string{}
+	for _, table := range tables {
+		for _, key := range kernelRows(s.Db, "SELECT \"table\" AS target FROM pragma_foreign_key_list(?)", table) {
+			target := kernelString(key["target"])
+			if member[target] {
+				references[table] = append(references[table], target)
+			}
+		}
+	}
+	ordered := []string{}
+	placed := map[string]bool{}
+	for len(ordered) < len(tables) {
+		progressed := false
+		for _, table := range tables {
+			if placed[table] {
+				continue
+			}
+			ready := true
+			for _, dependency := range references[table] {
+				if placed[dependency] {
+					ready = false
+					break
+				}
+			}
+			if !ready {
+				continue
+			}
+			ordered = append(ordered, table)
+			placed[table] = true
+			progressed = true
+		}
+		if !progressed {
+			for _, table := range tables {
+				if !placed[table] {
+					ordered = append(ordered, table)
+					placed[table] = true
+				}
+			}
+		}
+	}
+	return ordered
 }

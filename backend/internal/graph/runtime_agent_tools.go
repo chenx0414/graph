@@ -139,7 +139,7 @@ var agentToolsArtifactTrusts = []string{"unverified", "reviewed", "accepted"}
 
 var agentToolsCapabilityKinds = []string{"skill", "mcp", "extension", "pi-extension", "prompt"}
 
-var agentToolsControlActions = []string{"pause", "resume", "abandon", "set_budget", "steer", "stop_node"}
+var agentToolsControlActions = []string{"pause", "resume", "abandon", "set_budget", "steer", "stop_node", "archive", "restore", "delete"}
 
 var agentToolsProblemActions = []string{"retry", "acknowledge", "respond", "reconcile_usage", "escalate"}
 

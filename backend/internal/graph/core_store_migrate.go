@@ -209,6 +209,16 @@ func MigrateTaskSchema(db *sql.DB) {
 	if version < 64 {
 		execMigration(db, schemaV64)
 	}
+	if version < 65 {
+		tasks := kernelColumns(db, "tasks")
+		if !tasks["archived_at"] {
+			execSQL(db, "ALTER TABLE tasks ADD COLUMN archived_at INTEGER")
+		}
+		if !tasks["deleted_at"] {
+			execSQL(db, "ALTER TABLE tasks ADD COLUMN deleted_at INTEGER")
+		}
+		execMigration(db, schemaV65)
+	}
 }
 
 func migrateV62(db *sql.DB) {
