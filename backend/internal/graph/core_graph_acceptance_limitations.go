@@ -31,9 +31,9 @@ type GraphAcceptanceWaiveInput struct {
 }
 
 type GraphAcceptanceClosure struct {
-	GraphId string `json:"graphId"`
-	Phase   string `json:"phase"`
-	Replayed bool `json:"replayed"`
+	GraphId     string                    `json:"graphId"`
+	Phase       string                    `json:"phase"`
+	Replayed    bool                      `json:"replayed"`
 	Records     int                       `json:"records"`
 	Limitations []AcceptanceLimitationRow `json:"limitations"`
 	Acceptance  GraphAcceptanceReport     `json:"acceptance"`
@@ -163,6 +163,9 @@ func (service *graphManagementService) applyAcceptanceLimitations(plan acceptanc
 		if !ok {
 			Raise("invalid_input", "Acceptance "+limitation.AcceptanceId+" is not declared by this graph")
 		}
+		if item.Verification != nil {
+			Raise("invalid_graph", "Acceptance "+item.Id+" requires both verification receipts")
+		}
 		switch item.Status {
 		case "failed":
 			Raise("invalid_graph", "Acceptance "+item.Id+" failed and cannot be waived: the evidence exists and says no, so fix the work instead")
@@ -284,7 +287,7 @@ func graphAcceptanceClosable(task TaskRow, report GraphAcceptanceReport) bool {
 		if item.Status == "passed" || item.Status == "waived" {
 			continue
 		}
-		if item.Status != "missing" || item.Kind == "human" {
+		if item.Status != "missing" || item.Kind == "human" || item.Verification != nil {
 			return false
 		}
 	}

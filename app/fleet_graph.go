@@ -35,12 +35,26 @@ type fleetTopologyEdge struct {
 }
 
 type fleetTopologyData struct {
-	TaskID string
-	Width  float32
-	Height float32
-	Nodes  []fleetTopologyNode
-	Edges  []fleetTopologyEdge
-	Levels map[string]int
+	TaskID       string
+	Width        float32
+	Height       float32
+	Nodes        []fleetTopologyNode
+	Edges        []fleetTopologyEdge
+	Levels       map[string]int
+	Verification []fleetVerification
+}
+
+type fleetVerification struct {
+	Description string                   `json:"description"`
+	Status      string                   `json:"status"`
+	Reason      string                   `json:"reason"`
+	Baseline    *fleetVerificationSource `json:"baseline"`
+	Source      *fleetVerificationSource `json:"source"`
+}
+
+type fleetVerificationSource struct {
+	ID     string `json:"id"`
+	Commit string `json:"commit"`
 }
 
 type fleetGraphView struct {
@@ -78,11 +92,12 @@ func parseFleetTopology(payload []byte) (*fleetTopologyData, error) {
 			From string `json:"from"`
 			To   string `json:"to"`
 		} `json:"edges"`
+		Verification []fleetVerification `json:"verification"`
 	}
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		return nil, err
 	}
-	data := &fleetTopologyData{TaskID: raw.TaskID, Levels: map[string]int{}}
+	data := &fleetTopologyData{TaskID: raw.TaskID, Levels: map[string]int{}, Verification: raw.Verification}
 	for _, node := range raw.Nodes {
 		data.Nodes = append(data.Nodes, fleetTopologyNode{
 			ID: node.ID, Kind: node.Kind, Action: node.Action, Status: node.Status,

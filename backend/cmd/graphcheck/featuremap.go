@@ -309,8 +309,8 @@ func renderFeatureMapDocument(rows []featureRow, unclaimed []routeRecord, handle
 	builder.WriteString("`backend/internal/graph/`. `go -C backend test ./...` fails when the file no longer matches them,\n")
 	builder.WriteString("so a feature cannot be added, renamed or dropped without this map moving with it.\n\n")
 	builder.WriteString("## Features\n\n")
-	builder.WriteString("| id | feature | entry point | API | handler | existing tests |\n")
-	builder.WriteString("| --- | --- | --- | --- | --- | --- |\n")
+	builder.WriteString("| id | feature | entry point | API | handler | existing tests | verification command |\n")
+	builder.WriteString("| --- | --- | --- | --- | --- | --- | --- |\n")
 	for _, row := range rows {
 		handlersCell := "—"
 		if len(row.Routes) > 0 {
@@ -332,8 +332,12 @@ func renderFeatureMapDocument(rows []featureRow, unclaimed []routeRecord, handle
 		if len(row.Feature.API) > 0 {
 			apiCell = "`" + strings.Join(row.Feature.API, "`, `") + "`"
 		}
-		builder.WriteString(fmt.Sprintf("| [%s] | %s | %s | %s | %s | %s |\n",
-			row.Feature.ID, row.Feature.Title, row.Feature.Entry, apiCell, handlersCell, testsCell))
+		commandCell := "—"
+		if row.Feature.Command != "" {
+			commandCell = "`" + strings.ReplaceAll(row.Feature.Command, "|", "\\|") + "`"
+		}
+		builder.WriteString(fmt.Sprintf("| [%s] | %s | %s | %s | %s | %s | %s |\n",
+			row.Feature.ID, row.Feature.Title, row.Feature.Entry, apiCell, handlersCell, testsCell, commandCell))
 	}
 	builder.WriteString("\n## Routes no feature claims\n\n")
 	if len(unclaimed) == 0 {

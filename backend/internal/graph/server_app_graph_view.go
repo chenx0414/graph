@@ -130,9 +130,10 @@ type appGraphTopologyEdge struct {
 }
 
 type appGraphTopology struct {
-	TaskId string                 `json:"taskId"`
-	Nodes  []appGraphTopologyNode `json:"nodes"`
-	Edges  []appGraphTopologyEdge `json:"edges"`
+	TaskId       string                 `json:"taskId"`
+	Nodes        []appGraphTopologyNode `json:"nodes"`
+	Edges        []appGraphTopologyEdge `json:"edges"`
+	Verification []AcceptanceStatus     `json:"verification,omitempty"`
 }
 
 func appGraphEndpointNode(endpoint string) string {
@@ -189,7 +190,19 @@ func (app *GraphApp) serveGraphTopology(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusOK, graphTopologyView(taskID, GraphDefinition{}, nil))
 		return
 	}
-	writeJSON(w, http.StatusOK, graphTopologyView(taskID, native.Definition, app.appNativeGraphNodes(native.Definition, native)))
+	view := graphTopologyView(taskID, native.Definition, app.appNativeGraphNodes(native.Definition, native))
+	for _, criterion := range native.Definition.Acceptance {
+		if criterion.Verification != nil {
+			report := GraphAcceptance(app.runtime.kernel, taskID, app.runtime.artifacts)
+			for _, item := range report.Items {
+				if item.Verification != nil {
+					view.Verification = append(view.Verification, item)
+				}
+			}
+			break
+		}
+	}
+	writeJSON(w, http.StatusOK, view)
 }
 
 func appSortedKeys[T any](values map[string]T) []string {

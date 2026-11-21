@@ -7,14 +7,16 @@ import (
 )
 
 type AcceptanceStatus struct {
-	Id          string                `json:"id"`
-	Description string                `json:"description"`
-	Kind        string                `json:"kind"`
-	Status      string                `json:"status"`
-	Reason      string                `json:"reason"`
-	Source      *AcceptanceSource     `json:"source,omitempty"`
-	Waived      bool                  `json:"waived"`
-	Limitation  *AcceptanceLimitation `json:"limitation,omitempty"`
+	Id           string                  `json:"id"`
+	Description  string                  `json:"description"`
+	Kind         string                  `json:"kind"`
+	Status       string                  `json:"status"`
+	Reason       string                  `json:"reason"`
+	Source       *AcceptanceSource       `json:"source,omitempty"`
+	Baseline     *AcceptanceSource       `json:"baseline,omitempty"`
+	Verification *AcceptanceVerification `json:"verification,omitempty"`
+	Waived       bool                    `json:"waived"`
+	Limitation   *AcceptanceLimitation   `json:"limitation,omitempty"`
 }
 
 type AcceptanceSource struct {
@@ -241,7 +243,7 @@ func GraphAcceptance(kernel *KernelStore, graphID string, artifacts *ArtifactWor
 	}
 	calls := kernel.ProviderCalls(graphID)
 	for _, criterion := range criteria {
-		result := AcceptanceStatus{Id: criterion.Id, Description: criterion.Description, Kind: criterion.Kind, Status: "missing", Reason: "No valid evidence"}
+		result := AcceptanceStatus{Id: criterion.Id, Description: criterion.Description, Kind: criterion.Kind, Status: "missing", Reason: "No valid evidence", Verification: criterion.Verification}
 		switch criterion.Kind {
 		case "check":
 			attempts := graphAcceptanceCheckAttempts(kernel, graphID, criterion.Module)
@@ -272,6 +274,9 @@ func GraphAcceptance(kernel *KernelStore, graphID string, artifacts *ArtifactWor
 				result.Source = &AcceptanceSource{Id: g5Str(attempts[0]["id"])}
 				result.Status = "unknown"
 				result.Reason = graphAcceptanceUnjudgedReason(kernel, attempts[0], operation.Output)
+			}
+			if criterion.Verification != nil {
+				checkAcceptanceVerification(kernel, task, operation, attempts, row, &result)
 			}
 		case "review":
 			row, ok := g5One(kernel.Db, `SELECT a.artifact_id,a.version,a.producer_operation_id
@@ -362,7 +367,7 @@ func GraphAcceptance(kernel *KernelStore, graphID string, artifacts *ArtifactWor
 	records := kernel.AcceptanceLimitations(graphID)
 	waived := graphAcceptanceWaivedItems(records, commit)
 	for index := range items {
-		if items[index].Status == "passed" {
+		if items[index].Status == "passed" || items[index].Verification != nil {
 			continue
 		}
 		record, ok := waived[items[index].Id]

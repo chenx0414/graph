@@ -112,6 +112,12 @@ func (e *NodeExecutor) runOne(nodeId string, item QueueRow, run TurnRunner) Node
 	if latest == nil {
 		Raise("invalid_graph", fmt.Sprintf("Graph %s has no revision", e.graphId))
 	}
+	if reason := verificationDispatchBlock(e.kernel, e.graphId, nodeId, latest.Definition); reason != "" {
+		e.kernel.BlockNode(e.graphId, nodeId, reason)
+		e.kernel.SetNodeQueuePaused(e.graphId, nodeId, true)
+		e.queue.Complete(seq, QueueCompletion{Kind: "blocked", Reason: reason})
+		return NodeOutcomeBlocked
+	}
 	generation := graphDBInt(mustRow(graphDBRow(e.kernel.Store.Db, "SELECT generation FROM kernel_queue WHERE seq=?", seq)), "generation")
 	suffix := ""
 	if generation != 0 {

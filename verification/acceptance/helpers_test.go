@@ -28,10 +28,6 @@ func verificationRoot(t *testing.T) string {
 	}
 }
 
-func repoRoot(t *testing.T) string {
-	return filepath.Dir(verificationRoot(t))
-}
-
 func runCLI(t *testing.T, args ...string) (string, string, int) {
 	t.Helper()
 	root := verificationRoot(t)

@@ -49,18 +49,18 @@ type NodeDeliverable struct {
 }
 
 type NodeDefinition struct {
-	Recipe       string `json:"recipe"`
-	Task         string `json:"task"`
-	Instructions string `json:"instructions,omitempty"`
-	Harness     map[string]string      `json:"harness,omitempty"`
-	Workspace   *NodeWorkspace         `json:"workspace,omitempty"`
-	Access      map[string]any         `json:"access,omitempty"`
-	Acceptance  []string               `json:"acceptance,omitempty"`
-	Submission  NodeSubmission         `json:"submission"`
-	Deliverable *NodeDeliverable       `json:"deliverable,omitempty"`
-	Integrate   *bool                  `json:"integrate,omitempty"`
-	Inputs      map[string]ProtocolRef `json:"inputs"`
-	Outputs     map[string]ProtocolRef `json:"outputs"`
+	Recipe       string                 `json:"recipe"`
+	Task         string                 `json:"task"`
+	Instructions string                 `json:"instructions,omitempty"`
+	Harness      map[string]string      `json:"harness,omitempty"`
+	Workspace    *NodeWorkspace         `json:"workspace,omitempty"`
+	Access       map[string]any         `json:"access,omitempty"`
+	Acceptance   []string               `json:"acceptance,omitempty"`
+	Submission   NodeSubmission         `json:"submission"`
+	Deliverable  *NodeDeliverable       `json:"deliverable,omitempty"`
+	Integrate    *bool                  `json:"integrate,omitempty"`
+	Inputs       map[string]ProtocolRef `json:"inputs"`
+	Outputs      map[string]ProtocolRef `json:"outputs"`
 	ExecutionSettings
 }
 
@@ -133,11 +133,18 @@ type CompletionDeclaration struct {
 }
 
 type AcceptanceCriterion struct {
-	Id          string `json:"id"`
-	Description string `json:"description"`
-	Kind        string `json:"kind"`
-	Module      string `json:"module,omitempty"`
-	Node        string `json:"node,omitempty"`
+	Id           string                  `json:"id"`
+	Description  string                  `json:"description"`
+	Kind         string                  `json:"kind"`
+	Module       string                  `json:"module,omitempty"`
+	Node         string                  `json:"node,omitempty"`
+	Verification *AcceptanceVerification `json:"verification,omitempty"`
+}
+
+type AcceptanceVerification struct {
+	Paths               []string `json:"paths"`
+	FailureText         string   `json:"failureText"`
+	ImplementationNodes []string `json:"implementationNodes,omitempty"`
 }
 
 type GraphTemplate struct {

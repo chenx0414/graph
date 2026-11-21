@@ -13,13 +13,13 @@ type DriverHost interface {
 }
 
 type NodeTurnDriverOptions struct {
-	Kernel  *KernelStore
-	GraphId string
-	NodeId  string
-	Host    DriverHost
-	Submit  func(executionId string) *TurnInjection
-	InitialContext func() string
-	TurnText func(injection *TurnInjection) string
+	Kernel               *KernelStore
+	GraphId              string
+	NodeId               string
+	Host                 DriverHost
+	Submit               func(executionId string) *TurnInjection
+	InitialContext       func() string
+	TurnText             func(injection *TurnInjection) string
 	MissingRequiredNames func(executionId string) []string
 }
 
@@ -206,7 +206,7 @@ func (driver *NodeTurnDriver) firstTurnPrompt(executionId string, input *QueueRo
 		tail = driver.options.TurnText(nil)
 	}
 	parts := []string{}
-	for _, part := range []string{context, instructions, updated, tail} {
+	for _, part := range []string{context, instructions, updated, driver.verificationBriefing(execution.TaskId, definition), tail} {
 		if part != "" {
 			parts = append(parts, part)
 		}

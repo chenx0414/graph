@@ -17,7 +17,7 @@ func sessionToolDeclarations(set agentToolContext) []AgentToolDeclaration {
 	rsiArguments := PrepareToolArguments("apply_rsi_change")
 	apply := AgentToolDeclaration{
 		Name: "apply_rsi_change", Label: "Apply self-improvement change",
-		Description: "Change Graph files, check and commit to main. A change is a path plus write, replace, \"copy\", delete or fromPath (a file already written); copy mirrors a revision. Failed checks keep edits; changes:[] retries. Activation runs the full gate, ends this operation and schedules reload. Wait while a reload is pending; ask before force interrupts work.",
+		Description: "Change Graph files, check and commit to main. A change is a path plus write, replace, \"copy\", delete or fromPath (a file already written); copy mirrors a revision. Failed checks keep edits; changes:[] retries. Checks accept go, python3 and node. Activation runs the activation gate, ends this operation and schedules reload. The full suite runs after reload. Wait while a reload is pending; ask before force interrupts work.",
 		Parameters: tbObject([]tbField{
 			{"title", tbString(nil)}, {"problem", tbString(nil)},
 			{"evidence", tbOptional(tbString(nil))}, {"diagnosis", tbOptional(tbString(nil))},

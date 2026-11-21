@@ -370,6 +370,10 @@ func (c *chatState) messageRow(ctx *ui.Context, message transcriptMessage) {
 }
 
 func (c *chatState) plainMessageRow(ctx *ui.Context, message transcriptMessage) {
+	if message.Kind == "verification_draft" && message.Data.VerificationDraft != nil {
+		c.verificationDraftRow(ctx, message.Text, *message.Data.VerificationDraft)
+		return
+	}
 	if message.Data.Source.Form == "notice" || message.Data.Source.Kind == "tool_settled" {
 		c.noticeRow(ctx, message)
 		return

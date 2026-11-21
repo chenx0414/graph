@@ -277,3 +277,14 @@ func TestRightClickingAGraphNodeOpensItsDetailPage(t *testing.T) {
 		t.Fatalf("the graph node detail entry opens an agent page, page %+v", page)
 	}
 }
+
+func TestGraphPageShowsVerificationEvidence(t *testing.T) {
+	report := `"verification":[{"description":"保留等号","status":"passed","baseline":{"id":"red","commit":"111111111111"},"source":{"id":"green","commit":"222222222222"}},{"description":"保留空值","status":"missing","reason":"A failing baseline is required"}]`
+	mock := &fleetGraphMock{topology: strings.Replace(fleetTopologySample, `"nodes": [`, report+`,"nodes": [`, 1), fleet: ringGraphFleet()}
+	_, tester := fleetGraphTester(t, mock, ringGraphFleet())
+	for _, want := range []string{"保留等号", "基线失败 111111111111", "交付通过 222222222222", "保留空值", "A failing baseline is required"} {
+		if !tester.HasText(want) {
+			t.Fatalf("verification evidence %q is missing from %q", want, tester.Texts())
+		}
+	}
+}

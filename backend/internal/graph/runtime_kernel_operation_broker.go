@@ -75,10 +75,12 @@ type moduleOperationOutput struct {
 }
 
 type moduleOperationEvaluated struct {
-	Ok          bool           `json:"ok"`
-	State       any            `json:"state"`
-	Outputs     map[string]any `json:"outputs"`
-	Diagnostics []string       `json:"diagnostics"`
+	Ok                 bool           `json:"ok"`
+	State              any            `json:"state"`
+	Outputs            map[string]any `json:"outputs"`
+	Diagnostics        []string       `json:"diagnostics"`
+	VerificationCommit *string        `json:"verificationCommit,omitempty"`
+	VerificationTarget *string        `json:"verificationTarget,omitempty"`
 }
 
 func moduleOperationOutputValue(output moduleOperationOutput) map[string]any {
@@ -171,6 +173,17 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 	})
 
 	var commit *string
+	var verificationTarget *string
+	var verificationSnapshotCommit *string
+	commandWorkspace := options.Workspace
+	var verificationPaths []string
+	if revision := kernel.Revision(options.GraphId, options.RevisionVersion); revision != nil {
+		for _, criterion := range revision.Definition.Acceptance {
+			if criterion.Module == options.ModuleId && criterion.Verification != nil {
+				verificationPaths = append(verificationPaths, criterion.Verification.Paths...)
+			}
+		}
+	}
 	cleanBefore := false
 	cleanTree := func() bool {
 		status := Git(options.Workspace, []string{"status", "--porcelain", "-u"}, nil, nil)
@@ -187,6 +200,14 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 		rsiAdmitSource(kernel, options.GraphId, options.DeliveryId, options.Workspace, operation, options.IntegratesSource)
 		commit = RevParse(options.Workspace, "HEAD")
 		cleanBefore = commit != nil && cleanTree()
+		if verificationSnapshotCommit != nil && cleanBefore && graphAcceptanceShaEqual(commit, task.IntegrationSha) &&
+			graphAcceptanceShaEqual(commit, verificationSnapshotCommit) {
+			integration := kernelRow(kernel.Db, "SELECT path FROM worktrees WHERE instance_id=?", "integration:"+task.ID)
+			if integration != nil && gitReal(kernelString(integration["path"])) == gitReal(options.Workspace) &&
+				verificationWorkspaceMatches(commandWorkspace, *commit, verificationPaths) {
+				verificationTarget = task.TargetSha
+			}
+		}
 		dispatched, err := kernel.DispatchModuleOperation(id)
 		if err != nil {
 			panic(err)
@@ -258,7 +279,18 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 		programEnv = options.Program.Env
 		nodeModulesPath = options.Program.NodeModulesPath
 	}
-	LinkProjectDependencies(options.Workspace, nodeModulesPath)
+	if len(verificationPaths) != 0 {
+		verificationSnapshotCommit = RevParse(options.Workspace, "HEAD")
+		if verificationSnapshotCommit != nil {
+			commandWorkspace = filepath.Join(scratchDir, "checkout")
+			checkout := verificationGit(options.Workspace, "worktree", "add", "--detach", commandWorkspace, *verificationSnapshotCommit)
+			if checkout.Code != 0 {
+				Raise("invalid_operation", "Could not check out the verification commit: "+checkout.Stderr)
+			}
+			defer verificationGit(options.Workspace, "worktree", "remove", "--force", commandWorkspace)
+		}
+	}
+	LinkProjectDependencies(commandWorkspace, nodeModulesPath)
 	timeoutMs := moduleOperationDefaultTimeoutMs
 	if operation.TimeoutMs != nil {
 		timeoutMs = *operation.TimeoutMs
@@ -278,7 +310,7 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 		}
 		outputDir := scratchDir
 		running := RunHostCommand(HostCommandInput{
-			Cwd: options.Workspace, Executable: command.Executable, Args: command.Args,
+			Cwd: commandWorkspace, Executable: command.Executable, Args: command.Args,
 			OutputDir: &outputDir,
 			Env:       CheckEnvironment(CheckEnvironmentInput{Executable: command.Executable, Host: environMap(), Declared: declared}),
 			TimeoutMs: &timeoutMs, Signal: cancellation, Quiescence: &quiescence,
@@ -299,7 +331,7 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 			temporary = resolved
 		}
 		environment["TMPDIR"] = temporary
-		runner = OpenWorkspaceCommandRunner(options.Workspace, scratchDir, SendGate{
+		runner = OpenWorkspaceCommandRunner(commandWorkspace, scratchDir, SendGate{
 			Dispatch: func(_ string, _ float64, send func() any) any {
 				admit()
 				started := send()
@@ -359,6 +391,12 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 		Ok: true, State: options.State,
 		Outputs:     map[string]any{operation.Output: moduleOperationOutputValue(output)},
 		Diagnostics: []string{"workspace.command " + id},
+	}
+	if verificationTarget != nil && cleanAfter && graphAcceptanceShaEqual(commit, commitAfter) && result.Code != nil && !result.TimedOut &&
+		graphAcceptanceShaEqual(commit, RevParse(commandWorkspace, "HEAD")) && IsClean(commandWorkspace, nil) &&
+		verificationWorkspaceMatches(commandWorkspace, *commit, verificationPaths) {
+		evaluated.VerificationCommit = commit
+		evaluated.VerificationTarget = verificationTarget
 	}
 	kernel.Store.Transaction(func() any {
 		kernel.SettleModuleOperation(id, kernel.Content.Encode(evaluated), recordDigest, NowMillis())

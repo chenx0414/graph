@@ -12,24 +12,25 @@ so a feature cannot be added, renamed or dropped without this map moving with it
 
 ## Features
 
-| id | feature | entry point | API | handler | existing tests |
-| --- | --- | --- | --- | --- | --- |
-| [F-01] | 启动与就绪 | verify-graph launch / doctor | `/api/health`, `/api/startup`, `/api/conversations` | `GET /api/health` → serveHealth (server_app_routes.go)<br>`GET /api/startup` → serveStartup (server_app_routes.go)<br>`GET /api/conversations` → serveConversations (server_app_conversations.go)<br>`POST /api/conversations` → serveConversationCreate (server_app_conversations.go) | — |
-| [F-02] | 模块导航（侧栏 7 项） | 左侧 rail 七个图标 | `/api/conversations`, `/api/fleet`, `/api/catalog`, `/api/providers/magpie`, `/api/settings` | `GET /api/conversations` → serveConversations (server_app_conversations.go)<br>`POST /api/conversations` → serveConversationCreate (server_app_conversations.go)<br>`GET /api/fleet` → serveFleet (server_fleet.go)<br>`GET /api/catalog` → serveCatalog (server_app_catalog.go)<br>`GET /api/providers/magpie` → serveMagpieProviders (magpie_providers.go)<br>`GET /api/settings` → serveSettings (server_app_config.go) | `app/rail_view_test.go`, `app/shell_view_test.go` |
-| [F-03] | 会话列表与切换 | 左栏 main agent 会话卡片 + 会话行 | `/api/conversations`, `/api/conversations/{id}` | `GET /api/conversations` → serveConversations (server_app_conversations.go)<br>`POST /api/conversations` → serveConversationCreate (server_app_conversations.go) | `app/shell_test.go`, `app/conversations_test.go` |
-| [F-04] | 对话流渲染与消息操作 | 中栏消息流 | `/api/conversations/{id}`, `/api/conversations/{id}/history`, `/api/startup` | `GET /api/startup` → serveStartup (server_app_routes.go) | `app/chat_activity_test.go`, `app/chat_node_test.go`, `app/background_notice_test.go` |
-| [F-05] | 输入区（composer） | 中栏底部 消息/附件/模型/暂停 | `/api/settings`, `/api/projects/{id}/entries` | `GET /api/settings` → serveSettings (server_app_config.go) | `app/composer_menu_test.go`, `app/composer_trigger_test.go` |
-| [F-06] | 上下文窗口三页签 | 底部 当前上下文窗口（上下文/System Prompt/工具声明） | `/api/tasks/{taskId}/nodes/{nodeId}/prompt` | `GET /api/tasks/{taskId}/nodes/{nodeId}/prompt` → serveNodePrompt (server_app_graph.go) | `app/prompt_record_test.go` |
-| [F-07] | 白板布局与面板管理 | 主区页签栏 + 面板右上角 在新标签页打开/移除 | — | — | `app/board_drag_test.go`, `app/board_view_test.go`, `app/shell_layout_test.go` |
-| [F-08] | 轨迹页（12 个量化面板） | 侧栏「轨迹」 | `/api/conversations/{id}/trajectory`, `/api/tasks/{taskId}/nodes/{nodeId}/trajectory` | `GET /api/tasks/{taskId}/nodes/{nodeId}/trajectory` → serveNodeTrajectory (server_app_conversations.go) | `app/trajectory_context_overview_test.go` |
-| [F-09] | 洞察页 | 侧栏「洞察」 | `/api/usage`, `/api/insights`, `/api/trajectory/insights` | `GET /api/usage` → serveUsage (server_app_usage.go)<br>`GET /api/insights` → serveInsights (server_app_insights.go)<br>`GET /api/trajectory/insights` → serveTrajectoryInsights (server_app_conversations.go) | `app/usage_test.go` |
-| [F-10] | 编队页 | 侧栏「编队」 | `/api/fleet`, `/api/tasks`, `/api/tasks/{taskId}/graph/topology` | `GET /api/fleet` → serveFleet (server_fleet.go)<br>`GET /api/tasks` → serveTasks (server_app_conversations.go)<br>`POST /api/tasks` → serveTaskCreate (server_app_tasks.go)<br>`GET /api/tasks/{taskId}/graph/topology` → serveGraphTopology (server_app_graph_view.go) | `app/fleet_detail_test.go`, `app/fleet_graph_test.go`, `app/fleet_view_test.go` |
-| [F-11] | 供应商页 | 侧栏「供应商」 | `/api/providers/magpie`, `/api/providers` | `GET /api/providers/magpie` → serveMagpieProviders (magpie_providers.go) | `app/providers_page_test.go` |
-| [F-12] | 资源（能力）页 | 侧栏「资源」 | `/api/catalog`, `/api/extensions/status` | `GET /api/catalog` → serveCatalog (server_app_catalog.go)<br>`GET /api/extensions/status` → serveExtensionsStatus (server_app_catalog.go) | — |
-| [F-13] | 装配页 | 侧栏「装配」 | `/api/catalog`, `/api/catalog/combinations` | `GET /api/catalog` → serveCatalog (server_app_catalog.go)<br>`POST /api/catalog/combinations` → serveCombinationSave (server_app_catalog.go) | — |
-| [F-14] | 设置页 | 侧栏「设置」 | `/api/settings`, `/api/config`, `/api/startup`, `/api/limits` | `GET /api/settings` → serveSettings (server_app_config.go)<br>`GET /api/config` → serveConfig (server_app_config.go)<br>`POST /api/config` → serveConfigSave (server_app_config.go)<br>`GET /api/startup` → serveStartup (server_app_routes.go)<br>`GET /api/limits` → serveLimits (server_app_usage.go) | — |
-| [F-15] | 托盘与系统通知 | 菜单栏 Graph 图标 | `/api/tasks` | `GET /api/tasks` → serveTasks (server_app_conversations.go)<br>`POST /api/tasks` → serveTaskCreate (server_app_tasks.go) | — |
-| [F-16] | 空态与错误态 | 任意页面（停 daemon / 去 cookie / 空数据） | `/api/conversations`, `/api/fleet` | `GET /api/conversations` → serveConversations (server_app_conversations.go)<br>`POST /api/conversations` → serveConversationCreate (server_app_conversations.go)<br>`GET /api/fleet` → serveFleet (server_fleet.go) | `app/skeleton_pages_test.go`, `app/shell_view_test.go` |
+| id | feature | entry point | API | handler | existing tests | verification command |
+| --- | --- | --- | --- | --- | --- | --- |
+| [F-01] | 启动与就绪 | verify-graph launch / doctor | `/api/health`, `/api/startup`, `/api/conversations` | `GET /api/health` → serveHealth (server_app_routes.go)<br>`GET /api/startup` → serveStartup (server_app_routes.go)<br>`GET /api/conversations` → serveConversations (server_app_conversations.go)<br>`POST /api/conversations` → serveConversationCreate (server_app_conversations.go) | — | — |
+| [F-02] | 模块导航（侧栏 7 项） | 左侧 rail 七个图标 | `/api/conversations`, `/api/fleet`, `/api/catalog`, `/api/providers/magpie`, `/api/settings` | `GET /api/conversations` → serveConversations (server_app_conversations.go)<br>`POST /api/conversations` → serveConversationCreate (server_app_conversations.go)<br>`GET /api/fleet` → serveFleet (server_fleet.go)<br>`GET /api/catalog` → serveCatalog (server_app_catalog.go)<br>`GET /api/providers/magpie` → serveMagpieProviders (magpie_providers.go)<br>`GET /api/settings` → serveSettings (server_app_config.go) | `app/rail_view_test.go`, `app/shell_view_test.go` | `verification/verify-graph verify --journey F-02-nav` |
+| [F-03] | 会话列表与切换 | 左栏 main agent 会话卡片 + 会话行 | `/api/conversations`, `/api/conversations/{id}` | `GET /api/conversations` → serveConversations (server_app_conversations.go)<br>`POST /api/conversations` → serveConversationCreate (server_app_conversations.go) | `app/shell_test.go`, `app/conversations_test.go` | `verification/verify-graph verify --journey F-03-conversations` |
+| [F-04] | 对话流渲染与消息操作 | 中栏消息流 | `/api/conversations/{id}`, `/api/conversations/{id}/history`, `/api/startup` | `GET /api/startup` → serveStartup (server_app_routes.go) | `app/chat_activity_test.go`, `app/chat_node_test.go`, `app/background_notice_test.go` | `verification/verify-graph verify --journey F-04-conversation` |
+| [F-05] | 输入区（composer） | 中栏底部 消息/附件/模型/暂停 | `/api/settings`, `/api/projects/{id}/entries` | `GET /api/settings` → serveSettings (server_app_config.go) | `app/composer_menu_test.go`, `app/composer_trigger_test.go` | `verification/verify-graph verify --journey F-05-composer` |
+| [F-06] | 上下文窗口三页签 | 底部 当前上下文窗口（上下文/System Prompt/工具声明） | `/api/tasks/{taskId}/nodes/{nodeId}/prompt` | `GET /api/tasks/{taskId}/nodes/{nodeId}/prompt` → serveNodePrompt (server_app_graph.go) | `app/prompt_record_test.go` | `verification/verify-graph verify --journey F-06` |
+| [F-07] | 白板布局与面板管理 | 主区页签栏 + 面板右上角 在新标签页打开/移除 | — | — | `app/board_drag_test.go`, `app/board_view_test.go`, `app/shell_layout_test.go` | `verification/verify-graph verify --journey F-07` |
+| [F-08] | 轨迹页（12 个量化面板） | 侧栏「轨迹」 | `/api/conversations/{id}/trajectory`, `/api/tasks/{taskId}/nodes/{nodeId}/trajectory` | `GET /api/tasks/{taskId}/nodes/{nodeId}/trajectory` → serveNodeTrajectory (server_app_conversations.go) | `app/trajectory_context_overview_test.go` | `verification/verify-graph verify --journey F-08` |
+| [F-09] | 洞察页 | 侧栏「洞察」 | `/api/usage`, `/api/insights`, `/api/trajectory/insights` | `GET /api/usage` → serveUsage (server_app_usage.go)<br>`GET /api/insights` → serveInsights (server_app_insights.go)<br>`GET /api/trajectory/insights` → serveTrajectoryInsights (server_app_conversations.go) | `app/usage_test.go` | `verification/verify-graph verify --journey F-09` |
+| [F-10] | 编队页 | 侧栏「编队」→ 打开任务图 → 验证证据 | `/api/fleet`, `/api/tasks`, `/api/tasks/{taskId}/graph/topology` | `GET /api/fleet` → serveFleet (server_fleet.go)<br>`GET /api/tasks` → serveTasks (server_app_conversations.go)<br>`POST /api/tasks` → serveTaskCreate (server_app_tasks.go)<br>`GET /api/tasks/{taskId}/graph/topology` → serveGraphTopology (server_app_graph_view.go) | `backend/internal/graph/server_graph_verification_test.go`, `app/fleet_detail_test.go`, `app/fleet_graph_test.go`, `app/fleet_view_test.go` | `verification/verify-graph verify --journey F-10` |
+| [F-11] | 供应商页 | 侧栏「供应商」 | `/api/providers/magpie`, `/api/providers` | `GET /api/providers/magpie` → serveMagpieProviders (magpie_providers.go) | `app/providers_page_test.go` | `verification/verify-graph verify --journey F-11` |
+| [F-12] | 资源（能力）页 | 侧栏「资源」 | `/api/catalog`, `/api/extensions/status` | `GET /api/catalog` → serveCatalog (server_app_catalog.go)<br>`GET /api/extensions/status` → serveExtensionsStatus (server_app_catalog.go) | — | `verification/verify-graph verify --journey F-12` |
+| [F-13] | 装配页 | 侧栏「装配」 | `/api/catalog`, `/api/catalog/combinations` | `GET /api/catalog` → serveCatalog (server_app_catalog.go)<br>`POST /api/catalog/combinations` → serveCombinationSave (server_app_catalog.go) | — | `verification/verify-graph verify --journey F-13` |
+| [F-14] | 设置页 | 侧栏「设置」 | `/api/settings`, `/api/config`, `/api/startup`, `/api/limits` | `GET /api/settings` → serveSettings (server_app_config.go)<br>`GET /api/config` → serveConfig (server_app_config.go)<br>`POST /api/config` → serveConfigSave (server_app_config.go)<br>`GET /api/startup` → serveStartup (server_app_routes.go)<br>`GET /api/limits` → serveLimits (server_app_usage.go) | — | `verification/verify-graph verify --journey F-14` |
+| [F-15] | 托盘与系统通知 | 菜单栏 Graph 图标 | `/api/tasks` | `GET /api/tasks` → serveTasks (server_app_conversations.go)<br>`POST /api/tasks` → serveTaskCreate (server_app_tasks.go) | — | `verification/verify-graph verify --journey F-15-tray` |
+| [F-16] | 空态与错误态 | 任意页面（停 daemon / 去 cookie / 空数据） | `/api/conversations`, `/api/fleet` | `GET /api/conversations` → serveConversations (server_app_conversations.go)<br>`POST /api/conversations` → serveConversationCreate (server_app_conversations.go)<br>`GET /api/fleet` → serveFleet (server_fleet.go) | `app/skeleton_pages_test.go`, `app/shell_view_test.go` | `verification/verify-graph verify --journey F-16-empty-and-error` |
+| [F-17] | 验证驱动开发 | 会话中的验证草稿 → 确认草稿 → 任务图的验证证据 | `/api/orchestration/work/{workId}/confirm`, `/api/tasks/{taskId}/graph/topology` | `POST /api/orchestration/work/{workId}/confirm` → serveWorkConfirm (server_app_work_confirm.go)<br>`GET /api/tasks/{taskId}/graph/topology` → serveGraphTopology (server_app_graph_view.go) | `backend/internal/graph/server_work_verification_test.go`, `backend/internal/graph/server_graph_verification_test.go`, `app/work_verification_test.go` | `go -C backend test ./internal/graph -run 'TestVerificationWorkStartsOnlyFromTheConfirmedRevision\|TestImplementationRequiresTheExpectedFailureBeforeDispatch\|TestGraphVerificationPublishesFailureAndPassForTheSameCheck' && go -C app test . -run 'TestDesktopConfirmsTheVerificationDraftItShows\|TestGraphPageShowsVerificationEvidence'` |
 
 ## Routes no feature claims
 
@@ -91,7 +92,6 @@ index, or the route is dead and should go.
 | `GET /api/orchestration/work` | serveWorkList (server_app_work.go) |
 | `POST /api/orchestration/work` | serveWorkCreate (server_app_work.go) |
 | `GET /api/orchestration/work/{workId}` | serveWork (server_app_work.go) |
-| `POST /api/orchestration/work/{workId}/confirm` | serveWorkConfirm (server_app_work_confirm.go) |
 | `GET /api/orchestration/work/{workId}/drafts` | serveWorkDrafts (server_app_work_drafts.go) |
 | `POST /api/orchestration/work/{workId}/drafts` | serveWorkDraftCreate (server_app_work_drafts.go) |
 | `GET /api/orchestration/work/{workId}/drafts/{version}` | serveWorkDraft (server_app_work_drafts.go) |
@@ -147,9 +147,9 @@ index, or the route is dead and should go.
 ## Counts
 
 - 127 registered routes
-- 16 features in the index
-- 22 routes claimed by a feature
-- 105 routes unclaimed
+- 17 features in the index
+- 23 routes claimed by a feature
+- 104 routes unclaimed
 
 ## CI layers
 

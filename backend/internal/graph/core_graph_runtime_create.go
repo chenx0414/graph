@@ -64,6 +64,9 @@ func (runtime *GraphRuntime) Patch(baseRevision int, changes PatchChange) GraphP
 	} else {
 		parsed = ParseGraphDefinition(patchedDefinition(latest.Definition, changes.Patch))
 	}
+	if hasStagedVerification(parsed) && !hasStagedVerification(latest.Definition) {
+		Raise("invalid_input", "Verification-driven implementation requires a confirmed work draft")
+	}
 	if len(latest.Definition.Acceptance) > 0 && CanonicalJSON(parsed.Acceptance) != CanonicalJSON(latest.Definition.Acceptance) {
 		Raise("invalid_input", "Patch cannot change declared final acceptance")
 	}

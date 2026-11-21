@@ -13,6 +13,9 @@ func transcriptFingerprint(messages []transcriptMessage) string {
 		digest.Write([]byte(message.State))
 		digest.Write([]byte{0})
 		digest.Write([]byte(message.Text))
+		if draft := message.Data.VerificationDraft; draft != nil && draft.Confirmed {
+			digest.Write([]byte{2})
+		}
 		digest.Write([]byte{1})
 	}
 	return hex.EncodeToString(digest.Sum(nil))

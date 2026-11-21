@@ -47,7 +47,7 @@ func confirmationQuoted(store *TaskStore, anchorTaskId, instruction string) bool
 	}
 	row := kernelRow(store.Db, `SELECT COUNT(*) AS count FROM messages m
  JOIN conversations c ON c.id=m.conversation_id
- WHERE c.anchor_task_id=? AND instr(m.text, ?)>0`, anchorTaskId, instruction)
+ WHERE c.anchor_task_id=? AND m.role='user' AND m.kind='chat' AND instr(m.text, ?)>0`, anchorTaskId, instruction)
 	return row != nil && kernelInt(row["count"]) > 0
 }
 

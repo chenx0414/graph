@@ -269,6 +269,10 @@ func ParseGraphDefinition(input any, depth ...int) GraphDefinition {
 					interfaceSpecInvalid("Acceptance " + id + " must name a host operation module")
 				}
 				allowed = append(allowed, "module")
+				if verification, exists := record["verification"]; exists {
+					validateAcceptanceVerification(id, verification, nodes)
+					allowed = append(allowed, "verification")
+				}
 			} else if kind == "review" {
 				nodeName, _ := record["node"].(string)
 				node, _ := nodes[nodeName].(map[string]any)

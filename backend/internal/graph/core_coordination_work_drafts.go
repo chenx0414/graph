@@ -18,6 +18,7 @@ type WorkDraftAction struct {
 func (runtime *TaskRuntime) PutWorkDraft(workID string, input WorkDraftInput, requestID string) WorkDraft {
 	runtime.ensureOpen()
 	ValidateProposal(input.Proposal)
+	definition := ParseGraphDefinition(input.Proposal["definition"])
 	if !jsSafeInteger(input.Proposal["requirementVersion"]) || int64(numberValue(input.Proposal["requirementVersion"])) != input.WorkRevision {
 		Raise("stale_work", "The proposal must name the same work revision")
 	}
@@ -47,6 +48,9 @@ func (runtime *TaskRuntime) PutWorkDraft(workID string, input WorkDraftInput, re
 		}
 		conversation := ConversationRowOf(runtime.store, work.ConversationID)
 		draft := runtime.store.workDraftInTransaction(workID, version, draftCurrent)
+		if hasStagedVerification(definition) {
+			runtime.publishVerificationDraft(work, draft, definition)
+		}
 		runtime.store.Event(conversation.AnchorTaskId, "work.draft.saved", map[string]any{"workId": workID, "version": version})
 		if conversation.Role == ConversationGlobal {
 			WakeMaster(runtime.store, WakeIntent{TaskID: conversation.AnchorTaskId, Kind: "work_draft_ready",

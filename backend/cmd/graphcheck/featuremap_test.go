@@ -69,6 +69,7 @@ func (app *GraphApp) serveConversations(w http.ResponseWriter, r *http.Request) 
 		"serveHealth",
 		"server_handlers.go",
 		"generated",
+		"verification/verify-graph verify --journey F-01",
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("feature map does not mention %q:\n%s", want, rendered)

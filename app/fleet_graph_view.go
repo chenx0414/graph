@@ -42,6 +42,7 @@ func (s *shellState) panelFleetGraph(ctx *ui.Context) {
 	unit, _ := s.fleetGraphUnit(data.TaskID)
 	threadName, threadAgent := s.fleetGraphThread(unit)
 	s.panelFleetGraphHeader(ctx, data, unit, threadName, threadAgent)
+	fleetGraphVerification(ctx, data.Verification)
 	s.fleetGraphCanvas(ctx, data)
 }
 

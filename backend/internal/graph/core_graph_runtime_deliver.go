@@ -73,6 +73,9 @@ func (runtime *GraphRuntime) Chat(nodeId, text string, internal bool) QueueRow {
 	if _, ok := latest.Definition.Nodes[nodeId]; !ok {
 		Raise("invalid_input", "Unknown agent "+nodeId)
 	}
+	if reason := verificationDispatchBlock(runtime.kernel, runtime.graphId, nodeId, latest.Definition); reason != "" {
+		Raise("verification_required", reason)
+	}
 	return NewNodeQueue(runtime.kernel, runtime.graphId).Enqueue(QueueInput{NodeId: nodeId, Kind: "chat", Text: &text})
 }
 

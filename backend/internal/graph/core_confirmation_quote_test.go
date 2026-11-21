@@ -40,3 +40,14 @@ func TestAConfirmationFromAnotherConversationOrOfNothingIsRefused(t *testing.T) 
 		t.Fatal("an empty instruction authorises nothing")
 	}
 }
+
+func TestAnAssistantCannotConfirmItsOwnDraft(t *testing.T) {
+	store := quoteFixture(t)
+	AppendMessage(store, MessageInput{
+		ConversationID: "c-proj", Role: MessageRoleAssistant, Kind: "chat",
+		Text: "Approve this draft and run it",
+	})
+	if confirmationQuoted(store, "t-proj", "Approve this draft and run it") {
+		t.Fatal("the assistant's proposal cannot serve as the user's approval")
+	}
+}

@@ -16,6 +16,16 @@ func (service *graphManagementService) GraphCreate(input GraphCreateInput) any {
 		targetBranchValue = *input.TargetBranch
 	}
 	hasTargetBranch := input.TargetBranch != nil && *input.TargetBranch != ""
+	if hasStagedVerification(definition) {
+		reservation := kernelRow(service.kernel.Db, "SELECT proposal,target_branch FROM work_graphs WHERE owner_task_id=? AND kernel_request_id=?", service.ownerTaskId, requestId)
+		if reservation == nil || !hasTargetBranch || kernelString(reservation["target_branch"]) != *input.TargetBranch {
+			Raise("permission", "Verification-driven implementation requires a confirmed work draft with a Git target")
+		}
+		proposal, _ := g5JSON(kernelString(reservation["proposal"])).(map[string]any)
+		if CanonicalJSON(ParseGraphDefinition(proposal["definition"])) != CanonicalJSON(definition) {
+			Raise("permission", "Verification-driven implementation must use the confirmed work draft")
+		}
+	}
 	content := CanonicalJSON(map[string]any{"definition": definition, "targetBranch": targetBranchValue})
 	previous := service.kernel.FindCreateRequest(service.ownerTaskId, requestId)
 	if previous != nil && previous.Content != content {

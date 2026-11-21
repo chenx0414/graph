@@ -51,11 +51,15 @@ func (conversations *TaskRuntimeConversations) Confirm(conversationId string, in
 			panic(err)
 		}
 		ValidateProposal(proposal)
+		definition := ParseGraphDefinition(proposal.Definition)
+		if hasStagedVerification(definition) {
+			Raise("permission", "Verification-driven implementation requires a confirmed work draft")
+		}
 		taskId := graphUUID()
 		sequence := kernelInt(kernelRow(runtime.store.Db, "SELECT COUNT(*) AS count FROM tasks")["count"]) + 1
 		runtime.store.CreateConfirmedTask(taskId, *conversation.ProjectId, proposal.Summary, kernelInt(row["requirement_version"]), input.TargetBranch, string(PhaseRunning), sequence, conversationId, row["decision_snapshot"])
 		runtime.store.RecordProposal(taskId, 1, kernelInt(row["requirement_version"]), kernelString(row["spec"]), row["decision_snapshot"])
-		MaterializeGraph(runtime.kernel, taskId, ParseGraphDefinition(proposal.Definition), "Confirmed conversation draft")
+		MaterializeGraph(runtime.kernel, taskId, definition, "Confirmed conversation draft")
 		runtime.store.BumpRequirementVersion(anchor.ID)
 		kernelExec(runtime.store.Db, "INSERT INTO conversation_acceptances(conversation_id,proposal_version,task_id,target_branch,accepted_at,draft_revision) VALUES(?,?,?,?,?,?)",
 			conversationId, input.ProposalVersion, taskId, input.TargetBranch, NowMillis(), kernelInt(row["draft_revision"]))

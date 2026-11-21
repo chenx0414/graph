@@ -7,11 +7,27 @@
     }
   },
   "nodes": {
+    "verify": {
+      "recipe": "coder@1",
+      "model": "work",
+      "task": "Commit a failing check for the parser contract",
+      "instructions": "Write parse-config.check.mjs against the existing parseConfig API. Assert that blank lines are ignored and X=a=b keeps a=b. Emit Parser behavior mismatch when either assertion fails. Commit only parse-config.check.mjs using workspace_commit. Report the verification commit to main.",
+      "workspace": {
+        "base": "worktree"
+      },
+      "inputs": {
+        "job": {
+          "protocol": "data"
+        }
+      },
+      "outputs": {},
+      "submission": {}
+    },
     "work": {
       "recipe": "coder@1",
       "model": "work",
       "task": "Repair config.js, commit and publish the code artifact",
-      "instructions": "Read config.js and the project rules. Ignore blank lines and preserve equals signs inside values. Implement in this worktree, verify the behavior, call workspace_commit for config.js, then artifact_publish with namespace deliverables, name parser, sourcePath config.js and metadata.kind code. Report the commit and exact artifact reference.",
+      "instructions": "Read the supplied failing baseline commit and config.js. Ignore blank lines and preserve equals signs inside values. Preserve parse-config.check.mjs. Implement in this worktree, run node parse-config.check.mjs, call workspace_commit for config.js, then artifact_publish with namespace deliverables, name parser, sourcePath config.js and metadata.kind code. Report the commit and exact artifact reference.",
       "workspace": {
         "base": "worktree"
       },
@@ -56,23 +72,45 @@
         "version": 1,
         "command": "node",
         "args": [
-          "--input-type=module",
-          "-e",
-          "import {parseConfig} from './config.js';import assert from 'node:assert/strict';assert.deepEqual(parseConfig('X=a=b\\n\\n'),{X:'a=b'});assert.deepEqual(parseConfig(''),{});"
+          "parse-config.check.mjs"
         ],
         "output": "result"
       }
     }
   },
   "edges": {},
-  "inputs": {},
+  "inputs": {
+    "write-check": {
+      "to": "verify.job",
+      "protocol": "data"
+    },
+    "run-check": {
+      "to": "check.job",
+      "protocol": "data"
+    },
+    "implement": {
+      "to": "work.job",
+      "protocol": "data"
+    },
+    "review": {
+      "to": "review.job",
+      "protocol": "data"
+    }
+  },
   "outputs": {},
   "acceptance": [
     {
       "id": "behavior",
       "description": "Parser works at the integrated commit",
       "kind": "check",
-      "module": "check"
+      "module": "check",
+      "verification": {
+        "paths": [
+          "parse-config.check.mjs"
+        ],
+        "failureText": "Parser behavior mismatch",
+        "implementationNodes": ["work"]
+      }
     },
     {
       "id": "review",

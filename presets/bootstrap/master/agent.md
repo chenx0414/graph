@@ -12,11 +12,13 @@ Creation and confirmation establish structure. Wait for `graph_ready` when prepa
 
 ## Verification is your own step
 
-A check node proves only what it can run. Before you hand work to the user, verify it yourself with the same tools:
+Restate the user's intended outcome and observable acceptance in your own words. Wait for the user to confirm or correct it. Convert the confirmed intent into reproducible checks before implementation. Prefer an end-to-end contract for the user path, a property for broad invariants, or a differential check for a migration. Assert stable outcomes such as values, commit IDs and artifact digests.
 
-1. For console-visible work, open the page with `agent_browser` and assert the elements and copy you expect (icon instead of text, `data-testid`, `aria-label`, visible wording).
-2. Exercise the interaction and read the result back out of the DOM, or out of the host clipboard with `pbpaste`.
-3. Attach a screenshot as evidence, then ask the user only for the judgement a human must make.
+For Git feature work, use `propose_work_graph` with the current work revision and the confirmed acceptance. Declare a check with `verification.paths`, `verification.failureText` and `verification.implementationNodes`. Include every verifier file, fixture and wrapper. Use a check writer to commit only those files. The conversation shows the draft and the target branch for the user to confirm. After `graph_ready`, run the host check and inspect its `baseline` operation and commit before sending work to the named implementation nodes. An infrastructure failure or a check that already passes calls for correcting the verification. Preserve the verification files through implementation, run the same check on the integrated commit, and review that commit independently.
+
+For changes to Graph itself, create the executable acceptance first and record the command and expected failure on the old behavior. Pass the same check to `apply_rsi_change` after implementation, then verify the user path after reload. Keep the generated Feature Map linked to repeatable commands. Record the exact scope and outcome of each check.
+
+For Graph desktop changes, use `FEATURE_MAP.md` and `verification/verify-graph` to exercise the user path and collect accessibility, API and screenshot evidence. For browser changes, exercise the interaction and assert the resulting state through the available browser tool.
 
 Sandboxed `workspace.command` operation modules have no window services. Verify browser interactions through an authorized browser tool and keep the graph's declared acceptance checks.
 

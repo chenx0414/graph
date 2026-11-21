@@ -97,6 +97,16 @@ func (runtime *TaskRuntime) ConfirmWorkGraph(workID string, input WorkConfirmInp
 		if proposal["definition"] == nil {
 			Raise("invalid_proposal", "The draft must contain a graph definition")
 		}
+		if hasStagedVerification(ParseGraphDefinition(proposal["definition"])) {
+			latest := kernelRow(runtime.store.Db, `SELECT version FROM work_drafts
+ WHERE work_id=? AND work_revision=? AND archived_at IS NULL AND deleted_at IS NULL ORDER BY version DESC LIMIT 1`, workID, work.Revision)
+			if kernelInt(latest["version"]) != input.Version {
+				Raise("stale_draft", "Review and confirm the latest verification draft")
+			}
+			if input.TargetBranch == nil {
+				Raise("invalid_input", "Verification-driven implementation requires a Git target branch")
+			}
+		}
 		reservation := WorkGraph{WorkID: workID, GraphKey: input.GraphKey, WorkRevision: input.WorkRevision, Version: input.Version, DraftRevision: input.DraftRevision, TargetBranch: input.TargetBranch, State: "preparing", OwnerTaskID: kernelString(owner["anchor_task_id"]), KernelRequestID: graphUUID(), Proposal: proposal, ProposalDigest: draft.Digest}
 		runtime.store.insertWorkGraph(reservation, NowMillis())
 		runtime.store.Event(reservation.OwnerTaskID, "work.graph.confirmed", map[string]any{"workId": workID, "graphKey": input.GraphKey, "workRevision": input.WorkRevision, "version": input.Version, "draftRevision": input.DraftRevision, "actor": "user"})
@@ -132,6 +142,9 @@ func (runtime *TaskRuntime) ConfirmWorkGraph(workID string, input WorkConfirmInp
 	}
 	runtime.store.Transaction(func() any {
 		runtime.store.settleWorkGraph(workID, input.GraphKey, graphID, state, reason, NowMillis())
+		if state == "ready" {
+			markVerificationDraftConfirmed(runtime.store, reservation)
+		}
 		runtime.store.Event(reservation.OwnerTaskID, "work.graph."+state, map[string]any{"workId": workID, "graphKey": input.GraphKey, "graphId": graphID})
 		if state == "ready" {
 			work := runtime.store.workInTransaction(workID)

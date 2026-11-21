@@ -384,7 +384,7 @@
         "window",
         "api"
       ],
-      "entry": "侧栏「编队」",
+      "entry": "侧栏「编队」→ 打开任务图 → 验证证据",
       "drive": [
         "verification/verify-graph verify --journey F-10",
         "verification/verify-graph verify --journey F-10 --lane window",
@@ -410,6 +410,7 @@
         "/api/tasks/{taskId}/graph/topology"
       ],
       "existingTests": [
+        "backend/internal/graph/server_graph_verification_test.go",
         "app/fleet_detail_test.go",
         "app/fleet_graph_test.go",
         "app/fleet_view_test.go"
@@ -621,6 +622,22 @@
       "provenInJourney": true,
       "windowCommand": "verification/verify-graph verify --journey F-16-empty-and-error --lane window",
       "coverage": "headless+window"
+    },
+    {
+      "id": "F-17",
+      "title": "验证驱动开发",
+      "entry": "会话中的验证草稿 → 确认草稿 → 任务图的验证证据",
+      "api": [
+        "/api/orchestration/work/{workId}/confirm",
+        "/api/tasks/{taskId}/graph/topology"
+      ],
+      "existingTests": [
+        "backend/internal/graph/server_work_verification_test.go",
+        "backend/internal/graph/server_graph_verification_test.go",
+        "app/work_verification_test.go"
+      ],
+      "drive": ["go -C backend test ./internal/graph -run 'TestVerificationWorkStartsOnlyFromTheConfirmedRevision|TestImplementationRequiresTheExpectedFailureBeforeDispatch|TestGraphVerificationPublishesFailureAndPassForTheSameCheck' && go -C app test . -run 'TestDesktopConfirmsTheVerificationDraftItShows|TestGraphPageShowsVerificationEvidence'"],
+      "command": "go -C backend test ./internal/graph -run 'TestVerificationWorkStartsOnlyFromTheConfirmedRevision|TestImplementationRequiresTheExpectedFailureBeforeDispatch|TestGraphVerificationPublishesFailureAndPassForTheSameCheck' && go -C app test . -run 'TestDesktopConfirmsTheVerificationDraftItShows|TestGraphPageShowsVerificationEvidence'"
     }
   ],
   "verifiedAt": "2026-11-17T15:48+08:00",

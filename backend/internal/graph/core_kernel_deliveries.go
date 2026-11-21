@@ -29,6 +29,9 @@ func (k *KernelStore) DeliverDirect(taskID, endpoint string, value any) DirectDe
 	}
 	return k.Store.Transaction(func() any {
 		requireProjectActive(k.Store, k.Store.Task(taskID).ProjectID)
+		if reason := verificationDispatchBlock(k, taskID, owner, k.LatestRevision(taskID).Definition); reason != "" {
+			Raise("verification_required", reason)
+		}
 		id := graphUUID()
 		createdAt := NowMillis()
 		seqRow, _ := g5One(k.Db, "SELECT COALESCE(MAX(seq),0) AS s FROM kernel_deliveries WHERE task_id=?", taskID)
