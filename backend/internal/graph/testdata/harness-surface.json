@@ -6,7 +6,7 @@
     "persistence": "pass"
   },
   "surface": {
-    "backend/internal/graph/runtime_agent_context.go": "49491ca562fd989b481b5974d253ce1fecf871afea7d2511cac489b2d8a3a7fe",
+    "backend/internal/graph/runtime_agent_context.go": "cd3e19814ae57c733cd07fe09c425aec55f1f2be8443ac4de55d10504e1fd860",
     "backend/internal/graph/runtime_agent_tool_definitions.go": "4bba658319c66cbba595a9ca31cbfc2e7941da687b734483cc48edf8454a82bc",
     "backend/internal/graph/runtime_agent_tools.go": "d8c7649baeb3d322cf8afba30fe779820e836c144911c9ea6dd9f5103a0b3e6e",
     "backend/internal/graph/runtime_pi_native_tools.go": "dc2e6afc230da7b142706cbf298cfbad4def273392318c3cd1bfae07a7e3f1db",
@@ -16,5 +16,5 @@
     "backend/internal/harness/provider.go": "90778e9de704a1c41bb969a4a10c916804475479ad392eb5190d04493cd38c75",
     "backend/internal/harness/run.go": "8736a717959fd10a86dc04ce3bad28f2e7c615f94bf83621de9f15cee2f63386"
   },
-  "updatedAt": "2026-11-15T14:54:22.469487Z"
+  "updatedAt": "2026-11-21T06:40:04.017363Z"
 }
