@@ -3,9 +3,9 @@
   "total": 12,
   "bytes": 42173,
   "byState": {
-    "hard": 3,
+    "hard": 1,
     "open": 2,
-    "partial": 3,
+    "partial": 5,
     "procedure": 4
   },
   "rules": [
@@ -18,7 +18,8 @@
       "size": 3177,
       "owner": "backend/internal/graph/runtime_agent_context.go",
       "state": "open",
-      "proposed": "record"
+      "enforcedBy": "nothing; the receipt exists but reporting it is not required",
+      "proposed": "split"
     },
     {
       "id": "S-002",
@@ -29,7 +30,7 @@
       "size": 2991,
       "owner": "backend/internal/graph/runtime_agent_context.go",
       "state": "partial",
-      "enforcedBy": "graphcheck comments, the edit tool schema, and the shell itself for three of nineteen bullets.",
+      "enforcedBy": "gate.ScanComments for the comment budget; the edit tool schema for edit anchoring; three more of nineteen",
       "proposed": "split"
     },
     {
@@ -40,9 +41,9 @@
       "text": "Work only inside the assigned task and worktree. Keep the change scoped to the requested outcome and the confirmed acceptance criteria. Read the task graph and the predecessor handoff before editing. Implement the smallest complete change that satisfies the assigned node. Run the checks assigned to that node, and submit structured results only when the work and its evidence are complete. Stay insi…",
       "size": 1343,
       "owner": "backend/internal/graph/runtime_agent_context.go",
-      "state": "hard",
-      "enforcedBy": "submit validation, output naming, and the workspace commit check.",
-      "proposed": "keep"
+      "state": "partial",
+      "enforcedBy": "the commit path (paths must resolve inside the admitted node worktree) and one submission per execution; there is no per-node file list",
+      "proposed": "split"
     },
     {
       "id": "S-004",
@@ -53,7 +54,8 @@
       "size": 932,
       "owner": "backend/internal/graph/runtime_agent_context.go",
       "state": "open",
-      "proposed": "record"
+      "enforcedBy": "nothing",
+      "proposed": "split"
     },
     {
       "id": "S-005",
@@ -63,9 +65,9 @@
       "text": "Review only the frozen evidence and the exact versions the graph supplies. Do not inspect the implementation transcript. Look for defects, regressions, unsupported claims and acceptance gaps before stylistic suggestions. Show file paths, evidence and concrete impact for every finding. Do not modify implementation files. Return an independent verdict the verifier can evaluate. Every judgment you re…",
       "size": 828,
       "owner": "backend/internal/graph/runtime_agent_context.go",
-      "state": "hard",
-      "enforcedBy": "core_review_policy.go evaluatePolicy.",
-      "proposed": "keep"
+      "state": "partial",
+      "enforcedBy": "core_review_policy.go evaluatePolicy, for the report shape and the files field",
+      "proposed": "split"
     },
     {
       "id": "S-006",
@@ -76,7 +78,7 @@
       "size": 558,
       "owner": "backend/internal/graph/runtime_agent_context.go",
       "state": "hard",
-      "enforcedBy": "core_node_submit_bridge.go and the artifact lookup.",
+      "enforcedBy": "submit refusal codes (already_submitted, unknown_output, output_protocol_mismatch, missing_required_output) and the acceptance commit comparison",
       "proposed": "keep"
     },
     {
@@ -88,8 +90,8 @@
       "size": 442,
       "owner": "backend/internal/graph/runtime_agent_context.go",
       "state": "partial",
-      "enforcedBy": "the skills gate covers skill format, not whether one was read.",
-      "proposed": "delete-if-covered"
+      "enforcedBy": "nothing: the pending reload is reported, never enforced",
+      "proposed": "split"
     },
     {
       "id": "S-008",
@@ -100,8 +102,8 @@
       "size": 135,
       "owner": "backend/internal/graph/runtime_agent_context.go",
       "state": "partial",
-      "enforcedBy": "the reviewer role's tool allowlist.",
-      "proposed": "keep"
+      "enforcedBy": "workspace_commit excludes the reviewer role; write_file and run_command do not",
+      "proposed": "split"
     },
     {
       "id": "S-009",
@@ -113,7 +115,7 @@
       "owner": "verification/skills/verify-graph/SKILL.md",
       "state": "procedure",
       "enforcedBy": "skilldoc checks the shape; the journeys check that the steps work.",
-      "proposed": "human"
+      "proposed": "stay"
     },
     {
       "id": "S-010",
@@ -124,7 +126,7 @@
       "size": 7291,
       "owner": "verification/CONTROL_COVERAGE.md",
       "state": "procedure",
-      "proposed": "merge"
+      "proposed": "stay"
     },
     {
       "id": "S-011",
@@ -136,7 +138,7 @@
       "owner": "verification/skills/verify-graph/CONTROLS.md",
       "state": "procedure",
       "enforcedBy": "the control inventory loader rejects a malformed entry.",
-      "proposed": "keep"
+      "proposed": "stay"
     },
     {
       "id": "S-012",
@@ -147,7 +149,7 @@
       "size": 1383,
       "owner": "examples/README.md",
       "state": "procedure",
-      "proposed": "merge"
+      "proposed": "stay"
     }
   ]
 }

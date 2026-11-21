@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -102,4 +103,56 @@ func repositoryRoot(t *testing.T) string {
 		t.Fatalf("resolve root: %v", err)
 	}
 	return root
+}
+
+// A verdict that claims a machine enforces a rule has to name the machine, in a form
+// something can look up. Without that, "enforcedBy" is prose too: the first census claimed
+// the reviewer tool surface had no write tool and that a node carries a file list, and both
+// of those were simply untrue - nothing in the repository could contradict them.
+func TestEveryClaimNamesAWitnessThatExists(t *testing.T) {
+	root := repositoryRoot(t)
+	verdicts := readVerdicts(t, root)
+	for _, name := range sortedVerdictNames(verdicts) {
+		verdict := verdicts.Verdicts[name]
+		claimsEnforcement := verdict.State == "hard" || verdict.State == "partial"
+		if claimsEnforcement && len(verdict.Witness) == 0 {
+			t.Errorf("%s: claims %s enforcement but names no witness; add the file:symbol a reader can check, or answer open", name, verdict.State)
+			continue
+		}
+		for _, witness := range verdict.Witness {
+			if problem := resolveWitness(root, witness); problem != "" {
+				t.Errorf("%s: witness %q does not resolve: %s", name, witness, problem)
+			}
+		}
+	}
+}
+
+func sortedVerdictNames(file verdictFile) []string {
+	names := make([]string, 0, len(file.Verdicts))
+	for name := range file.Verdicts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// resolveWitness takes "path" or "path:Symbol". The path must exist; a symbol must appear in
+// that file, so a claim cannot survive a rename of the code it points at.
+func resolveWitness(root string, witness string) string {
+	path, symbol := witness, ""
+	if at := strings.LastIndex(witness, ":"); at > 0 {
+		path, symbol = witness[:at], witness[at+1:]
+	}
+	full := filepath.Join(root, path)
+	payload, err := os.ReadFile(full)
+	if err != nil {
+		return "no such file " + path
+	}
+	if symbol == "" {
+		return ""
+	}
+	if !strings.Contains(string(payload), symbol) {
+		return path + " does not contain " + symbol
+	}
+	return ""
 }

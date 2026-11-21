@@ -34,8 +34,9 @@ type ruleVerdict struct {
 	Why        string `json:"why"`
 	Proposed   string `json:"proposed"`
 	EnforcedBy string `json:"enforcedBy"`
-	Evidence   string `json:"evidence"`
-	Splits     string `json:"splits"`
+	Evidence   string   `json:"evidence"`
+	Splits     string   `json:"splits"`
+	Witness    []string `json:"witness"`
 }
 
 type softRuleReport struct {
