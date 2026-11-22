@@ -239,7 +239,7 @@ func (s *shellState) startTrajectory(path string, keepSelection bool) {
 		var data *conversationTrajectory
 		failure := ""
 		if err != nil {
-			failure = "读不到轨迹：" + err.Error()
+			failure = readFailureText(err, "轨迹")
 		} else if err := json.Unmarshal(payload, &data); err != nil {
 			failure = "轨迹格式不对"
 		}

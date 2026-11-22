@@ -460,7 +460,11 @@ func readFailureText(err error, subject string) string {
 		return ""
 	}
 	message := err.Error()
-	for _, transient := range []string{"connection refused", "connection reset", "broken pipe", "EOF", "no such host", "i/o timeout"} {
+	for _, transient := range []string{
+		"connection refused", "connection reset", "broken pipe", "EOF", "no such host", "i/o timeout",
+		"wsarecv", "wsasend", "forcibly closed", "context deadline exceeded", "Client.Timeout",
+		"server closed idle connection", "unexpected end of JSON input",
+	} {
 		if strings.Contains(message, transient) {
 			return "连接中断，正在重试读取" + subject
 		}

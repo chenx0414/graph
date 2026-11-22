@@ -167,22 +167,22 @@ func newUsageState(address, token string) *usageState {
 func (s *usageState) load() {
 	insights, err := s.api.get("/api/insights")
 	if err != nil {
-		s.status = "读不到用量：" + err.Error()
+		s.status = readFailureText(err, "用量")
 		return
 	}
 	usage, err := s.api.get("/api/usage")
 	if err != nil {
-		s.status = "读不到订阅额度：" + err.Error()
+		s.status = readFailureText(err, "订阅额度")
 		return
 	}
 	catalog, err := s.api.get("/api/catalog")
 	if err != nil {
-		s.status = "读不到资源库：" + err.Error()
+		s.status = readFailureText(err, "资源库")
 		return
 	}
 	capabilities, err := s.api.get("/api/capabilities/config")
 	if err != nil {
-		s.status = "读不到资源库：" + err.Error()
+		s.status = readFailureText(err, "资源库")
 		return
 	}
 	snapshot, err := parseUsage(insights, usage, catalog, capabilities)

@@ -125,7 +125,7 @@ func (s *assemblyState) selectedRow() *assemblyRow {
 func (s *assemblyState) load() {
 	payload, err := s.api.get("/api/catalog")
 	if err != nil {
-		s.status = "读不到能力装配：" + err.Error()
+		s.status = readFailureText(err, "能力装配")
 		return
 	}
 	rows, file, fileError, err := parseAssemblies(payload)

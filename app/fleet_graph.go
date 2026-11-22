@@ -326,7 +326,7 @@ func (s *shellState) graphRetry() {
 			}
 			s.graph.loading = false
 			if err != nil {
-				s.graph.failed = "读不到 Graph 拓扑：" + err.Error()
+				s.graph.failed = readFailureText(err, "Graph 拓扑")
 				return
 			}
 			s.graph.data = data

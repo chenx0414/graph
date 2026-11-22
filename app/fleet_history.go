@@ -158,7 +158,7 @@ func (s *shellState) ensureFleetHistory() {
 			}
 			s.fleetHistory.loading = false
 			if err != nil {
-				s.fleetHistory.failed = "读不到历史图：" + err.Error()
+				s.fleetHistory.failed = readFailureText(err, "历史图")
 				return
 			}
 			s.fleetHistory.tasks = tasks

@@ -114,12 +114,12 @@ func newSettingsState(address, token string) *settingsState {
 func (s *settingsState) load() {
 	startup, err := s.api.get("/api/startup")
 	if err != nil {
-		s.status = "读不到运行信息：" + err.Error()
+		s.status = readFailureText(err, "运行信息")
 		return
 	}
 	settings, err := s.api.get("/api/settings")
 	if err != nil {
-		s.status = "读不到设置：" + err.Error()
+		s.status = readFailureText(err, "设置")
 		return
 	}
 	snapshot, err := parseSettings(startup, settings)

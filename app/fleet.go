@@ -260,7 +260,7 @@ func (s *shellState) ensureGlobalFleet() {
 				return
 			}
 			if err != nil {
-				s.fleet.globalFailed = "读不到全局编队：" + err.Error()
+				s.fleet.globalFailed = readFailureText(err, "全局编队")
 				return
 			}
 			s.fleet.global = data
@@ -303,7 +303,7 @@ func (s *shellState) openFleetArtifact(artifact fleetArtifact) {
 				return
 			}
 			if err != nil {
-				active.preview = "读不到产物：" + err.Error()
+				active.preview = readFailureText(err, "产物")
 				return
 			}
 			active.setArtifactPreview(row, payload)

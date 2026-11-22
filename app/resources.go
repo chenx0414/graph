@@ -322,7 +322,7 @@ func (s *resourceState) revokeEnv(ref string) {
 func (s *resourceState) load() {
 	catalog, err := s.api.get("/api/catalog")
 	if err != nil {
-		s.status = "读不到资源库：" + err.Error()
+		s.status = readFailureText(err, "资源库")
 		return
 	}
 	config, configErr := s.api.get("/api/capabilities/config")

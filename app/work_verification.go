@@ -57,7 +57,7 @@ func (c *chatState) confirmVerificationDraft(draft chatVerificationDraft) {
 		Reason string `json:"reason"`
 	}
 	if err := json.Unmarshal(payload, &receipt); err != nil {
-		onUI(c.window, func() { c.failUser("读不到草稿确认结果：" + err.Error()) })
+		onUI(c.window, func() { c.failRead(readFailureText(err, "草稿确认结果")) })
 		return
 	}
 	if receipt.State == "blocked" {

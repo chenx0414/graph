@@ -161,7 +161,7 @@ func (c *chatState) exportArtifactNow(row artifactRow) {
 func (c *chatState) showArtifact(row artifactRow) {
 	payload, err := c.artifactContent(row)
 	if err != nil {
-		c.status = "读不到产物：" + err.Error()
+		c.status = readFailureText(err, "产物")
 		c.frame()
 		return
 	}

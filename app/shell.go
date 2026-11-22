@@ -129,7 +129,7 @@ func (s *shellState) probeRowsVersion() string {
 func (s *shellState) fetchRows() (list []conversationSummary, status string, ok bool) {
 	payload, err := s.api.get("/api/conversations")
 	if err != nil {
-		return nil, "读不到会话列表：" + err.Error(), false
+		return nil, readFailureText(err, "会话列表"), false
 	}
 	list, err = parseConversations(payload)
 	if err != nil {

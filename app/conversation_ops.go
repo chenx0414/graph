@@ -85,7 +85,7 @@ func (c *chatState) modelChoices() []modelChoice {
 	}
 	payload, err := c.api.get("/api/settings")
 	if err != nil {
-		c.status = "读不到模型列表：" + err.Error()
+		c.status = readFailureText(err, "模型列表")
 		return nil
 	}
 	var listed modelListPayload

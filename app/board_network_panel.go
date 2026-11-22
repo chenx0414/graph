@@ -367,7 +367,7 @@ func (s *shellState) ensureNetGraph(scope chatScope) {
 			}
 			s.boardNet.loading = false
 			if err != nil {
-				s.boardNet.failed = "读不到 Graph 拓扑：" + err.Error()
+				s.boardNet.failed = readFailureText(err, "Graph 拓扑")
 				return
 			}
 			s.boardNet.topology = data
