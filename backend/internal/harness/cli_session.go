@@ -14,8 +14,8 @@ import (
 
 type CLISessionOptions struct {
 	Repository string
-	Root string
-	Mode string
+	Root       string
+	Mode       string
 }
 
 func NewCLISession(address, token string) *CLISession {
@@ -26,11 +26,20 @@ func RepositoryFromEnvironment() string {
 	if set := os.Getenv("GRAPH_REPOSITORY"); set != "" {
 		return set
 	}
+	if here, err := os.Getwd(); err == nil {
+		if found := findRepositoryAbove(here); found != "" {
+			return found
+		}
+	}
 	candidate, err := os.Executable()
 	if err != nil {
 		return ""
 	}
-	directory := filepath.Dir(candidate)
+	return findRepositoryAbove(filepath.Dir(candidate))
+}
+
+func findRepositoryAbove(start string) string {
+	directory := start
 	for depth := 0; depth < 6; depth++ {
 		if _, err := os.Stat(filepath.Join(directory, "app", "go.mod")); err == nil {
 			if _, err := os.Stat(filepath.Join(directory, "backend", "go.mod")); err == nil {

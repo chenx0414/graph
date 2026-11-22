@@ -137,3 +137,25 @@ func TestTheCLIFailsLoudlyOnAnUnknownCommand(t *testing.T) {
 		t.Fatalf("an unknown command explains itself, got %q", output)
 	}
 }
+
+// A shell that runs graphcli from the checkout has no GRAPH_REPOSITORY set, and cannot be asked
+// to set one: the tool has to find the repository itself, or the screenshot verb fails with
+// "chdir app: no such file or directory" for everyone who runs it by hand.
+func TestTheCLIFindsTheRepositoryWithoutBeingTold(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatalf("resolve the repository root: %v", err)
+	}
+	previous, hadPrevious := os.LookupEnv("GRAPH_REPOSITORY")
+	if err := os.Unsetenv("GRAPH_REPOSITORY"); err != nil {
+		t.Fatalf("unset: %v", err)
+	}
+	t.Cleanup(func() {
+		if hadPrevious {
+			_ = os.Setenv("GRAPH_REPOSITORY", previous)
+		}
+	})
+	if found := RepositoryFromEnvironment(); found != root {
+		t.Fatalf("the CLI finds the checkout it runs from, want %s got %q", root, found)
+	}
+}
