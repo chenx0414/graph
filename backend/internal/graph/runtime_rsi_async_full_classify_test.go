@@ -287,3 +287,46 @@ func TestAsyncFullAttributesAnUnnamedGoFailureToItsPackage(t *testing.T) {
 		t.Fatalf("the package names where to look when the test line carries no file, got %q", failures[0].File)
 	}
 }
+
+// A package that fails to build has no elapsed time, so the line is "FAIL\tgraph/app [build
+// failed]" and the timing pattern above never matched it. The verdict then said it could not
+// parse a failure and named no package - measured 2026-11-22, when a test file written
+// mid-run broke the build and the receipt said only "没有解析到失败条目".
+const asyncFullBuildFailureOutput = "[check] go -C app test ./...\n" +
+	"FAIL\tgraph/app [build failed]\n" +
+	"ok  \tgraph/app/gwui/kit\t(cached)\n" +
+	"\n# graph/app [graph/app.test]\n" +
+	"./fleet_error_test.go:20:8: state.refreshFleet undefined (type *chatState has no field or method refreshFleet)\n" +
+	"FAIL\n" +
+	"exit status 1\n"
+
+func TestAsyncFullABuildFailureIsAFailureWithItsPackage(t *testing.T) {
+	failures := AsyncFullFailures(asyncFullBuildFailureOutput)
+	if len(failures) != 1 {
+		t.Fatalf("a build failure is one failure, got %d: %+v", len(failures), failures)
+	}
+	if !strings.Contains(failures[0].File, "graph/app") {
+		t.Fatalf("the failure must name the package that did not build, got %q", failures[0].File)
+	}
+	if !strings.Contains(failures[0].Message, "state.refreshFleet undefined") {
+		t.Fatalf("the failure must quote the compiler message, got %q", failures[0].Message)
+	}
+}
+
+// A build failure is a regression, and the receipt has to say which package and which compiler
+// error. Naming nothing is what made the earlier receipt unactionable: it read as if the run had
+// passed, and the actual cause was only visible in the log.
+func TestAsyncFullABuildFailureIsARegressionThatNamesItsCause(t *testing.T) {
+	verdict := ClassifyAsyncFull(asyncFullBuildFailureOutput, nil)
+	if verdict.Environment {
+		t.Fatalf("a build failure is not an environment problem, got %+v", verdict)
+	}
+	if len(verdict.Unmatched) != 1 {
+		t.Fatalf("the receipt must name exactly the broken package, got %+v", verdict.Unmatched)
+	}
+	for _, want := range []string{"graph/app", "state.refreshFleet undefined"} {
+		if !strings.Contains(verdict.Unmatched[0], want) {
+			t.Fatalf("the receipt must mention %q, got %q", want, verdict.Unmatched[0])
+		}
+	}
+}

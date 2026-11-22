@@ -38,7 +38,8 @@ var (
 	asyncFullRerunFile  = regexp.MustCompile(`failed once and passed on a re-run:\s*(tests/\S+\.test\.ts)`)
 	asyncFullGoFailTest = regexp.MustCompile(`^--- FAIL: (\S+)`)
 	asyncFullGoMessage  = regexp.MustCompile(`^\s+(\S+_test\.go:\d+: .*)$`)
-	asyncFullGoPackage  = regexp.MustCompile(`^FAIL\s+(\S+)\s+[0-9.]+s`)
+	asyncFullGoPackage  = regexp.MustCompile(`^FAIL\s+(\S+)(?:\s+[0-9.]+s|\s+\[build failed\])`)
+	asyncFullGoCompiler = regexp.MustCompile(`^\./\S+\.go:\d+:`)
 )
 
 func LoadEnvKnownReds(path string) ([]EnvKnownRed, error) {
@@ -71,6 +72,8 @@ func AsyncFullFailures(output string) []AsyncFullFailure {
 	messages := map[string]string{}
 	order := []string{}
 	goPackages := []string{}
+	buildFailures := map[string]bool{}
+	buildMessages := map[string]string{}
 	for _, line := range strings.Split(clean, "\n") {
 		if match := asyncFullFailLine.FindStringSubmatch(line); match != nil {
 			headers[strings.TrimSpace(match[2])] = strings.TrimSpace(match[1])
@@ -109,6 +112,18 @@ func AsyncFullFailures(output string) []AsyncFullFailure {
 		if match := asyncFullGoPackage.FindStringSubmatch(line); match != nil {
 			pkg := strings.TrimSpace(match[1])
 			goPackages = append(goPackages, pkg)
+			if strings.Contains(line, "[build failed]") {
+				buildFailures[pkg] = true
+			}
+			continue
+		}
+		// A compiler diagnostic names its file and line; keep the first one for the package it
+		// belongs to, so a build failure can quote what actually broke instead of saying nothing.
+		if match := asyncFullGoCompiler.FindStringSubmatch(strings.TrimSpace(line)); match != nil && len(goPackages) > 0 {
+			pkg := goPackages[len(goPackages)-1]
+			if buildFailures[pkg] && buildMessages[pkg] == "" {
+				buildMessages[pkg] = strings.TrimSpace(line)
+			}
 			continue
 		}
 		if match := asyncFullTestLine.FindStringSubmatch(line); match != nil {
@@ -139,7 +154,7 @@ func AsyncFullFailures(output string) []AsyncFullFailure {
 	}
 	if len(order) == 0 {
 		for _, pkg := range goPackages {
-			failures = append(failures, AsyncFullFailure{File: pkg})
+			failures = append(failures, AsyncFullFailure{File: pkg, Message: buildMessages[pkg]})
 		}
 	}
 	for _, file := range files {
