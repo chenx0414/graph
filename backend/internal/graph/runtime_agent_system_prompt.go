@@ -99,7 +99,7 @@ func ComposeAgentSystemPrompt(input ComposeAgentSystemPromptInput) ComposedAgent
 		rulesParts = append(rulesParts, AgentPromptPart{ID: "rules.runtime", Title: "Runtime rules", Origin: "editable", Content: input.RulesRuntime, Source: "runtime/*.md"})
 	}
 	rulesParts = append(rulesParts, AgentPromptPart{ID: "rules.tools", Title: "Tool guidance", Origin: "editable", Content: input.ToolGuidance, Source: "tools/<role>.md"})
-	host := AGENT_TESTING_POLICY
+	host := AGENT_TESTING_POLICY + "\n" + agentVddObligation(input.Role)
 	if input.Role != "main" {
 		host += "\n\nThis directory is this operation's own Git worktree: relative paths resolve here, and it is neither necessarily the project root nor another Agent's worktree."
 	}

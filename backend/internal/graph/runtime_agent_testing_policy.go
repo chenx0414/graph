@@ -15,3 +15,13 @@ func WithAgentTestingPolicy(prompt, fallback string) string {
 	}
 	return body + "\n\n" + AGENT_TESTING_POLICY
 }
+
+func agentVddObligation(role string) string {
+	switch role {
+	case "main":
+		return "VDD obligation: restate the outcome and observable acceptance in your own words, and wait for confirmation before proposing work. Convert the confirmed intent into a check that fails on the current behaviour, and say which part only a human can confirm."
+	case "reviewer":
+		return "VDD obligation: judge whether the check could have failed. A check never seen fail proves nothing, so report it as unproven rather than passed, and flag a test written after the code it tests. Name the exact commit and files for every finding, and do not weaken a check to obtain a pass."
+	}
+	return "VDD obligation: run the check that must fail before your change and show it failing, then implement until the same check passes. An edit you have not executed is not evidence, and a check that cannot fail is not a check."
+}
