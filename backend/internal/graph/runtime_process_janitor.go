@@ -93,6 +93,10 @@ type processEntry struct {
 
 const processStartLayout = "Mon Jan _2 15:04:05 2006"
 
+func readProcessStart(printed string) (time.Time, error) {
+	return time.ParseInLocation(processStartLayout, printed, time.Local)
+}
+
 func listProcessEntries() []processEntry {
 	command := exec.Command("ps", "-eww", "-o", "pid=,ppid=,pgid=,lstart=,command=")
 	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
@@ -110,7 +114,7 @@ func listProcessEntries() []processEntry {
 		pid, pidError := strconv.Atoi(fields[0])
 		parent, parentError := strconv.Atoi(fields[1])
 		pgid, pgidError := strconv.Atoi(fields[2])
-		started, startError := time.Parse(processStartLayout, strings.Join(fields[3:8], " "))
+		started, startError := readProcessStart(strings.Join(fields[3:8], " "))
 		if pidError != nil || parentError != nil || pgidError != nil || startError != nil {
 			continue
 		}

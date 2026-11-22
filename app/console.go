@@ -31,6 +31,15 @@ func inDaemonMode(args []string) bool {
 	return len(args) > 0 && args[0] == daemonModeArg
 }
 
+// screenshotModeArg is the verb the verification CLI runs: one window rendered to a PNG, then
+// the process exits. It reuses the same argument dispatch as daemon mode rather than adding a
+// second binary.
+const screenshotModeArg = "screenshot"
+
+func inScreenshotMode(args []string) bool {
+	return len(args) > 0 && args[0] == screenshotModeArg
+}
+
 func selfExecutable() string {
 	path, err := os.Executable()
 	if err != nil {

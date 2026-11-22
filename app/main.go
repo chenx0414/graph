@@ -154,6 +154,9 @@ func main() {
 		graphdaemon.Run(os.Args[2:])
 		return
 	}
+	if inScreenshotMode(os.Args[1:]) {
+		os.Exit(runScreenshotCommand(os.Args[2:]))
+	}
 	if !mygo.App.RequestSingleInstanceLock() {
 		mygo.App.Quit()
 		return

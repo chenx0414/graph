@@ -185,3 +185,21 @@ func TestSpawnGroupLedgerSurvivesARestart(t *testing.T) {
 		t.Fatalf("the ledger has to stay inside the state directory: %v", err)
 	}
 }
+
+// ps prints a process's start time in the machine's own zone, so reading it as UTC made a
+// process that had just started look hours old - exactly the UTC offset here. The minimum-age
+// guard then stopped protecting young processes, which is what this test is about.
+func TestTheJanitorReadsProcessAgeInTheLocalZone(t *testing.T) {
+	// The layout has no zone, so whichever location it is parsed in decides the instant. The
+	// assertion is on the reader the sweep uses, not on a second parse written here: the two
+	// must agree, and reading as UTC disagrees by the machine's offset.
+	justStarted := time.Now().Add(-30 * time.Second)
+	parsed, err := readProcessStart(justStarted.Format(processStartLayout))
+	if err != nil {
+		t.Fatalf("a ps start time parses: %v", err)
+	}
+	age := time.Since(parsed)
+	if age < 0 || age > 5*time.Minute {
+		t.Fatalf("a process started 30s ago reads as %v old, so the minimum-age guard would not hold", age)
+	}
+}
