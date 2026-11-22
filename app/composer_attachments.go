@@ -190,6 +190,27 @@ type systemClipboard interface {
 	Read(formats ...transfer.Format) (transfer.Data, error)
 }
 
+// clipboardFile is what a copied file offers: a path, without opening it. Reading the file is
+// the composer's own step, so a copy in Finder is a copy of a file and no more.
+type clipboardFile struct{ path string }
+
+// windowFiles reads the file references of the clipboard from inside a view build.
+func (c windowClipboard) Files() []clipboardFile {
+	data := c.ctx.Services().ReadClipboardData(transfer.FileList, transfer.URIList)
+	if len(data.Items()) == 0 {
+		return nil
+	}
+	paths, err := data.Files()
+	if err != nil {
+		return nil
+	}
+	files := make([]clipboardFile, 0, len(paths))
+	for _, path := range paths {
+		files = append(files, clipboardFile{path: path})
+	}
+	return files
+}
+
 // windowClipboard reads the clipboard from inside a view build, where the window's own services
 // answer without a round trip to the main thread.
 type windowClipboard struct{ ctx *ui.Context }
@@ -227,6 +248,47 @@ func composerAttachmentFromImage(data []byte, mime string) (composerAttachment, 
 // and a copied screenshot never has a file to pick. Everything else is left to the input.
 //
 // It reports whether it took the paste.
+// clipboardFileSource is a clipboard that also names copied files. A clipboard without it (a
+// test's own, holding bytes only) simply has no files.
+type clipboardFileSource interface {
+	Files() []clipboardFile
+}
+
+// pasteAttachmentFromFiles attaches the files a paste copied, and reports whether it did. A file
+// copied in Finder reaches the clipboard as a path and nothing else - no picture bytes - so
+// without this step a copied screenshot pastes as its name, which is what the user saw.
+func (c *chatState) pasteAttachmentFromFiles(clipboard systemClipboard) bool {
+	source, ok := clipboard.(clipboardFileSource)
+	if !ok {
+		return false
+	}
+	files := source.Files()
+	if len(files) == 0 {
+		return false
+	}
+	attached := 0
+	failed := ""
+	for _, file := range files {
+		attachment, err := composerAttachmentFromPath(file.path)
+		if err != nil {
+			if failed == "" {
+				failed = filepath.Base(file.path) + "：" + err.Error()
+			}
+			continue
+		}
+		c.attachments = append(c.attachments, attachment)
+		attached++
+	}
+	if attached == 0 {
+		c.status = "粘贴失败：" + failed
+		c.frame()
+		return true
+	}
+	c.status = fmt.Sprintf("已粘贴 %d 个文件", attached)
+	c.frame()
+	return true
+}
+
 func (c *chatState) handleComposerPaste(ctx *ui.Context, text string) bool {
 	clipboard := c.clipboard
 	if clipboard == nil {
@@ -234,6 +296,11 @@ func (c *chatState) handleComposerPaste(ctx *ui.Context, text string) bool {
 	}
 	if clipboard == nil {
 		return false
+	}
+	// A copied file comes first: the clipboard a Finder copy leaves holds a path and, on macOS,
+	// no picture representation at all.
+	if c.pasteAttachmentFromFiles(clipboard) {
+		return true
 	}
 	data, err := clipboard.Read(transfer.PNG)
 	if err != nil || len(data.Items()) == 0 {

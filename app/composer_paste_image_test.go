@@ -6,6 +6,8 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/egoist/mygo/transfer"
@@ -206,5 +208,105 @@ func TestCmdVPastesTextIntoTheDraft(t *testing.T) {
 	}
 	if len(chat.attachments) != 0 {
 		t.Fatalf("a text paste attaches nothing, got %d", len(chat.attachments))
+	}
+}
+
+// A pathClipboard is the clipboard a picture copied in Finder has: a file URL or URI list, and
+// no picture bytes at all. Measured on macOS: selecting a screenshot and pressing Cmd+C puts a
+// file reference on the clipboard, not an image/png representation.
+type pathClipboard struct {
+	paths []string
+	text  string
+}
+
+func (c *pathClipboard) Files() []clipboardFile {
+	files := make([]clipboardFile, 0, len(c.paths))
+	for _, path := range c.paths {
+		files = append(files, clipboardFile{path: path})
+	}
+	return files
+}
+
+func (c *pathClipboard) Read(formats ...transfer.Format) (transfer.Data, error) {
+	items := []transfer.Item{}
+	for _, format := range formats {
+		switch format {
+		case transfer.PNG:
+			// no picture representation: exactly what a Finder copy offers
+		case transfer.FileList, transfer.URIList:
+			if len(c.paths) > 0 {
+				data, err := transfer.FileData(c.paths...)
+				if err != nil {
+					return transfer.Data{}, err
+				}
+				items = append(items, data.Items()...)
+			}
+		case transfer.Text:
+			if c.text != "" {
+				items = append(items, transfer.NewItem(transfer.Bytes(transfer.Text, []byte(c.text))))
+			}
+		}
+	}
+	if len(items) == 0 {
+		return transfer.Data{}, transfer.ErrFormat
+	}
+	return transfer.New(items...), nil
+}
+
+// A picture file copied in Finder pastes as the picture, not as its name. This is the case the
+// user hit: the composer inserted "截屏2026-11-22 16.29.28" and showed no picture.
+func TestPastingAPictureFileFromFinderAttachesThePicture(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "截屏2026-11-22 16.29.28.png")
+	if err := os.WriteFile(path, pngBytes(t), 0o644); err != nil {
+		t.Fatalf("write the screenshot fixture: %v", err)
+	}
+	chat := &chatState{draft: ""}
+	chat.clipboard = &pathClipboard{paths: []string{path}}
+
+	if !chat.handleComposerPaste(nil, "截屏2026-11-22 16.29.28") {
+		t.Fatalf("a copied picture file is taken by the composer, not inserted as its name")
+	}
+	if len(chat.attachments) != 1 {
+		t.Fatalf("the copied picture becomes one attachment, got %d", len(chat.attachments))
+	}
+	attachment := chat.attachments[0]
+	if !attachment.isImage() {
+		t.Fatalf("the attachment is the picture itself, got type %q", attachment.Type)
+	}
+	if attachment.Name != "截屏2026-11-22 16.29.28.png" {
+		t.Fatalf("the attachment keeps the file's own name, got %q", attachment.Name)
+	}
+}
+
+// A copied text file is attached as a file, not swallowed as if it were a picture.
+func TestPastingATextFileFromFinderAttachesTheFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "notes.md")
+	if err := os.WriteFile(path, []byte("# 笔记"), 0o644); err != nil {
+		t.Fatalf("write the notes fixture: %v", err)
+	}
+	chat := &chatState{draft: ""}
+	chat.clipboard = &pathClipboard{paths: []string{path}}
+
+	if !chat.handleComposerPaste(nil, "notes.md") {
+		t.Fatalf("a copied file is attached rather than pasted as its name")
+	}
+	if len(chat.attachments) != 1 {
+		t.Fatalf("the copied file becomes one attachment, got %d", len(chat.attachments))
+	}
+	if chat.attachments[0].isImage() {
+		t.Fatalf("a markdown file is not an image attachment")
+	}
+}
+
+// A plan-text name that is not a file stays text: the paste path must not claim every paste.
+func TestPastingAPathThatDoesNotExistStaysText(t *testing.T) {
+	chat := &chatState{draft: ""}
+	chat.clipboard = &pathClipboard{text: "/no/such/截屏2026-11-22.png"}
+
+	if chat.handleComposerPaste(nil, "/no/such/截屏2026-11-22.png") {
+		t.Fatalf("a name that is not a readable file is left to the input")
+	}
+	if len(chat.attachments) != 0 {
+		t.Fatalf("nothing is attached for a name that is not a file, got %d", len(chat.attachments))
 	}
 }
