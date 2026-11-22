@@ -211,7 +211,7 @@ func (s *shellState) loadFleet() {
 			}
 			s.fleet.loading = false
 			if err != nil {
-				s.fleet.failed = "读不到编队数据：" + err.Error()
+				s.fleet.failed = readFailureText(err, "编队数据")
 				return
 			}
 			s.fleet.data = data

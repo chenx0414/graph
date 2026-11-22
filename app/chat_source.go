@@ -447,3 +447,19 @@ func parseConversationScope(payload []byte) (string, string) {
 	}
 	return scope.ProjectID, scope.ProjectRoot
 }
+
+// readFailureText turns a failed read into a sentence a person can act on. The raw error names
+// a loopback URL and a Go transport message, which tells the user nothing they can use and looks
+// like the console itself is broken; during a reload it appears on several surfaces at once.
+func readFailureText(err error, subject string) string {
+	if err == nil {
+		return ""
+	}
+	message := err.Error()
+	for _, transient := range []string{"connection refused", "connection reset", "broken pipe", "EOF", "no such host", "i/o timeout"} {
+		if strings.Contains(message, transient) {
+			return "连接中断，正在重试读取" + subject
+		}
+	}
+	return "读不到" + subject + "，稍后会再试一次"
+}

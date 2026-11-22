@@ -114,7 +114,7 @@ func (s *shellState) ensureFleetDetail(agent fleetAgent) {
 			}
 			s.fleet.detail.loading = false
 			if err != nil {
-				s.fleet.detail.failed = "读不到最近活动：" + err.Error()
+				s.fleet.detail.failed = readFailureText(err, "最近活动")
 				return
 			}
 			s.fleet.detail.entries = activities
@@ -139,7 +139,12 @@ func (s *shellState) refreshFleetDetail(agent fleetAgent) {
 			activities, err = parseFleetDetail(path, nodeRun, payload)
 		}
 		s.updates.post(s.window, func() {
-			if err != nil || s.fleet.detail.agentID != agent.ID || s.api != api {
+			if s.fleet.detail.agentID != agent.ID || s.api != api {
+				return
+			}
+			if err != nil {
+				s.fleet.detail.loading = false
+				s.fleet.detail.failed = readFailureText(err, "最近活动")
 				return
 			}
 			if !reflect.DeepEqual(activities, s.fleet.detail.entries) {
