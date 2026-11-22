@@ -92,7 +92,7 @@ func fleetTasks(store *TaskStore, scope fleetScope, scoped []AgentRecord) ([]Fle
 	}
 	out := []FleetTask{}
 	for _, row := range kernelRows(store.Db, `SELECT id,project_id,conversation_id,phase,request FROM tasks
-		WHERE phase!='chatting'`) {
+		WHERE phase!='chatting' AND archived_at IS NULL AND deleted_at IS NULL`) {
 		taskId := kernelString(row["id"])
 		if !scope.global && !taskSet[taskId] {
 			continue

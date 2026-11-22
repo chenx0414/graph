@@ -83,3 +83,38 @@ func TestArchivingKeepsTheTaskEvidence(t *testing.T) {
 		t.Fatalf("a restored task must still hold its artifact, got %d", kernelInt(row["n"]))
 	}
 }
+
+// The fleet list is what the console shows; an archived task that still appears there was
+// never really archived. This is the only place that decides it, so it is the place to pin.
+func TestAnArchivedTaskLeavesTheFleetList(t *testing.T) {
+	store := openTaskStore(t, filepath.Join(t.TempDir(), "graph.sqlite"))
+	t.Cleanup(store.Close)
+	store.RegisterProject("p", t.TempDir(), "[]")
+	seedArchiveTask(t, store, "t-fleet")
+
+	listed := func() int {
+		count := 0
+		tasks, _ := fleetTasks(store, fleetScope{global: true}, nil)
+		for _, task := range tasks {
+			if task.Id == "t-fleet" {
+				count++
+			}
+		}
+		return count
+	}
+	if listed() != 1 {
+		t.Fatalf("the task must start out in the fleet list")
+	}
+	if !store.ArchiveTask("t-fleet") {
+		t.Fatal("archiving must succeed")
+	}
+	if listed() != 0 {
+		t.Fatal("an archived task must not appear in the fleet list")
+	}
+	if !store.RestoreTask("t-fleet") {
+		t.Fatal("restoring must succeed")
+	}
+	if listed() != 1 {
+		t.Fatal("a restored task must appear again")
+	}
+}
