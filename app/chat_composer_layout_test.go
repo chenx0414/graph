@@ -35,7 +35,7 @@ func TestTheChatShowsNoStatusLineAboveTheComposer(t *testing.T) {
 	}
 }
 
-func TestAFailedOlderReadReadsInTheComposerPlaceholder(t *testing.T) {
+func TestAFailedOlderReadReadsBesideTheChatNotInTheComposer(t *testing.T) {
 	state := chatWithTwoMessages()
 	tester := frames(ui.NewTester(state.view, 900, 700))
 	quiet, ok := tester.Access("消息")
@@ -62,12 +62,17 @@ func TestAFailedOlderReadReadsInTheComposerPlaceholder(t *testing.T) {
 	for attempt := 0; attempt < 200 && state.historyLoading; attempt++ {
 		tester.Frame()
 	}
-	if state.problem == "" {
-		t.Fatalf("a failed read reports a problem, status %q", state.status)
+	if state.status == "" {
+		t.Fatalf("a failed read still records what went wrong, got %q", state.status)
 	}
 	tester = frames(tester)
-	if !tester.HasText("读不到更早的对话") {
-		t.Fatalf("the failure reads inside the composer card, texts %q", tester.Texts())
+	// A read failure is a transport fact: it belongs beside the chat, never in the composer,
+	// where the user types and where the one-second poll kept rewriting it.
+	if state.problem != "" {
+		t.Fatalf("a read failure must not occupy the composer, got %q", state.problem)
+	}
+	if !tester.HasText("读不到更早的对话，正在重试") {
+		t.Fatalf("the failure must stay visible beside the chat, texts %q", tester.Texts())
 	}
 	access, ok := tester.Access("消息")
 	if !ok {
@@ -114,10 +119,10 @@ func TestTheComposerStartsTwoLinesTall(t *testing.T) {
 
 func TestAFailureStaysVisibleWhileTheComposerHoldsADraft(t *testing.T) {
 	state := chatWithTwoMessages()
-	state.problem = "读不到更早的对话：不是 JSON"
+	state.connection = "读不到更早的对话，正在重试"
 	state.draft = "还没发出去的一句话"
 	tester := frames(ui.NewTester(state.view, 900, 700))
-	if !tester.HasText("读不到更早的对话：不是 JSON") {
+	if !tester.HasText("读不到更早的对话，正在重试") {
 		t.Fatalf("a failure must stay readable even when the composer holds a draft, texts %q", tester.Texts())
 	}
 	field, ok := tester.Access("消息")

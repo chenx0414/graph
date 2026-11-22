@@ -49,7 +49,7 @@ func (c *chatState) confirmVerificationDraft(draft chatVerificationDraft) {
 		"workRevision": draft.WorkRevision, "version": draft.Version, "draftRevision": draft.DraftRevision,
 	})
 	if err != nil {
-		onUI(c.window, func() { c.fail("草稿确认失败：" + err.Error()) })
+		onUI(c.window, func() { c.failUser("草稿确认失败：" + err.Error()) })
 		return
 	}
 	var receipt struct {
@@ -57,11 +57,11 @@ func (c *chatState) confirmVerificationDraft(draft chatVerificationDraft) {
 		Reason string `json:"reason"`
 	}
 	if err := json.Unmarshal(payload, &receipt); err != nil {
-		onUI(c.window, func() { c.fail("读不到草稿确认结果：" + err.Error()) })
+		onUI(c.window, func() { c.failUser("读不到草稿确认结果：" + err.Error()) })
 		return
 	}
 	if receipt.State == "blocked" {
-		onUI(c.window, func() { c.fail("草稿已确认，Git 准备受阻：" + receipt.Reason) })
+		onUI(c.window, func() { c.failUser("草稿已确认，Git 准备受阻：" + receipt.Reason) })
 		return
 	}
 	c.refresh()

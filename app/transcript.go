@@ -219,6 +219,7 @@ type chatState struct {
 	agentStatus        string
 	status             string
 	problem            string
+	connection         string
 	loading            bool
 	pollAt             time.Time
 	polling            bool

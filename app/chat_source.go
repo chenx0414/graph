@@ -49,12 +49,12 @@ func (source *conversationChatSource) Follows() bool { return true }
 func (source *conversationChatSource) Load(c *chatState) error {
 	payload, err := source.api.get("/api/conversations/" + source.id + "?questions=open&lean=1&limit=" + itoa64(initialMessagePageSize))
 	if err != nil {
-		c.fail("读不到这个会话：" + err.Error())
+		c.failRead("连接中断，正在重连")
 		return err
 	}
 	messages, err := parseConversationMessages(payload)
 	if err != nil {
-		c.fail("会话内容不是预期的 JSON：" + err.Error())
+		c.failRead("会话内容读不回来，正在重试")
 		return err
 	}
 	source.version = parseConversationVersion(payload)
@@ -98,11 +98,12 @@ func (source *conversationChatSource) Load(c *chatState) error {
 		c.tasks = rows
 	}
 	if len(messages) == 0 {
-		c.fail("这个会话还没有可显示的对话。")
+		c.failRead("这个会话还没有可显示的对话。")
 		return nil
 	}
 	c.status = ""
 	c.problem = ""
+	c.clearReadFailure()
 	return nil
 }
 
@@ -115,6 +116,9 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 	if source.version != "" {
 		if version, err := source.currentVersion(); err == nil {
 			still = version == source.version
+			if err == nil {
+				c.clearReadFailure()
+			}
 			if still && !c.transcriptInFlight() {
 				return false, nil
 			}
@@ -136,6 +140,8 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 		return false, err
 	}
 	source.version = parseConversationVersion(payload)
+	// The daemon answered, so a transport complaint is stale even if nothing else changed.
+	c.clearReadFailure()
 	messages, err := parseConversationMessages(payload)
 	if err != nil {
 		return false, err
@@ -275,7 +281,7 @@ func (source *nodeChatSource) path(suffix string) string {
 func (source *nodeChatSource) Load(c *chatState) error {
 	messages, hasOlder, err := source.loadPage(0)
 	if err != nil {
-		c.fail("读不到这个节点的记录：" + err.Error())
+		c.failRead("连接中断，正在重连")
 		return err
 	}
 	for page := 0; page < 5 && hasOlder && !nodeEntriesHaveMessage(messages); page++ {
@@ -285,7 +291,7 @@ func (source *nodeChatSource) Load(c *chatState) error {
 		}
 		older, olderHas, err := source.loadPage(before)
 		if err != nil {
-			c.fail("读不到这个节点的记录：" + err.Error())
+			c.failRead("连接中断，正在重连")
 			return err
 		}
 		if len(older) == 0 {
@@ -301,11 +307,12 @@ func (source *nodeChatSource) Load(c *chatState) error {
 	c.questions = nil
 	source.loadScopeData(c)
 	if len(messages) == 0 {
-		c.fail("这个节点还没有可显示的记录。")
+		c.failRead("这个节点还没有可显示的记录。")
 		return nil
 	}
 	c.status = ""
 	c.problem = ""
+	c.clearReadFailure()
 	return nil
 }
 

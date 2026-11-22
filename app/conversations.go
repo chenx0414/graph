@@ -123,7 +123,7 @@ func (c *chatState) answer(question openQuestion, value string) {
 		"requestId":  "native-" + question.ID + "-" + strconv.FormatInt(time.Now().UnixNano(), 36),
 	}
 	if _, err := c.api.post("/api/tasks/"+question.TaskID+"/answer", body); err != nil {
-		c.fail("回答失败：" + err.Error())
+		c.failUser("回答失败：" + err.Error())
 		return
 	}
 	c.status = ""
@@ -145,7 +145,7 @@ func (c *chatState) sendText(text string) {
 		return
 	}
 	if err := c.source.Send(c, text); err != nil {
-		c.fail("发送失败：" + err.Error())
+		c.failUser("发送失败：" + err.Error())
 		return
 	}
 	if stripSpace(c.draft) == text {
@@ -182,7 +182,7 @@ func (c *chatState) refresh() {
 		return
 	}
 	if _, err := c.source.Refresh(c); err != nil {
-		c.fail("读不到这个会话：" + err.Error())
+		c.failRead("连接中断，正在重连")
 	}
 }
 
@@ -203,7 +203,7 @@ func (c *chatState) openSource(source agentChatSource) {
 	err := source.Load(c)
 	c.loading = false
 	if err != nil && c.status == "" {
-		c.fail("读不到这个会话：" + err.Error())
+		c.failRead("连接中断，正在重连")
 	}
 }
 
@@ -222,6 +222,7 @@ func (c *chatState) view(ctx *ui.Context) {
 	c.keepFresh(ctx)
 	ui.Column(ctx).Fill().Children(func() {
 		c.transcript(ctx)
+		c.connectionStrip(ctx)
 		bottom := ui.Column(ctx).FillWidth()
 		bottom.Children(func() {
 			if _, last := c.list.Visible(); last >= 0 && !c.list.AtEnd() {
@@ -237,6 +238,21 @@ func (c *chatState) view(ctx *ui.Context) {
 			}
 			c.composer(ctx)
 		})
+	})
+}
+
+// connectionStrip reports a transport failure beside the chat instead of inside the composer.
+// It sits above the input because the transcript is what is stale, and it disappears the moment
+// a read succeeds.
+func (c *chatState) connectionStrip(ctx *ui.Context) {
+	if c.connection == "" {
+		return
+	}
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	ui.Row(ctx).FillWidth().AlignItems(ui.Center).Gap(th.Space(1.5)).
+		Padding(th.Space(0.75), th.Space(2)).Radius(t.Radius.Md).
+		Background(t.Card).Border(gwtheme.Hairline, t.Border).Children(func() {
+		kit.Text(ctx, c.connection, t.Text.Xs).TextColor(t.Muted).FillWidth().SingleLine().Ellipsis("…")
 	})
 }
 
@@ -389,9 +405,28 @@ func (c *chatState) composerPlaceholder() string {
 	return "想问什么？  @ 文件，$ 技能，/ 命令"
 }
 
-func (c *chatState) fail(text string) {
+// failUser reports something the user did or must decide: a rejected send, a failed confirm.
+// It belongs in the composer, next to the action that produced it.
+func (c *chatState) failUser(text string) {
 	c.status = text
 	c.problem = text
+}
+
+// failRead reports that the console could not reach the daemon. That is a transport fact the
+// poll retries on its own, so it lives in connection - a strip beside the chat - and never in
+// the composer: writing it there printed a red URL under the input every time a reload dropped
+// the socket, and the one-second poll put it straight back.
+func (c *chatState) failRead(text string) {
+	c.status = text
+	c.connection = text
+}
+
+// clearReadFailure drops a transport complaint once a read succeeds, so a single reload cannot
+// leave a permanent warning on a healthy conversation.
+func (c *chatState) clearReadFailure() {
+	if c.connection != "" {
+		c.connection = ""
+	}
 }
 
 func (c *chatState) composerTrackTrigger(field ui.Element) {
