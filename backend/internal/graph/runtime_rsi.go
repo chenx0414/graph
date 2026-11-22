@@ -190,9 +190,10 @@ type RsiValidateInput struct {
 type RsiValidateFunc func(input RsiValidateInput) []RsiValidationResult
 
 type RsiServiceOptions struct {
-	Root     *string
-	StateDir string
-	Validate RsiValidateFunc
+	Root       *string
+	StateDir   string
+	Validate   RsiValidateFunc
+	InstallApp func(root, buildRoot string) RsiAppInstall
 }
 
 type RsiApplyContext struct {
@@ -220,6 +221,7 @@ type RsiService struct {
 
 	stateDir      string
 	validate      RsiValidateFunc
+	installApp    func(root, buildRoot string) RsiAppInstall
 	runningCommit *string
 	mu            sync.Mutex
 	changing      bool

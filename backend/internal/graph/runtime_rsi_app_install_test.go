@@ -77,13 +77,16 @@ func TestInstallVerdictRefusesAnotherBuildAtTheDestination(t *testing.T) {
 	}
 }
 
-func TestInstallVerdictReportsAnInstallThatFailedAndLanded(t *testing.T) {
+func TestInstallVerdictReportsFailureWhenAnOldAppHasTheSameBundleVersion(t *testing.T) {
 	requireDarwinBundleTools(t)
 	bundle := builtBundle(t)
 	dest := destination(t)
 	writeBundle(t, dest, "dev.graph.console", "0.2.0")
+	if err := os.WriteFile(filepath.Join(dest, "Contents", "MacOS", "Graph"), []byte("previous build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	verdict := rsiAppInstallVerdict(bundle, dest, "", errors.New("codesign: something"))
-	if verdict.State != "installed" || !strings.Contains(verdict.Note, "although the installer reported an error") {
+	if verdict.State != "failed" || !strings.Contains(verdict.Note, "codesign: something") {
 		t.Fatalf("verdict = %+v", verdict)
 	}
 }

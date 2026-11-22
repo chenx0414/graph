@@ -29,14 +29,12 @@ func rsiAppInstallVerdict(bundle, dest, message string, installErr error) RsiApp
 	installedIdentity, installedErr := bundleIdentity(dest)
 	same := builtErr == nil && installedErr == nil && builtIdentity == installedIdentity
 	switch {
-	case installErr != nil && !same:
+	case installErr != nil:
 		reason := strings.TrimSpace(installErr.Error())
 		if reason == "" {
 			reason = "安装失败且没有输出"
 		}
 		return RsiAppInstall{State: "failed", Note: reason + "; built " + built + " (" + builtIdentity + "), installed " + installed + " (" + installedErrText(installedErr, installedIdentity) + ")"}
-	case installErr != nil:
-		return RsiAppInstall{State: "installed", Note: "installed " + installed + " (" + installedIdentity + ") although the installer reported an error: " + strings.TrimSpace(installErr.Error())}
 	case !same:
 		return RsiAppInstall{State: "failed", Note: "the installed app is not the build that was made; built " + built + " (" + builtIdentity + "), installed " + installed + " (" + installedErrText(installedErr, installedIdentity) + ")"}
 	}

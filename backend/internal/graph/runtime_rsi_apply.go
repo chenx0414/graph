@@ -408,15 +408,16 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 	if isolated && committedNow && commit != nil {
 		rsiLandIsolatedCommit(*root, work, *commit, claimedPaths)
 	}
+	live := commit != nil && service.runningCommit != nil && *commit == *service.runningCommit
 	var appInstall *RsiAppInstall
-	if activate && committedNow && needsAppBuild {
-		installed := rsiInstallDesktopApp(*root, work)
+	if activate && !live && needsAppBuild {
+		installed := service.installApp(*root, work)
 		appInstall = &installed
 	}
 	_ = os.Remove(service.rsiWorkingPath())
 
-	live := commit != nil && service.runningCommit != nil && *commit == *service.runningCommit
-	restartRequired := activate && !live
+	installFailed := appInstall != nil && appInstall.State != "installed"
+	restartRequired := activate && !live && !installFailed
 	if restartRequired {
 		_ = rsiPauseForReload(service, context.Store, context.TaskId)
 		generation := rsiRuntimeGeneration(context.Store)
@@ -428,7 +429,10 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 	if committedNow && commit != nil {
 		diff = rsiDiffFor(*root, *commit)
 	}
-	described := DescribeActivation(RsiActivationInput{Commit: commit, CommittedNow: committedNow, Activate: activate, Live: live})
+	described := DescribeActivation(RsiActivationInput{Commit: commit, CommittedNow: committedNow, Activate: activate && !installFailed, Live: live})
+	if installFailed {
+		described.Note = "提交已保存，安装失败，本次未安排重载"
+	}
 	applied := RsiReceipt{
 		Id: id, Status: "applied", Title: title, Root: root, Branch: &branch, Commit: commit,
 		Files: stagePaths, Validation: validation, RestartRequired: restartRequired, AppInstall: appInstall,

@@ -20,6 +20,10 @@ func NewRsiService(options RsiServiceOptions) *RsiService {
 	if service.validate == nil {
 		service.validate = rsiDefaultValidate
 	}
+	service.installApp = options.InstallApp
+	if service.installApp == nil {
+		service.installApp = rsiInstallDesktopApp
+	}
 	if service.Root != nil {
 		if repo := DetectRepo(*service.Root); repo != nil && *repo == *service.Root {
 			service.Available = true

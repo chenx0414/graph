@@ -31,6 +31,7 @@ so a feature cannot be added, renamed or dropped without this map moving with it
 | [F-15] | 托盘与系统通知 | 菜单栏 Graph 图标 | `/api/tasks` | `GET /api/tasks` → serveTasks (server_app_conversations.go)<br>`POST /api/tasks` → serveTaskCreate (server_app_tasks.go) | — | `verification/verify-graph verify --journey F-15-tray` |
 | [F-16] | 空态与错误态 | 任意页面（停 daemon / 去 cookie / 空数据） | `/api/conversations`, `/api/fleet` | `GET /api/conversations` → serveConversations (server_app_conversations.go)<br>`POST /api/conversations` → serveConversationCreate (server_app_conversations.go)<br>`GET /api/fleet` → serveFleet (server_fleet.go) | `app/skeleton_pages_test.go`, `app/shell_view_test.go` | `verification/verify-graph verify --journey F-16-empty-and-error` |
 | [F-17] | 验证驱动开发 | 会话中的验证草稿 → 确认草稿 → 任务图的验证证据 | `/api/orchestration/work/{workId}/confirm`, `/api/tasks/{taskId}/graph/topology` | `POST /api/orchestration/work/{workId}/confirm` → serveWorkConfirm (server_app_work_confirm.go)<br>`GET /api/tasks/{taskId}/graph/topology` → serveGraphTopology (server_app_graph_view.go) | `backend/internal/graph/server_work_verification_test.go`, `backend/internal/graph/server_graph_verification_test.go`, `app/work_verification_test.go` | `go -C backend test ./internal/graph -run 'TestVerificationWorkStartsOnlyFromTheConfirmedRevision\|TestImplementationRequiresTheExpectedFailureBeforeDispatch\|TestGraphVerificationPublishesFailureAndPassForTheSameCheck' && go -C app test . -run 'TestDesktopConfirmsTheVerificationDraftItShows\|TestGraphPageShowsVerificationEvidence'` |
+| [F-18] | RSI 激活与重载 | 全局主管工具 apply_rsi_change | `/api/app/rsi/status`, `/api/app/rsi/restart-ack` | `GET /api/app/rsi/status` → serveAppRsiStatus (server_app_usage.go)<br>`POST /api/app/rsi/restart-ack` → serveAppRsiRestartAck (server_app_usage.go) | `backend/internal/graph/runtime_rsi_apply_activation_test.go`, `backend/internal/graph/runtime_rsi_app_install_test.go` | `go -C backend test ./internal/graph -count=1 -run 'TestRsiActivationOfAnExistingCommit\|TestInstallVerdict'` |
 
 ## Routes no feature claims
 
@@ -45,8 +46,6 @@ index, or the route is dead and should go.
 | `POST /api/agent-context/prompts/default/reset` | serveAgentContextDefaultReset (server_app_agent_context.go) |
 | `POST /api/agent-context/prompts/reset` | serveAgentContextPromptReset (server_app_agent_context.go) |
 | `PUT /api/agent-context/tools` | serveAgentContextTools (server_app_agent_context.go) |
-| `POST /api/app/rsi/restart-ack` | serveAppRsiRestartAck (server_app_usage.go) |
-| `GET /api/app/rsi/status` | serveAppRsiStatus (server_app_usage.go) |
 | `POST /api/app/secret` | serveAppSecret (server_app_usage.go) |
 | `GET /api/app/secret-requests` | serveAppSecretRequests (server_app_usage.go) |
 | `GET /api/capabilities/config` | serveCapabilityConfig (server_app_config.go) |
@@ -150,9 +149,9 @@ index, or the route is dead and should go.
 ## Counts
 
 - 130 registered routes
-- 17 features in the index
-- 23 routes claimed by a feature
-- 107 routes unclaimed
+- 18 features in the index
+- 25 routes claimed by a feature
+- 105 routes unclaimed
 
 ## CI layers
 

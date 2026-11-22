@@ -310,7 +310,7 @@ func DescribeActivation(input RsiActivationInput) RsiActivation {
 		}
 		return RsiActivation{State: "saved", Note: "未重载，且这次调用没有产生提交"}
 	}
-	if !input.CommittedNow || input.Commit == nil {
+	if input.Commit == nil || (input.Live && !input.CommittedNow) {
 		return RsiActivation{State: "checked_only", Note: "这次调用只跑了检查，没有产生提交：源码是否需要更新，请自己核对后再判断。"}
 	}
 	if input.Live {
