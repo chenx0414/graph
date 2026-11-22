@@ -168,6 +168,10 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 		changed = fingerprint != c.fingerprint
 		c.fingerprint = fingerprint
 		c.messages = next
+		// A message that arrived with a picture has only its metadata until the bytes are read.
+		if changed {
+			c.loadAttachmentPictures()
+		}
 		changed = changed || master != c.roundMaster
 		c.roundMaster = master
 		c.projectID, c.projectRoot = parseConversationScope(payload)

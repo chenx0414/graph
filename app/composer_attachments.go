@@ -9,6 +9,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 	"graph/app/gwui/kit"
 	gwtheme "graph/app/gwui/theme"
@@ -181,4 +183,68 @@ func (c *chatState) attachmentButton(ctx *ui.Context) {
 	button.Children(func() {
 		ui.Icon(ctx, iconClip).Size(gwtheme.Icon, gwtheme.Icon).TextColor(t.Muted)
 	})
+}
+
+// systemClipboard is the part of the system clipboard this composer reads. mygo's own
+// mygo.Clipboard satisfies it; a test hands in its own.
+type systemClipboard interface {
+	Read(formats ...transfer.Format) (transfer.Data, error)
+}
+
+// composerClipboard returns the clipboard the paste path reads. A chat state without a window or
+// without one set reads the system clipboard; a test sets clipboard itself.
+func (c *chatState) composerClipboard() systemClipboard {
+	if c.clipboard != nil {
+		return c.clipboard
+	}
+	return mygo.Clipboard
+}
+
+// composerAttachmentFromImage builds the attachment a pasted picture becomes, in exactly the
+// shape composerAttachmentFromPath produces for an image file, so sending needs no second path.
+func composerAttachmentFromImage(data []byte, mime string) (composerAttachment, error) {
+	if len(data) == 0 {
+		return composerAttachment{}, fmt.Errorf("剪贴板里没有图片")
+	}
+	if int64(len(data)) > composerImageLimit {
+		return composerAttachment{}, fmt.Errorf("图片超过 5MB")
+	}
+	if mime == "" {
+		mime = "image/png"
+	}
+	return composerAttachment{
+		Name: "粘贴的图片." + strings.TrimPrefix(mime, "image/"),
+		Type: mime,
+		Size: int64(len(data)),
+		Data: base64.StdEncoding.EncodeToString(data),
+	}, nil
+}
+
+// handleComposerPaste takes a paste before the input inserts it. A clipboard holding a picture
+// becomes an image attachment - the attachment picker is the only other way to send a picture,
+// and a copied screenshot never has a file to pick. Everything else is left to the input.
+//
+// It reports whether it took the paste.
+func (c *chatState) handleComposerPaste(text string) bool {
+	clipboard := c.composerClipboard()
+	if clipboard == nil {
+		return false
+	}
+	data, err := clipboard.Read(transfer.PNG)
+	if err != nil || len(data.Items()) == 0 {
+		return false
+	}
+	raw, err := data.Read(transfer.PNG)
+	if err != nil || len(raw) == 0 {
+		return false
+	}
+	attachment, err := composerAttachmentFromImage(raw, "image/png")
+	if err != nil {
+		c.status = "粘贴失败：" + err.Error()
+		return true
+	}
+	c.attachments = append(c.attachments, attachment)
+	c.status = "已粘贴 " + attachment.Name
+	c.frame()
+	return true
 }

@@ -22,7 +22,21 @@ type transcriptMessageSource struct {
 	TaskID         string `json:"taskId"`
 }
 
+// transcriptAttachment is the metadata the server keeps for a sent attachment. The picture's
+// bytes are not part of it: the server strips them so a transcript stays small, and serves them
+// from GET /api/messages/{id}/attachments/{index} instead.
+type transcriptAttachment struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Size int64  `json:"size"`
+}
+
+func (a transcriptAttachment) isImage() bool {
+	return composerAttachmentIsImageType(a.Type)
+}
+
 type transcriptMessageData struct {
+	Attachments       []transcriptAttachment  `json:"attachments"`
 	VerificationDraft *chatVerificationDraft  `json:"verificationDraft"`
 	Tool              string                  `json:"tool"`
 	Source            transcriptMessageSource `json:"source"`
@@ -38,6 +52,7 @@ type transcriptMessageData struct {
 
 func (data *transcriptMessageData) UnmarshalJSON(payload []byte) error {
 	var body struct {
+		Attachments       []transcriptAttachment  `json:"attachments"`
 		VerificationDraft *chatVerificationDraft  `json:"verificationDraft"`
 		Tool              string                  `json:"tool"`
 		Source            transcriptMessageSource `json:"source"`
@@ -54,6 +69,7 @@ func (data *transcriptMessageData) UnmarshalJSON(payload []byte) error {
 	}
 	failed, text := parseTranscriptError(body.Error)
 	*data = transcriptMessageData{
+		Attachments:       body.Attachments,
 		VerificationDraft: body.VerificationDraft,
 		Tool:              body.Tool, Source: body.Source, ToolCallID: body.ToolCallID, Ordinal: body.Ordinal,
 		Output: body.Output, Message: body.Message, Command: body.Command, Args: body.Args,
@@ -212,6 +228,9 @@ type chatState struct {
 	projectID          string
 	projectRoot        string
 	attachments        []composerAttachment
+	clipboard          systemClipboard
+	pictures           pictureCache
+	pictureCount       int
 	focusComposer      bool
 	active             string
 	source             agentChatSource

@@ -449,6 +449,14 @@ func (c *chatState) bubble(ctx *ui.Context, message transcriptMessage) {
 		} else {
 			markdown.View(ctx, message.Text, &c.md)
 		}
+		for index, attachment := range message.Data.Attachments {
+			if !attachment.isImage() {
+				continue
+			}
+			if !c.messagePicture(ctx, message.ID, index) {
+				kit.Text(ctx, attachment.Name, t.Text.Xs).TextColor(t.Muted)
+			}
+		}
 	})
 }
 
