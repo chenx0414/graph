@@ -76,10 +76,8 @@ func (c *pictureClipboard) Read(formats ...transfer.Format) (transfer.Data, erro
 func TestPastingAPictureAttachesItAsAnImage(t *testing.T) {
 	chat := &chatState{draft: "", source: &conversationChatSource{id: "c1"}}
 	chat.clipboard = &pictureClipboard{picture: pngBytes(t)}
-	tester := ui.NewTester(chat.composer, 900, 260)
-	frames(tester)
 
-	if !chat.handleComposerPaste("") {
+	if !chat.handleComposerPaste(nil, "") {
 		t.Fatalf("a paste whose clipboard holds a picture must be taken by the composer")
 	}
 	if len(chat.attachments) != 1 {
@@ -105,7 +103,7 @@ func TestPastingTextStillInsertsText(t *testing.T) {
 	tester := ui.NewTester(chat.composer, 900, 260)
 	frames(tester)
 
-	if chat.handleComposerPaste("一段普通文字") {
+	if chat.handleComposerPaste(nil, "一段普通文字") {
 		t.Fatalf("a text paste must be left to the input, not taken by the picture path")
 	}
 	if len(chat.attachments) != 0 {
@@ -121,7 +119,7 @@ func TestPastingAPictureWithTextTakesThePicture(t *testing.T) {
 	tester := ui.NewTester(chat.composer, 900, 260)
 	frames(tester)
 
-	if !chat.handleComposerPaste("caption") {
+	if !chat.handleComposerPaste(nil, "caption") {
 		t.Fatalf("a clipboard holding a picture pastes the picture even when it also carries text")
 	}
 	if len(chat.attachments) != 1 || !chat.attachments[0].isImage() {
@@ -136,7 +134,7 @@ func TestPastingAnEmptyClipboardAttachesNothing(t *testing.T) {
 	tester := ui.NewTester(chat.composer, 900, 260)
 	frames(tester)
 
-	if chat.handleComposerPaste("") {
+	if chat.handleComposerPaste(nil, "") {
 		t.Fatalf("an empty clipboard leaves the paste to the input")
 	}
 	if len(chat.attachments) != 0 {
@@ -152,11 +150,61 @@ func TestPastingAPictureOverTheLimitIsRefused(t *testing.T) {
 	tester := ui.NewTester(chat.composer, 900, 260)
 	frames(tester)
 
-	chat.handleComposerPaste("")
+	chat.handleComposerPaste(nil, "")
 	if len(chat.attachments) != 0 {
 		t.Fatalf("a picture over the limit is not attached, got %d", len(chat.attachments))
 	}
 	if chat.status == "" {
 		t.Fatalf("a refused paste says why, status is empty")
+	}
+}
+
+// The paste has to reach the composer through the input, not only through a direct call: the
+// first version of this change called handleComposerPaste in its tests and would have passed
+// even with no OnPaste wired, which is exactly the bug being fixed. This presses Cmd+V.
+func TestCmdVPastesAPictureThroughTheInput(t *testing.T) {
+	chat := &chatState{draft: "", source: &conversationChatSource{id: "c1"}}
+	chat.clipboard = &pictureClipboard{picture: pngBytes(t)}
+	tester := ui.NewTester(chat.composer, 900, 260)
+	frames(tester)
+
+	// Focus the composer the way the user does, then paste. The injected clipboard answers the
+	// picture read; the window's clipboard is what the input itself would insert.
+	if err := tester.Click("消息"); err != nil {
+		t.Fatalf("focus the composer: %v", err)
+	}
+	tester.SetClipboard("")
+	tester.Key(ui.Cmd, ui.KeyV)
+	frames(tester)
+
+	if len(chat.attachments) != 1 || !chat.attachments[0].isImage() {
+		t.Fatalf("Cmd+V with a picture on the clipboard attaches it, got %d attachments", len(chat.attachments))
+	}
+	if chat.draft != "" {
+		t.Fatalf("a taken paste inserts no text, the draft is %q", chat.draft)
+	}
+}
+
+// A text paste still reaches the input: the picture path must not eat everything.
+func TestCmdVPastesTextIntoTheDraft(t *testing.T) {
+	chat := &chatState{draft: "", source: &conversationChatSource{id: "c1"}}
+	chat.clipboard = &pictureClipboard{text: "粘贴的文字"}
+	tester := ui.NewTester(chat.composer, 900, 260)
+	frames(tester)
+
+	if err := tester.Click("消息"); err != nil {
+		t.Fatalf("focus the composer: %v", err)
+	}
+	// The editor inserts a pasted text through the window's clipboard, so the window's
+	// clipboard is what carries the words; the injected one only answers "no picture here".
+	tester.SetClipboard("粘贴的文字")
+	tester.Key(ui.Cmd, ui.KeyV)
+	frames(tester)
+
+	if chat.draft != "粘贴的文字" {
+		t.Fatalf("a text paste lands in the draft, got %q", chat.draft)
+	}
+	if len(chat.attachments) != 0 {
+		t.Fatalf("a text paste attaches nothing, got %d", len(chat.attachments))
 	}
 }

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 	"graph/app/gwui/kit"
@@ -185,19 +184,22 @@ func (c *chatState) attachmentButton(ctx *ui.Context) {
 	})
 }
 
-// systemClipboard is the part of the system clipboard this composer reads. mygo's own
-// mygo.Clipboard satisfies it; a test hands in its own.
+// systemClipboard is the part of the clipboard this composer reads. A test sets it to a
+// clipboard of its own; the composer otherwise reads the window's, through ui.Services.
 type systemClipboard interface {
 	Read(formats ...transfer.Format) (transfer.Data, error)
 }
 
-// composerClipboard returns the clipboard the paste path reads. A chat state without a window or
-// without one set reads the system clipboard; a test sets clipboard itself.
-func (c *chatState) composerClipboard() systemClipboard {
-	if c.clipboard != nil {
-		return c.clipboard
+// windowClipboard reads the clipboard from inside a view build, where the window's own services
+// answer without a round trip to the main thread.
+type windowClipboard struct{ ctx *ui.Context }
+
+func (c windowClipboard) Read(formats ...transfer.Format) (transfer.Data, error) {
+	data := c.ctx.Services().ReadClipboardData(formats...)
+	if len(data.Items()) == 0 {
+		return data, transfer.ErrFormat
 	}
-	return mygo.Clipboard
+	return data, nil
 }
 
 // composerAttachmentFromImage builds the attachment a pasted picture becomes, in exactly the
@@ -225,8 +227,11 @@ func composerAttachmentFromImage(data []byte, mime string) (composerAttachment, 
 // and a copied screenshot never has a file to pick. Everything else is left to the input.
 //
 // It reports whether it took the paste.
-func (c *chatState) handleComposerPaste(text string) bool {
-	clipboard := c.composerClipboard()
+func (c *chatState) handleComposerPaste(ctx *ui.Context, text string) bool {
+	clipboard := c.clipboard
+	if clipboard == nil {
+		clipboard = windowClipboard{ctx: ctx}
+	}
 	if clipboard == nil {
 		return false
 	}

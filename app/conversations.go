@@ -362,7 +362,7 @@ func (c *chatState) composer(ctx *ui.Context) {
 			}
 			field := kit.TextArea(ctx, &c.draft, kit.InputOpts{Placeholder: c.composerPlaceholder(), Bare: true})
 			field.Label("消息").FillWidth().PaddingX(th.Space(0.5)).Lines(2, 6)
-			field.OnPaste(c.handleComposerPaste)
+			field.OnPaste(func(text string) bool { return c.handleComposerPaste(ctx, text) })
 			field.TextRanges(composerTextRanges(composerTokens(c.draft, c.composerSkillNames()))...)
 			if c.focusComposer {
 				field.Focus()
