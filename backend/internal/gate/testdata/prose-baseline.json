@@ -12,7 +12,6 @@
     "docs/guides/checks.md",
     "docs/specs/graph-rebuild-v2.md",
     "examples/README.md",
-    "src/runtime/README.md",
     "verification/CONTROL_COVERAGE.md",
     "verification/VERIFICATION_REPORT.md",
     "verification/skills/verify-graph/CONTROLS.md",

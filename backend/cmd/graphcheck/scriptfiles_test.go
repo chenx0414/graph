@@ -53,3 +53,25 @@ func TestScriptFileScanDetectsAnOffender(t *testing.T) {
 		t.Fatalf("the scan must report both unlisted files, got %v", offenders)
 	}
 }
+
+// One sandbox host script, one copy. src/runtime/ held a second copy of both files and the
+// checker had to permit each half separately; the copies were byte-identical, so keeping two
+// only left a way for them to drift apart unnoticed.
+func TestTheSandboxHostExistsInExactlyOnePlace(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, name := range []string{"module-worker.mjs", "check-resolver.cjs"} {
+		copies := []string{}
+		for _, directory := range []string{"src/runtime", "backend/internal/graph/embedded/runtime"} {
+			path := filepath.Join(root, directory, name)
+			if _, err := os.Stat(path); err == nil {
+				copies = append(copies, filepath.ToSlash(filepath.Join(directory, name)))
+			}
+		}
+		if len(copies) != 1 {
+			t.Fatalf("%s must exist in exactly one place, found %d: %v", name, len(copies), copies)
+		}
+		if copies[0] != filepath.ToSlash(filepath.Join("backend/internal/graph/embedded/runtime", name)) {
+			t.Fatalf("%s must be the embedded copy the binary ships, found %s", name, copies[0])
+		}
+	}
+}

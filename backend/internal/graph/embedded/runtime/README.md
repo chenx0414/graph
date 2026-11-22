@@ -1,9 +1,11 @@
-# src/runtime 里只剩 worker 脚本
+<!-- graph:allow-prose: 这两个脚本的存在原因与失败现象只能靠历史记录说明；它们的行为约束由 scriptfiles 与 embedded 两条测试与门禁强制，不在本文。 -->
+
+# 这里只有两个 worker 脚本
 
 TypeScript 侧的运行时实现在 `eb5ef9c8` 归档删除（`src/runtime/*.ts`，约 10,900 行）：
 守护进程早已由 Go (`graphd`) + PiG 内核承担运行，那些模块只被测试引用。
 
-**这里的 `.mjs` / `.cjs` 不是残留**：它们是 Go 守护进程 fork 出来执行受控工作的脚本，
+**这里的 `.mjs` / `.cjs` 不是残留**，且只存在这一份（`src/runtime/` 的副本已删除，两份曾逐字节相同、靠测试比对） ：它们是 Go 守护进程 fork 出来执行受控工作的脚本，
 路径由 Go 侧的资产解析器给出。实测删掉会让图命令与扩展加载静默失败（`go-command-output`、
 `go-review-module` 变红，命令 `passed=false`）。
 

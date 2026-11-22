@@ -22,8 +22,21 @@ func TestTheEmbeddedPresetsMatchTheRepositoryCopies(t *testing.T) {
 	compareTree(t, Presets(), filepath.Join(repoRoot(t), "presets"))
 }
 
-func TestTheEmbeddedRuntimeMatchesTheRepositoryCopies(t *testing.T) {
-	compareTree(t, Runtime(), filepath.Join(repoRoot(t), "src", "runtime"))
+// The runtime host scripts live in exactly one place: this package's embedded copy, which the
+// binary ships. There used to be a byte-identical second copy under src/runtime that this test
+// compared against; with one copy there is nothing to drift, and the paths that used to read the
+// disk first now resolve the embedded file. What has to hold instead is that src/runtime is gone,
+// so nobody re-creates a second copy and the resolution order stays single-source.
+func TestTheRuntimeHostScriptsHaveNoSecondCopyOutsideTheBinary(t *testing.T) {
+	stale := filepath.Join(repoRoot(t), "src", "runtime")
+	if _, err := os.Stat(stale); err == nil {
+		t.Fatalf("%s exists again: the runtime host scripts must live only in embedded/runtime", stale)
+	}
+	for _, name := range []string{"check-resolver.cjs", "module-worker.mjs"} {
+		if _, err := fs.ReadFile(Runtime(), name); err != nil {
+			t.Fatalf("the binary must still ship %s: %v", name, err)
+		}
+	}
 }
 
 func embeddedFileList(t *testing.T, source fs.FS) map[string]bool {

@@ -262,7 +262,7 @@ graph 状态区分 running、idle、paused、completing、completed、stopping�
 - 自动布局包含流水线、扇出、汇合、返工、嵌套、多同端点边；节点/折点格点对齐且边不穿节点；运行更新位置不变。
 - 边可查看历史value；模块显示等待/判断/触发/重开；多聊天窗口独立且关闭不停止进程；system prompt与实际运行一致。
 
-以公开 interface 验证行为；磁盘 SQLite、真实临时 Git、受控模型与实际 Pi 进程分别证明对应契约。截图只证明布局，不能证明调度。实施中写测试遵循工程规范的测试规则；提交或推送前必须 node --run check，工程与证据规则见 [CODING_STANDARDS.md](../../CODING_STANDARDS.md#验证与交付)，检查操作见 [检查指南](../guides/checks.md)。
+以公开 interface 验证行为；磁盘 SQLite、真实临时 Git、受控模型与实际 Pi 进程分别证明对应契约。截图只证明布局，不能证明调度。实施中写测试遵循工程规范的测试规则；提交或推送前必须 `python3 scripts/check-queue.py`，工程与证据规则见 [CODING_STANDARDS.md](../../CODING_STANDARDS.md#验证与交付)，检查操作见 [检查指南](../guides/checks.md)。
 
 ## 15. 已确认的九项选择与实施权限
 
@@ -282,6 +282,6 @@ graph 状态区分 running、idle、paused、completing、completed、stopping�
 
 先完成常驻 Pi 多 turn、配置重绑、自定义代码进程隔离三个可行性验证，再按第 13 节交付垂直切片与后续能力。重构以接口投递为正式执行模型，复用会话、能力库、预算、产物和 Git 基础；不要在旧 dependsOn/when/loops 调度上叠加第二套执行真相。
 
-每阶段在规格 Issue 记录改动、验收证据、限制和下一步。优先证明串行投递、原子 submit、去重恢复与 each/once，再完成动态修改、子 graph 和可视化。第 14 节是最低验收集合，第 15 节为已确认选择；实施时补充针对行为的必要验证，提交或推送前运行 node --run check。
+每阶段在规格 Issue 记录改动、验收证据、限制和下一步。优先证明串行投递、原子 submit、去重恢复与 each/once，再完成动态修改、子 graph 和可视化。第 14 节是最低验收集合，第 15 节为已确认选择；实施时补充针对行为的必要验证，提交或推送前运行 `python3 scripts/check-queue.py`。
 
 本交接授权按已确认规格细化工程实现；出现产品行为变化，遵守第 15 节第 9 项先与用户对齐。不得声称本规格中的验收已经通过。

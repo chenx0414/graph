@@ -10,10 +10,8 @@ import (
 
 // This repository is Go, so a script file can only run as the sandbox host for a `node` check.
 var allowedScriptFiles = []string{
-	"src/runtime/module-worker.mjs",
-	"src/runtime/check-resolver.cjs",
-	"backend/internal/graph/embedded/runtime/module-worker.mjs",
 	"backend/internal/graph/embedded/runtime/check-resolver.cjs",
+	"backend/internal/graph/embedded/runtime/module-worker.mjs",
 }
 
 var scriptFileExtensions = []string{".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"}
