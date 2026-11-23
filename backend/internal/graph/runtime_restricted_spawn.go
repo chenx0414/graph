@@ -152,6 +152,7 @@ func (executor *sandboxExecutor) spawnAndWait(command RestrictedCommand, launche
 	}()
 	waitErr := process.Wait()
 	execDebugTimeline("wait returned err=%v", waitErr)
+	state.killTree()
 	execDebugTimeline("pumps waiting")
 	pumps.Wait()
 	execDebugTimeline("pumps drained")
