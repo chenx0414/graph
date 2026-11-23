@@ -26,7 +26,7 @@ func TestInvocationTotalsFollowSettledWrites(t *testing.T) {
 	if cost.Unknown || cost.Amount == nil || *cost.Amount != 0.5 {
 		t.Fatalf("the settled cost is known, got %+v", cost)
 	}
-	usage := ConversationMasterUsage(store, "") 
+	usage := ConversationMasterUsage(store, "")
 	_ = usage
 	store.RecordInvocationUsage("inv", `{"input":200,"output":20,"cacheRead":800,"cacheWrite":0,"contextTokens":1000}`,
 		`{"amount":0.7,"currency":"USD","unit":"per_million_tokens"}`)

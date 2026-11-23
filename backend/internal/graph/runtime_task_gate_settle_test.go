@@ -2,7 +2,6 @@
 package graph
 
 import (
-	"database/sql"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,11 +15,7 @@ import (
 // call the second settle belonged to.
 func TestConflictingSettleNamesTheInvocationAndBothValues(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tasks.sqlite")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	store := NewTaskStore(db, path)
+	store := openTaskStore(t, path)
 	defer store.Close()
 	if _, err := store.DB.Exec(`INSERT INTO projects(id,root,grants) VALUES('p',?,'[]')`, t.TempDir()); err != nil {
 		t.Fatalf("seed project: %v", err)

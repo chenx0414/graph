@@ -16,6 +16,8 @@ func openTaskStore(t *testing.T, path string) *TaskStore {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	return NewTaskStore(db, path)
 }
 

@@ -2,7 +2,6 @@
 package graph
 
 import (
-	"database/sql"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -38,11 +37,7 @@ func TestNodeToolRefusalKeepsItsOwnReason(t *testing.T) {
 func scratchTaskGate(t *testing.T) SendGate {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "tasks.sqlite")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	store := NewTaskStore(db, path)
+	store := openTaskStore(t, path)
 	t.Cleanup(store.Close)
 	for _, statement := range []string{
 		`INSERT INTO projects(id,root,grants) VALUES('p','` + t.TempDir() + `','[]')`,

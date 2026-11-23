@@ -2,7 +2,6 @@
 package graph
 
 import (
-	"database/sql"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,11 +12,7 @@ import (
 func newDeferredTestStore(t *testing.T) (*TaskStore, func()) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "tasks.sqlite")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	store := NewTaskStore(db, path)
+	store := openTaskStore(t, path)
 	return store, func() { store.Close() }
 }
 
