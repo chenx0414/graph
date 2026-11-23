@@ -81,16 +81,16 @@ func (s *TaskStore) Transaction(action any) any {
 	if s.InTransaction() {
 		return storeTransactionAction(action)
 	}
-	if _, err := s.DB.Exec("BEGIN IMMEDIATE"); err != nil {
+	if err := s.runTransactionStatement("BEGIN IMMEDIATE"); err != nil {
 		panic(err)
 	}
 	s.setTx(true)
 	var result any
-	committed := false
+	settled := false
 	defer func() {
 		s.setTx(false)
-		if !committed {
-			if _, err := s.DB.Exec("ROLLBACK"); err != nil {
+		if !settled {
+			if err := s.runTransactionStatement("ROLLBACK"); err != nil {
 				panic(err)
 			}
 		}
@@ -99,12 +99,21 @@ func (s *TaskStore) Transaction(action any) any {
 		}
 	}()
 	result = storeTransactionAction(action)
-	if _, err := s.DB.Exec("COMMIT"); err != nil {
+	if err := s.runTransactionStatement("COMMIT"); err != nil {
+		settled = true
 		panic(err)
 	}
-	committed = true
+	settled = true
 	s.emitChange()
 	return result
+}
+
+func (s *TaskStore) runTransactionStatement(statement string) error {
+	if s.transactionExec != nil {
+		return s.transactionExec(statement)
+	}
+	_, err := s.DB.Exec(statement)
+	return err
 }
 
 func storeTransactionAction(action any) any {

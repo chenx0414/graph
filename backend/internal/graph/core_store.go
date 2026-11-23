@@ -41,6 +41,7 @@ type TaskStore struct {
 	txMu              sync.Mutex
 	agentExecutions   *executionSlotPool
 	programExecutions *executionSlotPool
+	transactionExec func(statement string) error
 }
 
 func NewTaskStore(db *sql.DB, path string) *TaskStore {
