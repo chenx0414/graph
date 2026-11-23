@@ -140,6 +140,7 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 	var configQueue sync.Mutex
 	presetsAvailable := false
 	definitionsPublished := false
+	catalogReady := false
 	publishDefinitions := func() {
 		if presetsAvailable || definitionsPublished || !live.Enabled() {
 			return
@@ -321,6 +322,7 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 		return daemonSystemSummary(live, userHome, agentContext, server, usage)
 	}
 	server = OpenGraphServer(GraphServerOptions{
+		Ready: func() bool { return catalogReady },
 		StateDir: stateDir, Projects: config.Projects, Port: &port, AutoDrive: &autoDrive,
 		Codemode:      config.Codemode,
 		SystemContext: &TaskRuntimeSystemContext{SystemSummary: systemSummary},
@@ -402,6 +404,7 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 	presetResult := PublishBootstrap(runtimeCatalog(server), bootstrap, log)
 	presetsAvailable = presetResult.Available
 	publishDefinitions()
+	catalogReady = true
 	ensureMainRecipe(runtimeCatalog(server), bootstrap, log)
 	if presetsAvailable {
 		log(fmt.Sprintf("Bootstrap: %d definitions ready%s; capabilities: %s.", len(presetResult.Installed),

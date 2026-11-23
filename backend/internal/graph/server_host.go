@@ -47,6 +47,7 @@ type AppOptions struct {
 	AppServices  *AppServices
 	Usage        UsageService
 	AgentContext *AgentContextLibrary
+	Ready        func() bool
 }
 
 type GraphServerOptions struct {
@@ -73,6 +74,7 @@ type GraphServerOptions struct {
 	Catalog              *TaskRuntimeCatalog
 	Codemode             GraphCodemode
 	OnCredentialRejected func(request CredentialRecoveryRequest) bool
+	Ready                func() bool
 }
 
 const problemSweepMs = 60 * 1000
@@ -120,6 +122,7 @@ func OpenGraphServer(options GraphServerOptions) *GraphHost {
 		Origin: origin, Startup: options.Startup, StartupInfo: options.StartupInfo,
 		ConfigStore: options.ConfigStore, ConfigEnv: options.ConfigEnv, ConfigTest: options.ConfigTest,
 		AppServices: options.AppServices, Usage: options.Usage, AgentContext: agentContext,
+		Ready: options.Ready,
 	})
 	requested := 0
 	if options.Port != nil {

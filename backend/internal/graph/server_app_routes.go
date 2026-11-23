@@ -157,6 +157,10 @@ func (app *GraphApp) serveHome(w http.ResponseWriter, r *http.Request) {
 }
 
 func (app *GraphApp) serveHealth(w http.ResponseWriter, r *http.Request) {
+	if app.options.Ready != nil && !app.options.Ready() {
+		writeJSON(w, http.StatusServiceUnavailable, appHealth{OK: false})
+		return
+	}
 	writeJSON(w, http.StatusOK, appHealth{OK: true})
 }
 
