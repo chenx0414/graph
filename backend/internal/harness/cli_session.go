@@ -303,3 +303,22 @@ func (session *CLISession) appBinary() (string, error) {
 	}
 	return binary, nil
 }
+
+func (session *CLISession) Drive(steps []string) (string, error) {
+	binary, err := session.appBinary()
+	if err != nil {
+		return "", err
+	}
+	arguments := []string{"drive", "--address", session.URL(), "--token", session.token}
+	for _, step := range steps {
+		arguments = append(arguments, "--step", step)
+	}
+	command := exec.Command(binary, arguments...)
+	var logs bytes.Buffer
+	command.Stdout = &logs
+	command.Stderr = &logs
+	if err := command.Run(); err != nil {
+		return logs.String(), fmt.Errorf("drive: %v: %s", err, strings.TrimSpace(logs.String()))
+	}
+	return logs.String(), nil
+}

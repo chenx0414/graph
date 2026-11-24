@@ -159,3 +159,60 @@ func TestTheCLIFindsTheRepositoryWithoutBeingTold(t *testing.T) {
 		t.Fatalf("the CLI finds the checkout it runs from, want %s got %q", root, found)
 	}
 }
+
+// An Agent changing the interface has to be able to press it, not only photograph it. A
+// screenshot proves a layout; it cannot prove that a click does what the label says. The verbs
+// take a step script so the whole interaction is one call and one verdict:
+//
+//	steps: click "消息" | type "hello" | key cmd+v | frame | texts | has "欢迎" | shot out.png
+func TestTheCLIDrivesTheInterfaceAndReportsWhatItSaw(t *testing.T) {
+	root := cliSessionRoot(t)
+	session, err := StartCLISession(CLISessionOptions{Repository: repositoryForTest(t), Root: root})
+	if err != nil {
+		t.Fatalf("start a CLI session: %v", err)
+	}
+	defer session.Close()
+
+	shot := filepath.Join(root, "after.png")
+	// Pressing a rail item is a real interaction: the label exists, and after the press the
+	// page it names is the one showing. A screenshot alone could not tell a broken click from a
+	// working one.
+	output, err := session.Drive([]string{
+		`has "轨迹"`,
+		`click "轨迹"`,
+		`frame`,
+		`texts`,
+		`shot ` + shot,
+	})
+	if err != nil {
+		t.Fatalf("drive the interface: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "轨迹") {
+		t.Fatalf("the page the rail item names has to be showing after the press, got:\n%s", output)
+	}
+	if info, statErr := os.Stat(shot); statErr != nil || info.Size() == 0 {
+		t.Fatalf("the last step wrote its screenshot: %v", statErr)
+	}
+}
+
+// A step that cannot be carried out must stop the run with the step and the reason, not walk on
+// and report the later steps as if the earlier one had worked.
+func TestTheCLIStopsAtAStepThatCannotBeCarriedOut(t *testing.T) {
+	root := cliSessionRoot(t)
+	session, err := StartCLISession(CLISessionOptions{Repository: repositoryForTest(t), Root: root})
+	if err != nil {
+		t.Fatalf("start a CLI session: %v", err)
+	}
+	defer session.Close()
+
+	output, err := session.Drive([]string{
+		`click "这个标签页不存在"`,
+		`texts`,
+	})
+	if err == nil {
+		t.Fatalf("a click on a label the interface does not show must fail, got:\n%s", output)
+	}
+	if !strings.Contains(err.Error(), "这个标签页不存在") {
+		t.Fatalf("the failure names the step that could not be carried out, got %q", err)
+	}
+}

@@ -40,6 +40,12 @@ func inScreenshotMode(args []string) bool {
 	return len(args) > 0 && args[0] == screenshotModeArg
 }
 
+const driveModeArg = "drive"
+
+func inDriveMode(args []string) bool {
+	return len(args) > 0 && args[0] == driveModeArg
+}
+
 func selfExecutable() string {
 	path, err := os.Executable()
 	if err != nil {
