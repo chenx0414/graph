@@ -40,6 +40,9 @@ func hasBase64Shape(data string) bool {
 	for i := len(data) - 1; i >= 0 && data[i] == '=' && padding < 2; i-- {
 		padding++
 	}
+	if len(data)%4 != 0 {
+		return false
+	}
 	body := data[:len(data)-padding]
 	for i := 0; i < len(body); i++ {
 		c := body[i]
