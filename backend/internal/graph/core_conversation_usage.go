@@ -214,7 +214,7 @@ func ConversationDigest(store *TaskStore, conversationId string) string {
 	conversation := ConversationRowOf(store, conversationId)
 	anchor := store.Task(conversation.AnchorTaskId)
 	master := kernelRow(store.Db, "SELECT n.id,n.status,n.output,i.used,i.budget,i.model FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? AND json_extract(n.spec,'$.role')='master'", anchor.ID)
-	lines := []string{conversationProjectLine(store, conversation.ProjectId)}
+	lines := []string{conversationProjectLine(store, conversation)}
 	var proposal map[string]any
 	if anchor.LatestProposal != 0 {
 		proposal = kernelRow(store.Db, "SELECT version,requirement_version,draft_revision,spec FROM proposals WHERE task_id=? AND version=? AND archived_at IS NULL AND deleted_at IS NULL",

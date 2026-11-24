@@ -34,15 +34,21 @@ func conversationFailureSuffix(detail string) string {
 	return " 原因：" + detail
 }
 
-func conversationProjectLine(store *TaskStore, projectId *string) string {
-	if projectId == nil || *projectId == "" {
-		return "Project: not bound (ask the user to choose one from the configured projects)"
+func conversationProjectLine(store *TaskStore, conversation ConversationRow) string {
+	if conversation.ProjectId == nil || *conversation.ProjectId == "" {
+		switch conversation.Role {
+		case ConversationGlobal:
+			return "Project: not bound - choose it yourself from the goal: this checkout's own repository is your workspace (its harness, console, backend and prompts are yours to change and verify with apply_rsi_change), and every other project goes through delegate_work. Ask the user only when the goal points at no repository at all."
+		case ConversationProject:
+			return "Project: not bound - this project thread cannot create work for another project"
+		}
+		return "Project: not bound"
 	}
-	row := kernelRow(store.Db, "SELECT root FROM projects WHERE id=?", *projectId)
+	row := kernelRow(store.Db, "SELECT root FROM projects WHERE id=?", *conversation.ProjectId)
 	if row == nil {
-		return "Project: " + *projectId
+		return "Project: " + *conversation.ProjectId
 	}
-	return "Project: " + *projectId + " (root " + kernelString(row["root"]) + ")"
+	return "Project: " + *conversation.ProjectId + " (root " + kernelString(row["root"]) + ")"
 }
 
 func conversationQuestionSummary(kind string, data any) string {
