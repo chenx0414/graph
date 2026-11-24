@@ -30,6 +30,10 @@ import sys
 import threading
 import time
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from gate_layers import modules_to_test
+
 
 # How often a holder says it is still there, and when a silent holder is suspect.
 HEARTBEAT_SECONDS = 10
@@ -39,6 +43,24 @@ NOTICE_SECONDS = 30
 # How long a reclaim waits for the process it judged to actually be gone.
 KILL_WAIT_SECONDS = 5
 
+
+
+def working_tree_changes(worktree):
+    """Repository-relative paths the working tree changed, tracked or not.
+
+    Both the index and the working tree count: an agent editing a file without staging it is
+    exactly the case this gate has to notice.
+    """
+    changed = []
+    try:
+        for args in (["-c", "core.quotepath=false", "diff", "--name-only", "HEAD"],
+                     ["-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"]):
+            result = subprocess.run(["git", "-C", str(worktree), *args],
+                                    capture_output=True, text=True, check=False)
+            changed.extend(line for line in result.stdout.splitlines() if line.strip())
+    except OSError:
+        return []
+    return changed
 
 def process_start(pid):
     """When the process with this pid started, or None when we cannot ask.
@@ -376,6 +398,12 @@ def main():
     if command[:1] == ["--"]:
         command = command[1:]
     if not command:
+        # Which modules to test is decided by what the working tree touched. git already knows;
+        # asking it is cheaper and less wrong than running three suites and guessing.
+        gate_layers = modules_to_test(
+            working_tree_changes(Path.cwd()),
+            override=[m for m in os.environ.get("GATE_LAYERS", "").split(",") if m],
+        )
         # The blocking gate takes no machine-wide slot at all.
         #
         # Measured 2026-11-05: a commit waited 236s and counting for
@@ -388,8 +416,6 @@ def main():
         # whether a commit lands.
         static = (
             ("go", "-C", "backend", "run", "./cmd/graphbuild", "backend"),
-            ("go", "-C", "backend", "vet", "./..."),
-            ("go", "-C", "backend", "test", "-short", "./..."),
             # Go keys its test cache on files inside the package's own module, and these
             # packages read data that lives outside it - verification/ is a separate module,
             # and the rest read docs, presets or the repository root. Measured 2026-11-21: a
@@ -398,16 +424,22 @@ def main():
             # the rest of ./... stays cached. scripts/test_data_freshness.py fails when a
             # package starts reading outside backend/ without being listed here, and when this
             # list names a package that does not.
-            ("go", "-C", "backend", "test", "-short", "-count=1",
-             "./cmd/graphcheck", "./internal/gate", "./internal/graph",
-             "./internal/graph/embedded", "./internal/appinstall", "./internal/harness"),
-            ("go", "-C", "app", "vet", "./..."),
-            ("go", "-C", "app", "test", "-short", "./..."),
-            # verification/ is a third module: nothing in the other two runs its tests, and the
-            # skill contract it enforces went red unnoticed - a module named for verification
-            # that the gate never verified.
-            ("go", "-C", "verification", "vet", "./..."),
-            ("go", "-C", "verification", "test", "-short", "-count=1", "./..."),
+            *((("go", "-C", "backend", "test", "-short", "-count=1",
+                "./cmd/graphcheck", "./internal/gate", "./internal/graph",
+                "./internal/graph/embedded", "./internal/appinstall", "./internal/harness"),)
+              if "backend" in gate_layers else ()),
+            # One module per change: measured 2026-11-23, the fast layer was 98s of which app
+            # tests were 41s and internal/graph 17s, and neither can be broken by a change to
+            # the other. scripts/gate_layers.py picks the modules the working tree touched;
+            # anything unplaceable widens to all of them.
+            *(
+                ("go", "-C", module, "vet", "./...")
+                for module in gate_layers
+            ),
+            *(
+                ("go", "-C", module, "test", "-short", "-count=1", "./...")
+                for module in gate_layers
+            ),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "comments"),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "ownership"),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "api"),
