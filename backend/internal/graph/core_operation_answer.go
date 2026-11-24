@@ -176,6 +176,7 @@ func (l *OperationLifecycle) releaseFailedTurnMessages(question map[string]any) 
 	if latest == nil || kernelString(latest["id"]) != operationId {
 		return
 	}
+	l.store.ReleaseAnswers(operationId)
 	released := []string{}
 	for _, row := range MessagesForOperation(l.store, operationId) {
 		if row.Role == string(MessageRoleUser) && row.State == string(MessageStateDelivered) {

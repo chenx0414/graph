@@ -33,6 +33,7 @@ func (l *OperationLifecycle) markNotSent(row map[string]any, options operationNo
 	ReleaseOperationReservation(l.store, id)
 	ReleaseRsiContinuation(l.store, id)
 	ReleaseWakes(l.store, id)
+	l.store.ReleaseAnswers(id)
 	if options.ResetNode {
 		l.store.SetNodePending(kernelString(row["task_id"]), kernelString(row["node_id"]))
 	}

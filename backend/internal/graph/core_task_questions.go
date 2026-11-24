@@ -77,3 +77,26 @@ func (s *TaskStore) EscalateQuestionOwnership(questionID string, escalatedAt int
  data=json_set(data,'$.escalatedAt',?,'$.escalatedFrom',?,'$.escalatedWaitedMs',?,'$.escalationPrompt',?)
  WHERE id=? AND status='open' AND data IS NOT NULL`, escalatedAt, from, waitedMs, prompt, questionID)
 }
+
+func (s *TaskStore) UndeliveredAnswers(taskID, nodeID string) []map[string]any {
+	return kernelRows(s.DB, `SELECT id,answer FROM questions
+ WHERE task_id=? AND node_id=? AND kind IN ('waiting','system_change') AND status='resolved'
+   AND answers_delivered_by IS NULL ORDER BY rowid`, taskID, nodeID)
+}
+
+func (s *TaskStore) MarkAnswersDelivered(questionIDs []string, operationID string, at int64) {
+	for _, questionID := range questionIDs {
+		kernelExec(s.DB, "UPDATE questions SET answers_delivered_by=?,answers_delivered_at=? WHERE id=? AND answers_delivered_by IS NULL",
+			operationID, at, questionID)
+	}
+}
+
+func (s *TaskStore) ReleaseAnswers(operationID string) {
+	kernelExec(s.DB, "UPDATE questions SET answers_delivered_by=NULL,answers_delivered_at=NULL WHERE answers_delivered_by=?", operationID)
+}
+
+func (s *TaskStore) DiscardPendingAnswers(taskID, nodeID, reason string, at int64) int64 {
+	return kernelChanges(s.DB, `UPDATE questions SET answers_delivered_by=?,answers_delivered_at=?
+ WHERE task_id=? AND node_id=? AND kind IN ('waiting','system_change') AND status='resolved'
+   AND answers_delivered_by IS NULL`, reason, at, taskID, nodeID)
+}

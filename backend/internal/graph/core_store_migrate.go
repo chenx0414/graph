@@ -219,6 +219,25 @@ func MigrateTaskSchema(db *sql.DB) {
 		}
 		execMigration(db, schemaV65)
 	}
+	if version < 66 {
+		migrateV66(db)
+	}
+}
+
+func migrateV66(db *sql.DB) {
+	questions := sqliteColumns(db, "questions")
+	if !questions["answers_delivered_by"] {
+		execSQL(db, "ALTER TABLE questions ADD COLUMN answers_delivered_by TEXT")
+	}
+	if !questions["answers_delivered_at"] {
+		execSQL(db, "ALTER TABLE questions ADD COLUMN answers_delivered_at INTEGER")
+	}
+	execSQL(db, `UPDATE questions SET answers_delivered_by='migration',answers_delivered_at=CAST(strftime('%s','now') AS INTEGER)*1000
+ WHERE kind IN ('waiting','system_change') AND status='resolved' AND answers_delivered_by IS NULL
+   AND (EXISTS(SELECT 1 FROM operations o WHERE o.task_id=questions.task_id AND o.node_id=questions.node_id
+         AND instr(o.spec, questions.id)>0)
+     OR EXISTS(SELECT 1 FROM node_questions n WHERE n.question_id=questions.id AND n.state='answered'))`)
+	execSQL(db, "PRAGMA user_version=66;")
 }
 
 func migrateV62(db *sql.DB) {

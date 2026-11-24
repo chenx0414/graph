@@ -29,12 +29,14 @@ func (e *Execution) admit(node ExecutionNodeRow, spec NodeSpec, reservation int6
 			wakes = PendingWakes(e.store, node.TaskId, node.Id)
 		}
 		answers := []OperationAnswer{}
-		for _, row := range kernelRows(e.store.Db, "SELECT id,answer FROM questions WHERE task_id=? AND node_id=? AND kind IN ('waiting','system_change') AND status='resolved' ORDER BY rowid", node.TaskId, node.Id) {
+		answerQuestionIDs := []string{}
+		for _, row := range e.store.UndeliveredAnswers(node.TaskId, node.Id) {
 			var payload map[string]any
 			if err := json.Unmarshal([]byte(kernelString(row["answer"])), &payload); err != nil {
 				panic(err)
 			}
 			answers = append(answers, OperationAnswer{QuestionId: kernelString(row["id"]), Value: payload["value"]})
+			answerQuestionIDs = append(answerQuestionIDs, kernelString(row["id"]))
 		}
 		messages := []OperationMessage{}
 		if task.Phase == "chatting" {
@@ -307,6 +309,9 @@ func (e *Execution) admit(node ExecutionNodeRow, spec NodeSpec, reservation int6
 			AfterIntent: func(admitted Operation) {
 				ConsumeRsiContinuation(e.store, admitted)
 				ConsumePauseContinuation(e.store, admitted.TaskId, admitted.NodeId, admitted.Id)
+				if len(answerQuestionIDs) > 0 {
+					e.store.MarkAnswersDelivered(answerQuestionIDs, admitted.Id, NowMillis())
+				}
 				resolved := admitted.Context.AgentContext
 				if resolved != nil && handoffPackage != nil {
 					FreezeContextHandoff(e.store, *resolved, FreezeContextHandoffInput{
