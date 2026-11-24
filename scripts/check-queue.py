@@ -403,6 +403,11 @@ def main():
              "./internal/graph/embedded", "./internal/appinstall", "./internal/harness"),
             ("go", "-C", "app", "vet", "./..."),
             ("go", "-C", "app", "test", "-short", "./..."),
+            # verification/ is a third module: nothing in the other two runs its tests, and the
+            # skill contract it enforces went red unnoticed - a module named for verification
+            # that the gate never verified.
+            ("go", "-C", "verification", "vet", "./..."),
+            ("go", "-C", "verification", "test", "-short", "-count=1", "./..."),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "comments"),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "ownership"),
             ("go", "-C", "backend", "run", "./cmd/graphcheck", "api"),

@@ -636,19 +636,27 @@
         "backend/internal/graph/server_graph_verification_test.go",
         "app/work_verification_test.go"
       ],
-      "drive": ["go -C backend test ./internal/graph -run 'TestVerificationWorkStartsOnlyFromTheConfirmedRevision|TestImplementationRequiresTheExpectedFailureBeforeDispatch|TestGraphVerificationPublishesFailureAndPassForTheSameCheck' && go -C app test . -run 'TestDesktopConfirmsTheVerificationDraftItShows|TestGraphPageShowsVerificationEvidence'"],
+      "drive": [
+        "go -C backend test ./internal/graph -run 'TestVerificationWorkStartsOnlyFromTheConfirmedRevision|TestImplementationRequiresTheExpectedFailureBeforeDispatch|TestGraphVerificationPublishesFailureAndPassForTheSameCheck' && go -C app test . -run 'TestDesktopConfirmsTheVerificationDraftItShows|TestGraphPageShowsVerificationEvidence'"
+      ],
       "command": "go -C backend test ./internal/graph -run 'TestVerificationWorkStartsOnlyFromTheConfirmedRevision|TestImplementationRequiresTheExpectedFailureBeforeDispatch|TestGraphVerificationPublishesFailureAndPassForTheSameCheck' && go -C app test . -run 'TestDesktopConfirmsTheVerificationDraftItShows|TestGraphPageShowsVerificationEvidence'"
     },
     {
       "id": "F-18",
       "title": "RSI 激活与重载",
       "entry": "全局主管工具 apply_rsi_change",
-      "api": ["/api/app/rsi/status", "/api/app/rsi/restart-ack"],
+      "api": [
+        "/api/app/rsi/status",
+        "/api/app/rsi/restart-ack"
+      ],
       "existingTests": [
         "backend/internal/graph/runtime_rsi_apply_activation_test.go",
         "backend/internal/graph/runtime_rsi_app_install_test.go"
       ],
-      "command": "go -C backend test ./internal/graph -count=1 -run 'TestRsiActivationOfAnExistingCommit|TestInstallVerdict'"
+      "command": "go -C backend test ./internal/graph -count=1 -run 'TestRsiActivationOfAnExistingCommit|TestInstallVerdict'",
+      "drive": [
+        "go -C backend test ./internal/graph -count=1 -run 'TestRsiActivationOfAnExistingCommit|TestInstallVerdict'"
+      ]
     }
   ],
   "verifiedAt": "2026-11-17T15:48+08:00",
