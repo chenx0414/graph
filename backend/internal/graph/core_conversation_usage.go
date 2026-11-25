@@ -34,6 +34,8 @@ func TurnFailureText(reason string, kind ...TurnFailureKind) string {
 	return "主 Agent 本轮没有完成回复，消息已保留，可以再发一次重试。" + conversationFailureSuffix(detail)
 }
 
+const EmptyReplyNotice = "本轮模型没有返回任何内容（finish_reason=stop，没有任何文字）。消息已保留，再发一次即可继续。"
+
 var turnFailureOutputKeys = []string{"error", "setupError"}
 
 func TurnFailureReason(result OperationResult) TurnFailure {
@@ -116,6 +118,18 @@ func RecordConversationOutput(store *TaskStore, operation Operation, result Oper
 				State:          MessageStateDone,
 				OperationID:    &operation.Id,
 				Turn:           operation.Attempt,
+			})
+			MarkOperationReplied(store, &operation.Id)
+		} else if reply == "" && output["emptyReply"] == true && !alreadyReplied {
+			AppendMessage(store, MessageInput{
+				ConversationID: conversation.Id,
+				Role:           MessageRoleSystem,
+				Kind:           "notice",
+				Text:           EmptyReplyNotice,
+				State:          MessageStateDone,
+				OperationID:    &operation.Id,
+				Turn:           operation.Attempt,
+				Data:           map[string]any{"source": map[string]any{"form": "notice", "summary": "本轮没有回复"}},
 			})
 			MarkOperationReplied(store, &operation.Id)
 		}

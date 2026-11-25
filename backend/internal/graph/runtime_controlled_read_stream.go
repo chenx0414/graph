@@ -34,6 +34,7 @@ func (stream *controlledStream) readEvents(response *http.Response, remaining in
 		line, err := lines.read(idle - time.Since(lastEvent))
 		if line != "" {
 			trimmed := strings.TrimRight(line, "\r\n")
+			stream.recordRawLine(trimmed)
 			if strings.HasPrefix(trimmed, "data:") {
 				payload := strings.TrimSpace(trimmed[5:])
 				if payload == "[DONE]" {
@@ -66,6 +67,7 @@ func (stream *controlledStream) readEvents(response *http.Response, remaining in
 			break
 		}
 	}
+	stream.terminated = terminated
 	if bodyOpen {
 		stream.cancelRequest()
 	}
@@ -74,6 +76,9 @@ func (stream *controlledStream) readEvents(response *http.Response, remaining in
 	}
 	if failure == nil {
 		failure = stream.brokenToolCall()
+	}
+	if failure != nil {
+		stream.events = append(stream.events, map[string]any{"type": "stream_evidence", "evidence": stream.streamEvidence(failure).Fields()})
 	}
 	replay := failure != nil && remaining > 0 && stream.answeredNothing() && controlledReplayableFailure(failure)
 	usage := evidence.result(stream.api)

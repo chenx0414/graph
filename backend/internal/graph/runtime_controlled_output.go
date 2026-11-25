@@ -332,6 +332,7 @@ func (stream *controlledStream) appendToolArguments(index int, text string) {
 		call = stream.toolCalls[index]
 	}
 	call.arguments.WriteString(text)
+	call.fragments = append(call.fragments, text)
 	block, known := stream.toolCallBlocks[index]
 	if !known {
 		return

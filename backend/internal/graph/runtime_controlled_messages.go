@@ -34,6 +34,7 @@ type controlledToolCall struct {
 	id        string
 	name      string
 	arguments strings.Builder
+	fragments []string
 }
 
 type controlledStream struct {
@@ -63,6 +64,9 @@ type controlledStream struct {
 	requestWrittenAt int64
 	firstDeltaAt     int64
 	lastDeltaAt      int64
+	terminated       bool
+	rawLines         []string
+	rawLinesDropped  int
 }
 
 func (stream *controlledStream) clock() int64 {

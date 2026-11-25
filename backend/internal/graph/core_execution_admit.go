@@ -246,6 +246,9 @@ func (e *Execution) admit(node ExecutionNodeRow, spec NodeSpec, reservation int6
 		if conversation != nil && IsSummaryLeakRetry(intent.Context.PreviousOutput) {
 			parts = append(parts, "上一轮输出了内部会话摘要，没有回答用户。请沿用现有会话，完成上一轮用户的原始请求，只给用户正式答复；不要输出 <analysis>、<summary> 或交接摘要。已完成的调查和工具调用无需重复。")
 		}
+		if conversation != nil && IsUnfinishedToolCalls(intent.Context.PreviousOutput) {
+			parts = append(parts, "上一轮的回复在还有工具调用没完成、或者没有给出文字答复时就停了。本轮不要重述已经查到的内容：有没跑完的工具调用就先补做；否则直接根据已有结果给用户正式答复。")
+		}
 		if len(wakes) > 0 {
 			parts = append(parts, RenderWakes(wakes))
 		}

@@ -53,6 +53,15 @@ func IsSummaryLeakRetry(output any) bool {
 	return code == "session_summary_leak"
 }
 
+func IsUnfinishedToolCalls(output any) bool {
+	record, ok := output.(map[string]any)
+	if !ok || output == nil {
+		return false
+	}
+	code, _ := record["retryCode"].(string)
+	return code == "tool_calls_unfinished"
+}
+
 func IsCompactionNoop(message string) bool {
 	return compactionNoop.MatchString(message)
 }

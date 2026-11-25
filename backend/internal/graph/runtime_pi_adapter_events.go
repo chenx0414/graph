@@ -91,6 +91,9 @@ func (live *piAdapterLiveTurn) livePart(contentIndex int) *piAdapterPart {
 func (live *piAdapterLiveTurn) handle(event map[string]any) {
 	kind, _ := event["type"].(string)
 	switch kind {
+	case "stream_evidence":
+		live.store.Event(live.operation.TaskId, "provider.stream_evidence", event["evidence"])
+		return
 	case "context_reset":
 		live.store.Event(live.operation.TaskId, "session.context_reset", map[string]any{
 			"operationId": live.operation.Id, "nodeId": live.operation.NodeId,
