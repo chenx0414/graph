@@ -19,7 +19,6 @@ func TestTheMachineFailingIsNeverBlamedOnTheAgent(t *testing.T) {
 	for _, output := range []string{
 		`Post "https://api.commandcode.ai/provider/v1/chat/completions": tls: failed to verify certificate: x509: certificate signed by unknown authority`,
 		`Post "https://x/v1/chat/completions": tls: failed to verify certificate: x509: certificate has expired or is not yet valid`,
-		`Session failed after a storage error; close and reopen it`,
 		`The provider cut the arguments of the apply_rsi_change tool call`,
 	} {
 		decision := retryVerdict(output)
@@ -28,6 +27,27 @@ func TestTheMachineFailingIsNeverBlamedOnTheAgent(t *testing.T) {
 		}
 		if strings.Contains(decision.Reason, "不是环境问题") {
 			t.Fatalf("%q must not be reported as the agent's own mistake: %s", output, decision.Reason)
+		}
+	}
+}
+
+// A storage fault of the harness itself is neither the agent's mistake nor a
+// transport problem: re-running the turn runs into the same fault again and
+// spends a model call to find that out.
+func TestAHarnessStorageFaultIsNamedAndNotRerun(t *testing.T) {
+	for _, output := range []string{
+		`Session failed after a storage error; close and reopen it`,
+		`database is locked (5) (SQLITE_BUSY)`,
+	} {
+		decision := retryVerdict(output)
+		if decision.Retry {
+			t.Fatalf("%q repeats itself on the next turn; the claim that it is transient is untested, got %+v", output, decision)
+		}
+		if strings.Contains(decision.Reason, "不是环境问题") {
+			t.Fatalf("%q is the harness's own fault, not the agent's: %s", output, decision.Reason)
+		}
+		if !strings.Contains(decision.Reason, "存储") {
+			t.Fatalf("%q names where the fault is: %s", output, decision.Reason)
 		}
 	}
 }

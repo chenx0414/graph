@@ -33,6 +33,9 @@ func RetryDecision(input struct {
 	if IsDisconnectBeforeReply(input.Output) {
 		return RetryDecisionRecord{Retry: false, Attempt: attempt, Exhausted: false, Reason: "连接在收到任何回复前中断或损坏；传输层已有限次重试，交 main 处理。"}
 	}
+	if IsStorageFailure(input.Output) {
+		return RetryDecisionRecord{Retry: false, Attempt: attempt, Reason: "这是 harness 自己的存储故障，不是对代码或结果的判断；同一刻自动再跑会撞上同一处，等一会儿手动再发可以。"}
+	}
 	if IsCapacityFailure(input.Output) {
 		return RetryDecisionRecord{Retry: false, Attempt: attempt, Exhausted: false, Reason: "provider 已按容量限制的暂停重试过；再重跑整轮只会倍增请求，交 main 处理。"}
 	}
