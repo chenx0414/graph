@@ -3,8 +3,6 @@ package graph
 import (
 	"strings"
 	"sync"
-
-	"database/sql"
 )
 
 type ModuleOperationRequest struct {
@@ -407,7 +405,7 @@ func (runner *GraphRunner) recordUnjudged(moduleId, deliveryId, operationId, rea
 	})
 }
 
-func (runner *GraphRunner) kernelDB() *sql.DB {
+func (runner *GraphRunner) kernelDB() sqlh {
 	return runner.options.Kernel.Store.Db
 }
 

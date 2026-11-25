@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"database/sql"
 )
 
 type TokenBudget struct {
@@ -209,8 +208,8 @@ type CreateRequest struct {
 
 type KernelStore struct {
 	Store                   *TaskStore
-	Db                      *sql.DB
-	DB                      *sql.DB
+	Db                      sqlh
+	DB                      sqlh
 	Content                 *KernelContent
 	moduleTransactionActive bool
 }

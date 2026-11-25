@@ -20,8 +20,8 @@ func TestFleetRunsOneThousandTwentyFourAgentsThroughExecution(t *testing.T) {
 		ChildrenPerAgent: fleetScaleAgents,
 	}
 	taskRuntime := spawnRuntime(t, limits)
-	taskRuntime.store.DB.SetMaxOpenConns(1)
-	taskRuntime.store.DB.SetMaxIdleConns(1)
+	taskRuntime.store.pool.SetMaxOpenConns(1)
+	taskRuntime.store.pool.SetMaxIdleConns(1)
 	taskRuntime.master.Action = "collaborate"
 	taskRuntime.store.SetExecutionLimits(fleetScaleAgents, DefaultProgramExecutions)
 

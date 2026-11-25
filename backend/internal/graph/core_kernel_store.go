@@ -3,7 +3,6 @@ package graph
 import (
 	"strings"
 
-	"database/sql"
 )
 
 func NewKernelStore(store *TaskStore) *KernelStore {
@@ -14,7 +13,7 @@ func NewKernelStore(store *TaskStore) *KernelStore {
 	return kernel
 }
 
-func kernelExecScript(db *sql.DB, script string) {
+func kernelExecScript(db sqlh, script string) {
 	g5Exec(db, script)
 }
 
@@ -93,7 +92,7 @@ func (k *KernelStore) migrate() {
 	}
 }
 
-func kernelColumns(db *sql.DB, table string) map[string]bool {
+func kernelColumns(db sqlh, table string) map[string]bool {
 	out := map[string]bool{}
 	for _, row := range g5Query(db, "PRAGMA table_info("+table+")") {
 		out[g5Str(row["name"])] = true

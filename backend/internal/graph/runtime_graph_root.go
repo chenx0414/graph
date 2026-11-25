@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -42,7 +41,7 @@ func GraphApplicationRoot(moduleURL ...string) string {
 	return filepath.Clean(filepath.Join(filepath.Dir(abs), "..", ".."))
 }
 
-func sqliteRows(db *sql.DB, query string, args ...any) []map[string]any {
+func sqliteRows(db sqlh, query string, args ...any) []map[string]any {
 	rows, err := db.Query(query, args...)
 	if err != nil {
 		panic(err)
@@ -74,7 +73,7 @@ func sqliteRows(db *sql.DB, query string, args ...any) []map[string]any {
 	return out
 }
 
-func sqliteOne(db *sql.DB, query string, args ...any) (map[string]any, bool) {
+func sqliteOne(db sqlh, query string, args ...any) (map[string]any, bool) {
 	rows := sqliteRows(db, query, args...)
 	if len(rows) == 0 {
 		return nil, false
@@ -82,7 +81,7 @@ func sqliteOne(db *sql.DB, query string, args ...any) (map[string]any, bool) {
 	return rows[0], true
 }
 
-func sqliteChanges(db *sql.DB, query string, args ...any) int64 {
+func sqliteChanges(db sqlh, query string, args ...any) int64 {
 	result, err := db.Exec(query, args...)
 	if err != nil {
 		panic(err)

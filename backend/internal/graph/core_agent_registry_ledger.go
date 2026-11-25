@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"database/sql"
 	"encoding/json"
 )
 
@@ -39,7 +38,7 @@ func fleetKey(taskId, nodeId string) string {
 	return taskId + "\x00" + nodeId
 }
 
-func graphTableExists(db *sql.DB, table string) bool {
+func graphTableExists(db sqlh, table string) bool {
 	var name string
 	err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&name)
 	return err == nil

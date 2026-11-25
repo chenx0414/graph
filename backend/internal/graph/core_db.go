@@ -1,10 +1,9 @@
 package graph
 
 import (
-	"database/sql"
 )
 
-func graphDBRow(db *sql.DB, query string, args ...any) (map[string]any, bool) {
+func graphDBRow(db sqlh, query string, args ...any) (map[string]any, bool) {
 	rows := graphDBAll(db, query, args...)
 	if len(rows) == 0 {
 		return nil, false
@@ -12,7 +11,7 @@ func graphDBRow(db *sql.DB, query string, args ...any) (map[string]any, bool) {
 	return rows[0], true
 }
 
-func graphDBAll(db *sql.DB, query string, args ...any) []map[string]any {
+func graphDBAll(db sqlh, query string, args ...any) []map[string]any {
 	rows, err := db.Query(query, args...)
 	if err != nil {
 		panic(err)
@@ -44,7 +43,7 @@ func graphDBAll(db *sql.DB, query string, args ...any) []map[string]any {
 	return out
 }
 
-func graphDBExec(db *sql.DB, query string, args ...any) int64 {
+func graphDBExec(db sqlh, query string, args ...any) int64 {
 	result, err := db.Exec(query, args...)
 	if err != nil {
 		panic(err)

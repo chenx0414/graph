@@ -31,17 +31,23 @@ type TaskRow struct {
 }
 
 type TaskStore struct {
-	DB                *sql.DB
-	Db                *sql.DB
-	Path              string
+	*storeState
+	DB   sqlh
+	Db   sqlh
+	Path string
+	pool *sql.DB
+	inTx bool
+}
+
+type storeState struct {
 	mu                sync.Mutex
 	listeners         []func(string)
 	waiters           []chan struct{}
-	txDepth           int
 	txMu              sync.Mutex
+	txDepth           int
 	agentExecutions   *executionSlotPool
 	programExecutions *executionSlotPool
-	transactionExec func(statement string) error
+	transactionExec   func(statement string) error
 }
 
 func NewTaskStore(db *sql.DB, path string) *TaskStore {
@@ -50,7 +56,7 @@ func NewTaskStore(db *sql.DB, path string) *TaskStore {
 	}
 	MigrateTaskSchema(db)
 	kernelExec(db, taskInvocationTotalsDDL)
-	store := &TaskStore{DB: db, Db: db, Path: path}
+	store := &TaskStore{storeState: &storeState{}, DB: db, Db: db, Path: path, pool: db}
 	store.agentExecutions = newExecutionSlotPool(DefaultAgentExecutions)
 	store.programExecutions = newExecutionSlotPool(DefaultProgramExecutions)
 	return store
@@ -61,7 +67,7 @@ func (s *TaskStore) Close() {
 		return
 	}
 	fleetSnapshotsForget(s)
-	if err := s.DB.Close(); err != nil {
+	if err := s.pool.Close(); err != nil {
 		panic(err)
 	}
 	s.emitChange()

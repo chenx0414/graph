@@ -2,7 +2,6 @@
 package graph
 
 import (
-	"database/sql"
 	"fmt"
 	"path/filepath"
 	"runtime"
@@ -216,7 +215,7 @@ type dbWriteSnapshot struct {
 	bytes      int64
 }
 
-func readDBWriteSnapshot(t testing.TB, db *sql.DB) dbWriteSnapshot {
+func readDBWriteSnapshot(t testing.TB, db sqlh) dbWriteSnapshot {
 	t.Helper()
 	snapshot := dbWriteSnapshot{}
 	snapshot.events = countTableRows(t, db, "events")
@@ -232,7 +231,7 @@ func readDBWriteSnapshot(t testing.TB, db *sql.DB) dbWriteSnapshot {
 	return snapshot
 }
 
-func countTableRows(t testing.TB, db *sql.DB, table string) int64 {
+func countTableRows(t testing.TB, db sqlh, table string) int64 {
 	t.Helper()
 	row := kernelRow(db, "SELECT COUNT(*) AS n FROM "+table)
 	if row == nil {

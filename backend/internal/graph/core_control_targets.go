@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"database/sql"
 )
 
 type ActiveOperation struct {
@@ -21,7 +20,7 @@ func ActiveOperationForNode(store *TaskStore, taskID, nodeID string) *ActiveOper
 	return &ActiveOperation{Id: g5Str(row["id"])}
 }
 
-func g5Query(db *sql.DB, query string, args ...any) []map[string]any {
+func g5Query(db sqlh, query string, args ...any) []map[string]any {
 	rows, err := db.Query(query, args...)
 	if err != nil {
 		panic(err)
@@ -56,7 +55,7 @@ func g5Query(db *sql.DB, query string, args ...any) []map[string]any {
 	return out
 }
 
-func g5One(db *sql.DB, query string, args ...any) (map[string]any, bool) {
+func g5One(db sqlh, query string, args ...any) (map[string]any, bool) {
 	rows := g5Query(db, query, args...)
 	if len(rows) == 0 {
 		return nil, false
@@ -64,7 +63,7 @@ func g5One(db *sql.DB, query string, args ...any) (map[string]any, bool) {
 	return rows[0], true
 }
 
-func g5Exec(db *sql.DB, query string, args ...any) (changes, lastID int64) {
+func g5Exec(db sqlh, query string, args ...any) (changes, lastID int64) {
 	res, err := db.Exec(query, args...)
 	if err != nil {
 		panic(err)

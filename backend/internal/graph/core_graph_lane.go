@@ -1,7 +1,5 @@
 package graph
 
-import "database/sql"
-
 type GraphLaneOptions struct {
 	Kernel          *KernelStore
 	SettleWorkspace func(executionId string)
@@ -164,7 +162,7 @@ func (lane *GraphLane) runGraph(graphId string) RunResult {
 	return result
 }
 
-func (lane *GraphLane) db() *sql.DB {
+func (lane *GraphLane) db() sqlh {
 	return lane.options.Kernel.Store.Db
 }
 

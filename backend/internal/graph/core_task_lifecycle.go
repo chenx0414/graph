@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"database/sql"
 	"errors"
 )
 
@@ -347,7 +346,7 @@ func (s *TaskStore) ArchivedTaskCount() int {
 	return int(kernelInt(row["n"]))
 }
 
-func deleteIgnoringRefusal(db *sql.DB, query string, args ...any) (removed int64, refused bool) {
+func deleteIgnoringRefusal(db sqlh, query string, args ...any) (removed int64, refused bool) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			removed, refused = 0, true

@@ -125,7 +125,7 @@ func (s *TaskStore) ApplyRetention(options RetentionOptions) RetentionApplied {
 	return applied
 }
 
-func applyRetentionLocked(db *sql.DB, sqlText retentionDoomed) (RetentionApplied, error) {
+func applyRetentionLocked(db sqlh, sqlText retentionDoomed) (RetentionApplied, error) {
 	events, err := execChanges(db, fmt.Sprintf("DELETE FROM events WHERE cursor IN (SELECT id FROM (%s))", sqlText.events))
 	if err != nil {
 		return RetentionApplied{}, err
@@ -141,7 +141,7 @@ func applyRetentionLocked(db *sql.DB, sqlText retentionDoomed) (RetentionApplied
 	return RetentionApplied{Events: events, Capabilities: capabilities, Handoffs: handoffs}, nil
 }
 
-func execChanges(db *sql.DB, query string) (int, error) {
+func execChanges(db sqlh, query string) (int, error) {
 	result, err := db.Exec(query)
 	if err != nil {
 		return 0, err

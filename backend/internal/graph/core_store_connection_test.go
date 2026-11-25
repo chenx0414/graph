@@ -16,7 +16,7 @@ func TestEveryStoreRunsOnASingleConnection(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tasks.sqlite")
 
 	store := openTaskStore(t, path)
-	if limit := store.DB.Stats().MaxOpenConnections; limit != 1 {
+	if limit := store.pool.Stats().MaxOpenConnections; limit != 1 {
 		t.Fatalf("the store the tests use allows %d connections; transaction control needs exactly one", limit)
 	}
 
