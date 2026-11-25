@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/chenx0414/graph/backend/internal/appinstall"
 	"github.com/chenx0414/graph/backend/internal/gate"
 )
 
@@ -69,21 +70,7 @@ func usage() {
 }
 
 func repoRoot() (string, error) {
-	current, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	directory := current
-	for {
-		if info, statErr := os.Stat(filepath.Join(directory, ".git")); statErr == nil && info.IsDir() {
-			return directory, nil
-		}
-		parent := filepath.Dir(directory)
-		if parent == directory {
-			return current, nil
-		}
-		directory = parent
-	}
+	return appinstall.RepoRoot()
 }
 
 func git(root string, args ...string) (string, error) {

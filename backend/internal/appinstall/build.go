@@ -112,3 +112,21 @@ func directorySize(directory string) (int64, error) {
 	})
 	return total, err
 }
+
+func RepoRoot() (string, error) {
+	current, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	directory := current
+	for {
+		if _, statErr := os.Stat(filepath.Join(directory, ".git")); statErr == nil {
+			return directory, nil
+		}
+		parent := filepath.Dir(directory)
+		if parent == directory {
+			return current, nil
+		}
+		directory = parent
+	}
+}

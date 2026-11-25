@@ -56,16 +56,12 @@ func (s *TaskStore) IsTransaction() bool {
 	return s.InTransaction()
 }
 
-// InTransaction reports whether this store is the handle a transaction body was given. It is a
-// property of the handle, not of the store: a second goroutine holding the pool store is not inside
-// the first goroutine's transaction and must not write on its connection.
+// InTransaction is a property of this handle: a goroutine holding the pool store is not inside another's transaction.
 func (s *TaskStore) InTransaction() bool {
 	return s.inTx
 }
 
-// Transaction runs a body on a connection it owns. The body receives the store as seen from
-// inside that transaction, and the transaction commits or rolls back on the same connection, so a
-// statement from another goroutine can never end up inside it.
+// Transaction runs a body on a connection it owns, so no other goroutine's statement can land inside it.
 func (s *TaskStore) Transaction(action any) any {
 	if s.inTx {
 		return storeTransactionAction(s, action)

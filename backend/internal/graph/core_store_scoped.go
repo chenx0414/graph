@@ -1,11 +1,6 @@
 package graph
 
-// A transaction owns one connection. Code that runs inside its body must reach the database
-// through that connection, so every type that carries a store can be rebound onto the store the
-// transaction owns. A holder that only forwards statements (a kernel, an artifact workspace) is
-// rebound field by field so its own store is the transaction's; a holder that also keeps live
-// state (an execution's counters, a git integration's mutex and caches) is not copied at all,
-// because the copy's updates would be lost and a copied mutex is not a lock.
+// A holder that only forwards statements is rebound onto the transaction's store; one that keeps live state is not copied.
 
 func (k *KernelStore) scoped(tx *TaskStore) *KernelStore {
 	scoped := *k
@@ -39,8 +34,7 @@ func (g *TaskSendGate) scoped(tx *TaskStore) *TaskSendGate {
 	return &scoped
 }
 
-// GitIntegration keeps a mutex and two caches, so it is never copied: a scoped view carries only
-// the store, and the code that needs the caches goes on using the original.
+// GitIntegration keeps a mutex and caches, so its scoped view carries the store only.
 func (g *GitIntegration) scoped(tx *TaskStore) *GitIntegration {
 	return &GitIntegration{store: tx, stateDir: g.stateDir}
 }
@@ -51,9 +45,7 @@ func (l *OperationLifecycle) scoped(tx *TaskStore) *OperationLifecycle {
 	return &scoped
 }
 
-// TaskRuntime carries a mutex and a dozen pointers, so it is rebuilt field by field: the store and
-// the holders that only forward statements move onto the transaction, while everything that owns
-// live state (an execution's counters, git's locks, the scheduler) stays the same object.
+// TaskRuntime is rebuilt field by field: statements move onto the transaction, live state stays shared.
 func (r *TaskRuntime) scoped(tx *TaskStore) *TaskRuntime {
 	scoped := &TaskRuntime{
 		options:         r.options,
