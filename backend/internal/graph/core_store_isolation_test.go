@@ -116,3 +116,34 @@ func TestConcurrentTransactionsAndPlainWritesKeepEveryRow(t *testing.T) {
 		}
 	}
 }
+
+// Nested transactions must join the one already open instead of waiting for the connection it
+// holds, and a helper built outside the transaction must write where the transaction is. Both
+// shapes deadlocked while an open transaction could hand its body the store's pool.
+func TestNestedTransactionsJoinInsteadOfWaiting(t *testing.T) {
+	store := openTaskStore(t, filepath.Join(t.TempDir(), "isolation-nested.sqlite"))
+	defer store.Close()
+	kernelExec(store.DB, "INSERT INTO projects(id,root,grants) VALUES('p','/tmp/isolation-nested','[]')")
+	kernelExec(store.DB, "INSERT INTO tasks(id,project_id,request,created_seq,phase) VALUES('t','p','r',1,'working')")
+	kernel := NewKernelStore(store)
+
+	store.Transaction(func(tx *TaskStore) any {
+		tx.Event("t", "outer", map[string]any{"n": 1})
+		// A nested transaction through the same handle joins this one.
+		tx.Transaction(func(inner *TaskStore) any {
+			inner.Event("t", "inner", map[string]any{"n": 2})
+			return nil
+		})
+		// A kernel rebuilt from the handle writes on the same connection.
+		NewKernelStore(tx).Store.Event("t", "kernel", map[string]any{"n": 3})
+		return nil
+	})
+	for _, kind := range []string{"outer", "inner", "kernel"} {
+		if got := kernelInt(kernelRow(store.DB, "SELECT COUNT(*) AS c FROM events WHERE type=?", kind)["c"]); got != 1 {
+			t.Fatalf("%s kept %d row(s)", kind, got)
+		}
+	}
+	if kernel.Store.InTransaction() {
+		t.Fatal("the pool store must be outside the transaction once it has ended")
+	}
+}
