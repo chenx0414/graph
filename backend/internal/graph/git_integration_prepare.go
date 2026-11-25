@@ -285,10 +285,10 @@ func (integration *GitIntegration) PrepareTask(taskId, targetBranch string) {
 	if head := RevParse(integrationPath, "HEAD"); head != nil {
 		sha = *head
 	}
-	integration.store.Transaction(func() any {
-		integration.store.SetTaskIntegration(taskId, branch, sha, *targetSha)
-		ReplaceIntegrationWorktree(integration.store, taskId, integrationPath, branch)
-		integration.store.Event(taskId, "git.prepared", map[string]any{"branch": branch, "targetBranch": targetBranch, "targetSha": *targetSha})
+	integration.store.Transaction(func(tx *TaskStore) any {
+		tx.SetTaskIntegration(taskId, branch, sha, *targetSha)
+		ReplaceIntegrationWorktree(tx, taskId, integrationPath, branch)
+		tx.Event(taskId, "git.prepared", map[string]any{"branch": branch, "targetBranch": targetBranch, "targetSha": *targetSha})
 		return nil
 	})
 }

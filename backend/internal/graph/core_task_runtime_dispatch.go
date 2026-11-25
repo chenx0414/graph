@@ -51,7 +51,8 @@ func (runtime *TaskRuntime) SyncProjects() {
 	runtime.ensureOpen()
 	configured := runtime.configuredProjects()
 	runtime.CheckProjects(configured)
-	runtime.store.Transaction(func() any {
+	runtime.store.Transaction(func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		for _, project := range configured {
 			root, err := filepath.Abs(project.Root)
 			if err != nil {
@@ -78,7 +79,8 @@ func (runtime *TaskRuntime) RecoverMasters() int {
 		return 0
 	}
 	created := 0
-	runtime.store.Transaction(func() any {
+	runtime.store.Transaction(func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		pending := kernelRows(runtime.store.Db, "SELECT id, project_id, phase FROM tasks WHERE "+taskPhaseIn("phase", PhaseDiscussing, PhaseChatting)+" ORDER BY created_seq")
 		allowed := runtime.allowedProjects()
 		recoverable := []map[string]any{}

@@ -29,7 +29,8 @@ func (user *TaskRuntimeUser) Begin(input TaskRuntimeBeginInput) Receipt {
 	runtime.ensureOpen()
 	result := runtime.store.Command("user", input.RequestId, map[string]any{
 		"type": "begin", "projectId": input.ProjectId, "request": input.Request,
-	}, func() any {
+	}, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		if strings.TrimSpace(input.Request) == "" || kernelRow(runtime.store.Db, "SELECT id FROM projects WHERE id=?", input.ProjectId) == nil {
 			Raise("invalid_input", "A known project and nonempty request are required")
 		}
@@ -116,7 +117,8 @@ func (task *TaskRuntimeTask) setPaused(paused bool, requestId string) (Receipt, 
 	stoppedMaster := false
 	result := runtime.store.Command("user", requestId, map[string]any{
 		"type": taskRuntimePauseType(paused), "taskId": task.taskId,
-	}, func() any {
+	}, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		runtime.store.SetTaskPaused(task.taskId, paused)
 		if paused {
 			stoppedMaster = pauseMasterTurn(runtime, task.taskId, requestId)
@@ -157,7 +159,7 @@ func (task *TaskRuntimeTask) Abandon(requestId string, reason *string) Receipt {
 	runtime.ensureOpen()
 	result := runtime.store.Command("user", requestId, map[string]any{
 		"type": "abandon", "taskId": task.taskId, "reason": reasonValue(reason),
-	}, func() any {
+	}, func(tx *TaskStore) any {
 		return map[string]any{
 			"taskId": task.taskId,
 			"cursor": runtime.execution.Abandon(task.taskId, reason, false),
@@ -180,7 +182,8 @@ func (task *TaskRuntimeTask) Answer(questionId string, answer Answer, requestId 
 	runtime.ensureOpen()
 	result := runtime.store.Command("user", requestId, map[string]any{
 		"type": "answer", "taskId": task.taskId, "questionId": questionId, "answer": answer,
-	}, func() any {
+	}, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		if answer.Type == "pause" {
 			runtime.store.SetTaskPaused(task.taskId, true)
 			pauseMasterTurn(runtime, task.taskId, requestId)
@@ -209,7 +212,8 @@ func (task *TaskRuntimeTask) Say(text string, requestId string) Receipt {
 	runtime.ensureOpen()
 	result := runtime.store.Command("user", requestId, map[string]any{
 		"type": "say", "taskId": task.taskId, "text": text,
-	}, func() any {
+	}, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		current := runtime.store.Task(task.taskId)
 		if strings.TrimSpace(text) == "" {
 			Raise("invalid_input", "A nonempty message is required")
@@ -254,7 +258,8 @@ func (task *TaskRuntimeTask) Accept(input TaskRuntimeAcceptInput) Receipt {
 	result := runtime.store.Command("user", input.RequestId, map[string]any{
 		"type": "accept", "taskId": task.taskId, "proposalVersion": input.ProposalVersion,
 		"draftRevision": input.DraftRevision, "targetBranch": input.TargetBranch,
-	}, func() any {
+	}, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		current := runtime.store.Task(task.taskId)
 		row := kernelRow(runtime.store.Db, "SELECT requirement_version,spec,draft_revision,archived_at,deleted_at FROM proposals WHERE task_id=? AND version=?",
 			task.taskId, input.ProposalVersion)

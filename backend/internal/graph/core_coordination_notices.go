@@ -73,7 +73,8 @@ func RecordSupervisorNotice(store *TaskStore, taskID string, notice SupervisorNo
 	}
 	return store.Command("supervisor:notice:"+taskID, delivery, map[string]any{
 		"text": text, "milestone": milestone, "workId": workID, "evidence": evidence, "projectId": projectID,
-	}, func() any {
+	}, func(tx *TaskStore) any {
+		store := tx
 		body := "[来自项目主管的通知]\n项目: " + projectID
 		if workID != "" {
 			body += "\n工作: " + workID

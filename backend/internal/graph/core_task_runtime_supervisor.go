@@ -37,7 +37,8 @@ func (supervisor *TaskRuntimeSupervisor) ControlTask(input TaskRuntimeControlInp
 			payload["sourceMessageId"] = input.SourceMessageID
 			payload["instruction"] = input.Instruction
 		}
-		receipt := runtime.store.Command(scope, input.RequestId, payload, func() any {
+		receipt := runtime.store.Command(scope, input.RequestId, payload, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 			if !paused {
 				requireArchiveResumeInstruction(runtime.store, supervisor.taskId, target, input.SourceMessageID, input.Instruction)
 			}
@@ -85,7 +86,7 @@ func (supervisor *TaskRuntimeSupervisor) ControlTask(input TaskRuntimeControlInp
 		if reason == "" {
 			Raise("invalid_input", "Abandoning a task needs a recorded reason")
 		}
-		return runtime.store.Command(scope, input.RequestId, map[string]any{"type": "abandon", "taskId": target, "reason": reason}, func() any {
+		return runtime.store.Command(scope, input.RequestId, map[string]any{"type": "abandon", "taskId": target, "reason": reason}, func(tx *TaskStore) any {
 			return map[string]any{
 				"taskId": target,
 				"cursor": runtime.execution.Abandon(target, &reason, true),
@@ -93,7 +94,8 @@ func (supervisor *TaskRuntimeSupervisor) ControlTask(input TaskRuntimeControlInp
 		})
 	case "archive", "restore":
 		archived := input.Action == "archive"
-		return runtime.store.Command(scope, input.RequestId, map[string]any{"type": input.Action, "taskId": target}, func() any {
+		return runtime.store.Command(scope, input.RequestId, map[string]any{"type": input.Action, "taskId": target}, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 			changed := runtime.store.RestoreTask(target)
 			if archived {
 				changed = runtime.store.ArchiveTask(target)
@@ -104,7 +106,8 @@ func (supervisor *TaskRuntimeSupervisor) ControlTask(input TaskRuntimeControlInp
 			return map[string]any{"taskId": target, "archived": archived, "listed": runtime.store.ListedTaskCount()}
 		})
 	case "delete":
-		return runtime.store.Command(scope, input.RequestId, map[string]any{"type": "delete", "taskId": target}, func() any {
+		return runtime.store.Command(scope, input.RequestId, map[string]any{"type": "delete", "taskId": target}, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 			removed, err := runtime.store.DeleteTask(target)
 			if err != nil {
 				Raise("invalid_state", err.Error())
@@ -134,7 +137,8 @@ func (supervisor *TaskRuntimeSupervisor) ControlTask(input TaskRuntimeControlInp
 			Raise("steering_unavailable", "Node "+nodeId+" has no running turn to steer")
 		}
 		steered := runtime.execution.Steer(active.Id, text)
-		return runtime.store.Transaction(func() any {
+		return runtime.store.Transaction(func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 			return map[string]any{
 				"taskId":      target,
 				"nodeId":      nodeId,
@@ -200,7 +204,8 @@ func (supervisor *TaskRuntimeSupervisor) Propose(input TaskRuntimeProposeInput) 
 	}
 	result := runtime.store.Command("supervisor:"+supervisor.taskId, input.RequestId, map[string]any{
 		"type": "propose", "proposal": proposal, "newVersion": input.NewVersion,
-	}, func() any {
+	}, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		task := runtime.store.Task(supervisor.taskId)
 		if task.AcceptedProposal != nil {
 			Raise("requirements_locked", "This task already has a confirmed graph: revise the running graph with graph_patch instead of proposing a new draft")
@@ -317,7 +322,8 @@ type TaskRuntimeWithdrawInput struct {
 func (supervisor *TaskRuntimeSupervisor) WithdrawDraft(input TaskRuntimeWithdrawInput) map[string]any {
 	runtime := supervisor.runtime
 	runtime.ensureOpen()
-	result := runtime.store.Command("supervisor:"+supervisor.taskId, input.RequestId, map[string]any{"type": "withdraw", "proposalVersion": input.ProposalVersion}, func() any {
+	result := runtime.store.Command("supervisor:"+supervisor.taskId, input.RequestId, map[string]any{"type": "withdraw", "proposalVersion": input.ProposalVersion}, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		task := runtime.store.Task(supervisor.taskId)
 		row := kernelRow(runtime.store.Db, "SELECT version FROM proposals WHERE task_id=? AND version=?", supervisor.taskId, input.ProposalVersion)
 		if row == nil {

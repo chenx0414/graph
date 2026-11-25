@@ -39,7 +39,8 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 		"attachments":   attachments,
 		"model":         input.Model,
 		"thinkingLevel": input.ThinkingLevel,
-	}, func() any {
+	}, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		text := ""
 		if input.Text != nil {
 			text = strings.TrimSpace(*input.Text)

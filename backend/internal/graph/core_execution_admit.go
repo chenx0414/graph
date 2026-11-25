@@ -361,9 +361,10 @@ func (e *Execution) admit(node ExecutionNodeRow, spec NodeSpec, reservation int6
 				"requiredFacts": []any{},
 				"policy":        "none",
 			}
-			e.store.Transaction(func() any {
-				e.store.Event(node.TaskId, "context.rejected", map[string]any{"nodeId": node.Id, "data": data})
-				e.block(node, "context_rejected", data, nil)
+			e.store.Transaction(func(tx *TaskStore) any {
+				lifecycle := e.lifecycle.scoped(tx)
+				tx.Event(node.TaskId, "context.rejected", map[string]any{"nodeId": node.Id, "data": data})
+				lifecycle.Block(node.TaskId, node.Id, "context_rejected", data, nil)
 				return nil
 			})
 			return Operation{}, false

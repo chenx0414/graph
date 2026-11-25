@@ -118,7 +118,7 @@ func (s *TaskStore) ApplyRetention(options RetentionOptions) RetentionApplied {
 		run()
 		return applied
 	}
-	s.Transaction(func() any {
+	s.Transaction(func(tx *TaskStore) any {
 		run()
 		return nil
 	})

@@ -58,7 +58,8 @@ func (conversations *TaskRuntimeConversations) Archive(conversationId, requestId
 	if conversation.Role == ConversationGlobal || conversation.Role == ConversationProject {
 		Raise("invalid_input", "A supervisor thread cannot be archived as a conversation")
 	}
-	result := runtime.store.Command("conversation:"+conversationId, requestId, map[string]any{"type": "archive"}, func() any {
+	result := runtime.store.Command("conversation:"+conversationId, requestId, map[string]any{"type": "archive"}, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		now := NowMillis()
 		if conversation.ArchivedAt == nil {
 			runtime.store.ArchiveConversation(conversationId, now)
@@ -85,7 +86,8 @@ func (conversations *TaskRuntimeConversations) Unarchive(conversationId, request
 	runtime := conversations.runtime
 	runtime.ensureOpen()
 	conversation := ConversationRowOf(runtime.store, conversationId)
-	result := runtime.store.Command("conversation:"+conversationId, requestId, map[string]any{"type": "unarchive"}, func() any {
+	result := runtime.store.Command("conversation:"+conversationId, requestId, map[string]any{"type": "unarchive"}, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		if conversation.ArchivedAt != nil {
 			runtime.store.RestoreConversation(conversationId)
 		}
@@ -118,7 +120,8 @@ func (conversations *TaskRuntimeConversations) Chat(conversationId string, input
 	attachments := CleanAttachments(input.Attachments)
 	result := runtime.store.Command("conversation:"+conversationId, input.RequestId, map[string]any{
 		"type": "chat", "text": input.Text, "attachments": attachments, "command": input.Command, "source": input.Source,
-	}, func() any {
+	}, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		conversation = ConversationRowOf(runtime.store, conversationId)
 		if conversation.Role == ConversationHistory {
 			Raise("invalid_input", "Historical conversations are read-only")
@@ -198,7 +201,8 @@ func (conversations *TaskRuntimeConversations) Bind(conversationId, projectId, r
 		Raise("invalid_input", "The project is no longer part of the current configuration")
 	}
 	runtime.git.RequirePrepared(projectId)
-	result := runtime.store.Command("conversation:"+conversationId, requestId, map[string]any{"type": "bind", "projectId": projectId}, func() any {
+	result := runtime.store.Command("conversation:"+conversationId, requestId, map[string]any{"type": "bind", "projectId": projectId}, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		previous := conversation.ProjectId
 		if previous != nil && *previous == projectId {
 			return map[string]any{"conversationId": conversationId, "taskId": conversation.AnchorTaskId, "changed": false, "cursor": nil}

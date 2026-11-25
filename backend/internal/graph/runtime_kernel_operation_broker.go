@@ -164,7 +164,7 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 		id = previous.Id
 	}
 	created := NowMillis()
-	kernel.Store.Transaction(func() any {
+	kernel.Store.Transaction(func(tx *TaskStore) any {
 		request := kernel.Content.Encode(map[string]any{
 			"operation": operation, "inputs": options.Inputs, "workspace": options.Workspace,
 		})
@@ -398,7 +398,7 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 		evaluated.VerificationCommit = commit
 		evaluated.VerificationTarget = verificationTarget
 	}
-	kernel.Store.Transaction(func() any {
+	kernel.Store.Transaction(func(tx *TaskStore) any {
 		kernel.SettleModuleOperation(id, kernel.Content.Encode(evaluated), recordDigest, NowMillis())
 		return nil
 	})

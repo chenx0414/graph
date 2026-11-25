@@ -124,7 +124,8 @@ func (runtime *TaskRuntime) settlePigCompletion(operation Operation, execution p
 
 func (runtime *TaskRuntime) reportPigRecoveryBlocked(operation Operation, reason string) {
 	message := "The interrupted turn could not be sent again: " + reason
-	runtime.store.Transaction(func() any {
+	runtime.store.Transaction(func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		runtime.store.Event(operation.TaskId, "graph.recovery.blocked", map[string]any{
 			"operationId": operation.Id, "nodeId": operation.NodeId, "reason": message,
 		})
@@ -134,7 +135,8 @@ func (runtime *TaskRuntime) reportPigRecoveryBlocked(operation Operation, reason
 }
 
 func (runtime *TaskRuntime) reattachPigExecution(operation Operation, execution pigkernel.FrozenExecution) {
-	runtime.store.Transaction(func() any {
+	runtime.store.Transaction(func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		runtime.store.Event(operation.TaskId, "graph.recovery.attempted", map[string]any{
 			"operationId": operation.Id, "nodeId": operation.NodeId,
 		})

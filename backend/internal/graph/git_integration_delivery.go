@@ -47,8 +47,8 @@ func (integration *GitIntegration) recheckAgainstTarget(taskId, integrationPath,
 	if !moved.Ok {
 		return GitDeliverResult{Status: "blocked", Data: map[string]any{"kind": "git_conflict", "conflicts": moved.Conflicts, "reason": "Target branch changed"}}
 	}
-	integration.store.Transaction(func() any {
-		integration.store.SetTaskIntegrationAndTarget(taskId, moved.Sha, targetSha)
+	integration.store.Transaction(func(tx *TaskStore) any {
+		tx.SetTaskIntegrationAndTarget(taskId, moved.Sha, targetSha)
 		return nil
 	})
 	return GitDeliverResult{Status: "recheck"}

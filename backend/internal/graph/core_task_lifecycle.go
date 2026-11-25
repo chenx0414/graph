@@ -245,7 +245,8 @@ func (s *TaskStore) RestoreTask(taskID string) bool {
 }
 
 func (s *TaskStore) archiveOrRestore(taskID string, at int64) bool {
-	return s.Transaction(func() any {
+	return s.Transaction(func(tx *TaskStore) any {
+		s := tx
 		row := kernelRow(s.Db, "SELECT phase FROM tasks WHERE id=? AND deleted_at IS NULL", taskID)
 		if row == nil {
 			return false
@@ -267,7 +268,8 @@ func (s *TaskStore) archiveOrRestore(taskID string, at int64) bool {
 }
 
 func (s *TaskStore) DeleteTask(taskID string) (DeletedTask, error) {
-	result := s.Transaction(func() any {
+	result := s.Transaction(func(tx *TaskStore) any {
+		s := tx
 		row := kernelRow(s.Db, "SELECT phase FROM tasks WHERE id=?", taskID)
 		if row == nil {
 			return DeletedTask{}

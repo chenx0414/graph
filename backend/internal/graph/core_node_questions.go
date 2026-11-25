@@ -6,7 +6,8 @@ func (k *KernelStore) RecordNodeQuestion(taskID, nodeID string, question PiAdapt
 	if active == nil {
 		Raise("invalid_execution", "A running execution is required")
 	}
-	k.Store.Command("node-question:"+taskID+":"+nodeID, question.RequestID, map[string]any{"executionId": active.Id, "question": request}, func() any {
+	k.Store.Command("node-question:"+taskID+":"+nodeID, question.RequestID, map[string]any{"executionId": active.Id, "question": request}, func(tx *TaskStore) any {
+		k := k.scoped(tx)
 		execution := k.RunningExecution(taskID, nodeID)
 		if execution == nil || execution.Id != active.Id || execution.SubmissionId != nil {
 			Raise("invalid_execution", "A running unsubmitted execution is required")
@@ -65,7 +66,8 @@ func (k *KernelStore) HasRecordedNodeQuestion(executionID string) bool {
 }
 
 func (k *KernelStore) BlockRecordedNodeQuestion(executionID, reason string) {
-	k.Store.Transaction(func() any {
+	k.Store.Transaction(func(tx *TaskStore) any {
+		k := k.scoped(tx)
 		row := kernelRow(k.Db, "SELECT task_id,node_id,queue_seq FROM node_questions WHERE execution_id=? AND state='recorded'", executionID)
 		if row == nil {
 			return nil
@@ -81,7 +83,8 @@ func (k *KernelStore) BlockRecordedNodeQuestion(executionID, reason string) {
 }
 
 func (k *KernelStore) ParkNodeQuestion(executionID string) {
-	k.Store.Transaction(func() any {
+	k.Store.Transaction(func(tx *TaskStore) any {
+		k := k.scoped(tx)
 		row := kernelRow(k.Db, "SELECT * FROM node_questions WHERE execution_id=? AND state='recorded'", executionID)
 		if row == nil {
 			return nil

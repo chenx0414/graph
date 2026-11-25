@@ -14,7 +14,8 @@ func RetireLegacyGraphs(store *TaskStore) {
 	if len(candidates) == 0 {
 		return
 	}
-	store.Transaction(func() any {
+	store.Transaction(func(tx *TaskStore) any {
+		store := tx
 		for _, row := range candidates {
 			if row["id"] == nil {
 				panic("retired graph id is null")

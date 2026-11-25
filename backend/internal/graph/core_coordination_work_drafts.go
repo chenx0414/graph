@@ -22,7 +22,8 @@ func (runtime *TaskRuntime) PutWorkDraft(workID string, input WorkDraftInput, re
 	if !jsSafeInteger(input.Proposal["requirementVersion"]) || int64(numberValue(input.Proposal["requirementVersion"])) != input.WorkRevision {
 		Raise("stale_work", "The proposal must name the same work revision")
 	}
-	result := runtime.store.Command("work:draft:"+workID, requestID, input, func() any {
+	result := runtime.store.Command("work:draft:"+workID, requestID, input, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		work := runtime.store.workInTransaction(workID)
 		if work.Revision != input.WorkRevision || (work.State != "clarifying" && work.State != "ready" && work.State != "dispatched") {
 			Raise("stale_work", "The work changed or is not accepting a draft")
@@ -67,7 +68,8 @@ func (runtime *TaskRuntime) PutWorkDraft(workID string, input WorkDraftInput, re
 
 func (runtime *TaskRuntime) ChangeWorkDraft(workID string, input WorkDraftAction, requestID string) WorkDraft {
 	runtime.ensureOpen()
-	result := runtime.store.Command("work:draft-action:"+workID, requestID, input, func() any {
+	result := runtime.store.Command("work:draft-action:"+workID, requestID, input, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		work := runtime.store.workInTransaction(workID)
 		runtime.store.setWorkDraftState(workID, input.Version, input.ExpectedDraftRevision, input.Action, NowMillis())
 		conversation := ConversationRowOf(runtime.store, work.ConversationID)

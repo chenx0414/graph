@@ -81,7 +81,8 @@ func (k *KernelStore) ensureNodeState(taskID, nodeID string) {
 }
 
 func (k *KernelStore) NoteNodeAttempt(taskID, nodeID string) {
-	k.Store.Transaction(func() any {
+	k.Store.Transaction(func(tx *TaskStore) any {
+		k := k.scoped(tx)
 		k.ensureNodeState(taskID, nodeID)
 		g5Exec(k.Db, "UPDATE kernel_node_state SET attempts=attempts+1 WHERE task_id=? AND node_id=?", taskID, nodeID)
 		return nil
@@ -89,7 +90,8 @@ func (k *KernelStore) NoteNodeAttempt(taskID, nodeID string) {
 }
 
 func (k *KernelStore) NoteNodeResubmit(taskID, nodeID string, allowed int) {
-	k.Store.Transaction(func() any {
+	k.Store.Transaction(func(tx *TaskStore) any {
+		k := k.scoped(tx)
 		k.ensureNodeState(taskID, nodeID)
 		used := k.NodeState(taskID, nodeID).ResubmitsUsed
 		if used >= allowed {
@@ -120,7 +122,8 @@ func (k *KernelStore) SetNodeQueuePausedInCurrentTransaction(taskID, nodeID stri
 }
 
 func (k *KernelStore) ConfigureNodeRetries(taskID, nodeID string, config NodeRetryConfig) {
-	k.Store.Transaction(func() any {
+	k.Store.Transaction(func(tx *TaskStore) any {
+		k := k.scoped(tx)
 		k.ensureNodeState(taskID, nodeID)
 		if config.RetriesAllowed != nil {
 			g5Exec(k.Db, "UPDATE kernel_node_state SET retries_allowed=? WHERE task_id=? AND node_id=?", *config.RetriesAllowed, taskID, nodeID)
@@ -133,7 +136,8 @@ func (k *KernelStore) ConfigureNodeRetries(taskID, nodeID string, config NodeRet
 }
 
 func (k *KernelStore) NoteNodeRebind(taskID, nodeID string) {
-	k.Store.Transaction(func() any {
+	k.Store.Transaction(func(tx *TaskStore) any {
+		k := k.scoped(tx)
 		k.ensureNodeState(taskID, nodeID)
 		g5Exec(k.Db, "UPDATE kernel_node_state SET rebinds=rebinds+1 WHERE task_id=? AND node_id=?", taskID, nodeID)
 		return nil

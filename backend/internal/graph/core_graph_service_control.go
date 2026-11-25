@@ -120,29 +120,31 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 			if !known {
 				Raise("invalid_input", "Pause/resume requires a target in the current graph definition")
 			}
-			service.kernel.Store.Transaction(func() any {
+			service.kernel.Store.Transaction(func(tx *TaskStore) any {
+		kernel := service.kernel.scoped(tx)
 				if !paused {
-					requireProjectActive(service.kernel.Store, service.kernel.Store.Task(input.GraphId).ProjectID)
+					requireProjectActive(kernel.Store, kernel.Store.Task(input.GraphId).ProjectID)
 					if input.AgentTaskID != "" {
-						requireArchiveResumeInstruction(service.kernel.Store, input.AgentTaskID, input.GraphId, input.SourceMessageID, input.Instruction)
+						requireArchiveResumeInstruction(kernel.Store, input.AgentTaskID, input.GraphId, input.SourceMessageID, input.Instruction)
 					}
 				}
-				service.kernel.SetQuestionManualPause(input.GraphId, target, paused)
-				service.kernel.SetNodeQueuePausedInCurrentTransaction(input.GraphId, target, paused)
+				kernel.SetQuestionManualPause(input.GraphId, target, paused)
+				kernel.SetNodeQueuePausedInCurrentTransaction(input.GraphId, target, paused)
 				if !paused {
-					service.kernel.UnblockNode(input.GraphId, target)
+					kernel.UnblockNode(input.GraphId, target)
 				}
-				service.kernel.SetNativePause(input.GraphId, paused, target, 0)
+				kernel.SetNativePause(input.GraphId, paused, target, 0)
 				return nil
 			})
 			return graph.State()
 		}
-		service.kernel.Store.Transaction(func() any {
+		service.kernel.Store.Transaction(func(tx *TaskStore) any {
+		kernel := service.kernel.scoped(tx)
 			if !paused && input.AgentTaskID != "" {
-				requireArchiveResumeInstruction(service.kernel.Store, input.AgentTaskID, input.GraphId, input.SourceMessageID, input.Instruction)
+				requireArchiveResumeInstruction(kernel.Store, input.AgentTaskID, input.GraphId, input.SourceMessageID, input.Instruction)
 			}
-			service.kernel.Store.SetTaskPaused(input.GraphId, paused)
-			service.kernel.SetNativePause(input.GraphId, paused, "", 0)
+			kernel.Store.SetTaskPaused(input.GraphId, paused)
+			kernel.SetNativePause(input.GraphId, paused, "", 0)
 			return nil
 		})
 		return graph.State()
@@ -166,24 +168,25 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 		if input.Action == "retry" && submitted != nil {
 			Raise("invalid_queue", "Submitted work cannot be sent again")
 		}
-		service.kernel.Store.Transaction(func() any {
-			requireProjectActive(service.kernel.Store, service.kernel.Store.Task(input.GraphId).ProjectID)
-			if input.Action == "retry" && service.kernel.HasPendingProviderCall(input.GraphId, nodeId) {
+		service.kernel.Store.Transaction(func(tx *TaskStore) any {
+		kernel := service.kernel.scoped(tx)
+			requireProjectActive(kernel.Store, kernel.Store.Task(input.GraphId).ProjectID)
+			if input.Action == "retry" && kernel.HasPendingProviderCall(input.GraphId, nodeId) {
 				Raise("unknown_usage", "Reconcile the node's pending provider calls before retrying")
 			}
-			if kernelRow(service.kernel.Db, "SELECT id FROM node_questions WHERE task_id=? AND node_id=? AND queue_seq=? AND state IN ('recorded','parked')", input.GraphId, nodeId, seq) != nil {
+			if kernelRow(kernel.Db, "SELECT id FROM node_questions WHERE task_id=? AND node_id=? AND queue_seq=? AND state IN ('recorded','parked')", input.GraphId, nodeId, seq) != nil {
 				Raise("invalid_queue", "The node question must be resolved before changing its queue item")
 			}
 			if input.Action == "retry" {
-				service.kernel.RetryQueueItem(input.GraphId, int64(seq), input.Action)
+				kernel.RetryQueueItem(input.GraphId, int64(seq), input.Action)
 			} else {
-				service.kernel.SettleQueueItem(input.GraphId, int64(seq), input.Action)
+				kernel.SettleQueueItem(input.GraphId, int64(seq), input.Action)
 			}
-			service.kernel.UnpauseNodeState(input.GraphId, nodeId)
-			service.kernel.SetNativePause(input.GraphId, false, nodeId, 0)
-			service.kernel.ReleaseNode(input.GraphId, nodeId)
-			service.kernel.Store.CompleteBlockedTask(input.GraphId)
-			service.kernel.Store.Event(input.GraphId, "graph.queue."+input.Action, map[string]any{"seq": seq, "nodeId": nodeId})
+			kernel.UnpauseNodeState(input.GraphId, nodeId)
+			kernel.SetNativePause(input.GraphId, false, nodeId, 0)
+			kernel.ReleaseNode(input.GraphId, nodeId)
+			kernel.Store.CompleteBlockedTask(input.GraphId)
+			kernel.Store.Event(input.GraphId, "graph.queue."+input.Action, map[string]any{"seq": seq, "nodeId": nodeId})
 			return nil
 		})
 		return graph.State()

@@ -62,7 +62,8 @@ func (runtime *TaskRuntime) ConfirmWorkGraph(workID string, input WorkConfirmInp
 	}
 	unlock := lockWorkGraph(workID, input.GraphKey)
 	defer unlock()
-	result := runtime.store.Command("work:confirm:"+workID, requestID, input, func() any {
+	result := runtime.store.Command("work:confirm:"+workID, requestID, input, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		existing := runtime.store.workGraphInTransaction(workID, input.GraphKey)
 		if existing != nil {
 			work := runtime.store.workInTransaction(workID)
@@ -140,7 +141,8 @@ func (runtime *TaskRuntime) ConfirmWorkGraph(workID string, input WorkConfirmInp
 	default:
 		Raise("invalid_graph", "Graph creation returned an invalid receipt")
 	}
-	runtime.store.Transaction(func() any {
+	runtime.store.Transaction(func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		runtime.store.settleWorkGraph(workID, input.GraphKey, graphID, state, reason, NowMillis())
 		if state == "ready" {
 			markVerificationDraftConfirmed(runtime.store, reservation)

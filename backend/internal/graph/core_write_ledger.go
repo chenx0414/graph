@@ -139,7 +139,8 @@ func (ledger *WriteLedger) Capture(side string, input WriteCaptureInput) *WriteR
 	snapshot := SnapshotFile(input.Workspace, *path)
 	relativePath := RelativeLanePath(input.Workspace, *path)
 	var record *WriteRecord
-	ledger.store.Transaction(func() {
+	ledger.store.Transaction(func(tx *TaskStore) {
+		ledger := ledger.scoped(tx)
 		row := ledger.lookup(input.TaskID, input.NodeID, input.TurnID, relativePath)
 		if side == "open" {
 			if row != nil {

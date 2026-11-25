@@ -24,7 +24,8 @@ func (conversations *TaskRuntimeConversations) Confirm(conversationId string, in
 		payload["onBehalfOf"] = input.Attestation.OnBehalfOf
 		payload["instruction"] = input.Attestation.Instruction
 	}
-	result := runtime.store.Command("conversation:"+conversationId, input.RequestId, payload, func() any {
+	result := runtime.store.Command("conversation:"+conversationId, input.RequestId, payload, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		conversation := ConversationRowOf(runtime.store, conversationId)
 		if conversation.ProjectId == nil {
 			Raise("invalid_input", "Bind a project before confirming a draft")
@@ -126,7 +127,8 @@ func (conversations *TaskRuntimeConversations) CancelMessage(conversationId stri
 	}
 	result := runtime.store.Command("conversation:"+conversationId, input.RequestId, map[string]any{
 		"type": "cancel_message", "messageId": input.MessageId,
-	}, func() any {
+	}, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		cancelled := CancelQueuedMessage(runtime.store, conversationId, input.MessageId)
 		var cursor any
 		if cancelled.Changed {
@@ -187,7 +189,8 @@ func (conversations *TaskRuntimeConversations) Steer(conversationId, requestId s
 	for _, message := range messages {
 		ids = append(ids, message.Id)
 	}
-	receipt := runtime.store.Transaction(func() any {
+	receipt := runtime.store.Transaction(func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		ordinal := -1
 		if steered != nil {
 			ordinal = int(*steered)

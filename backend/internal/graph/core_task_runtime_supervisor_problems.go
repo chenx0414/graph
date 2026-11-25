@@ -227,7 +227,8 @@ func (supervisor *TaskRuntimeSupervisor) ResolveProblem(input TaskRuntimeResolve
 	if conversation.Role == ConversationGlobal && conversation.AnchorTaskId == supervisor.taskId {
 		scope += " OR route_stage='global'"
 	}
-	receipt := runtime.store.Command("problems:"+supervisor.taskId, input.RequestId, input, func() any {
+	receipt := runtime.store.Command("problems:"+supervisor.taskId, input.RequestId, input, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		row := kernelRow(runtime.store.Db, `SELECT id,task_id,node_id,kind,data,route_stage,route_revision
           FROM questions WHERE id=? AND owner='main' AND status='open' AND (`+scope+`)`, params...)
 		if row == nil {
@@ -385,7 +386,8 @@ func (supervisor *TaskRuntimeSupervisor) ReviewHumanCheck(input TaskRuntimeRevie
 	if !inConversation {
 		Raise("not_found", "No open human acceptance check with that id in this conversation")
 	}
-	result := runtime.store.Command("human-review:"+supervisor.taskId, input.RequestId, input, func() any {
+	result := runtime.store.Command("human-review:"+supervisor.taskId, input.RequestId, input, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		if input.Approve {
 			return map[string]any{"questionId": input.QuestionId, "approved": ApproveHumanCheck(runtime.store, input.QuestionId, input.Note)}
 		}

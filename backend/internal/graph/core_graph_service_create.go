@@ -44,34 +44,35 @@ func (service *graphManagementService) GraphCreate(input GraphCreateInput) any {
 		}
 		created = GraphCreateResult{GraphId: graphId, Definition: latest.Definition, Revision: latest.Version}
 	} else {
-		created = service.kernel.Store.Transaction(func() any {
-			if conversation := ConversationForTask(service.kernel.Store, service.ownerTaskId); conversation != nil && conversation.Role == ConversationHistory {
+		created = service.kernel.Store.Transaction(func(tx *TaskStore) any {
+		kernel := service.kernel.scoped(tx)
+			if conversation := ConversationForTask(kernel.Store, service.ownerTaskId); conversation != nil && conversation.Role == ConversationHistory {
 				Raise("permission", "Historical conversations cannot create graph work")
 			}
-			requireProjectActive(service.kernel.Store, parent.ProjectID)
+			requireProjectActive(kernel.Store, parent.ProjectID)
 			var conversationId any
 			if parent.ConversationID != nil {
 				conversationId = *parent.ConversationID
 			}
-			service.kernel.Store.CreateSubgraphTask(graphId, parent.ProjectID, conversationId, definition.Name, NowMillis(), targetBranchValue)
+			kernel.Store.CreateSubgraphTask(graphId, parent.ProjectID, conversationId, definition.Name, NowMillis(), targetBranchValue)
 			if hasTargetBranch {
-				service.kernel.Store.StartGraphPreparation(graphId)
+				kernel.Store.StartGraphPreparation(graphId)
 			}
 			createState := "ready"
 			if hasTargetBranch {
 				createState = "preparing"
 			}
-			service.kernel.RecordCreateRequest(service.ownerTaskId, requestId, graphId, content, createState)
-			service.kernel.RecordGraphOwner(graphId, service.ownerTaskId)
-			revision := service.kernel.InsertRevision(graphId, definition, "create")
+			kernel.RecordCreateRequest(service.ownerTaskId, requestId, graphId, content, createState)
+			kernel.RecordGraphOwner(graphId, service.ownerTaskId)
+			revision := kernel.InsertRevision(graphId, definition, "create")
 			for _, id := range sortedKeys(definition.Nodes) {
-				service.kernel.AdmitNode(graphId, revision.Version, id, AdmitNodeInput{InstanceId: graphUUID()})
+				kernel.AdmitNode(graphId, revision.Version, id, AdmitNodeInput{InstanceId: graphUUID()})
 			}
 			for _, id := range sortedKeys(definition.Modules) {
 				module := definition.Modules[id]
-				service.kernel.AdmitModule(graphId, revision.Version, id, AdmitModuleInput{ModuleType: module.Type, Trigger: module.Trigger})
+				kernel.AdmitModule(graphId, revision.Version, id, AdmitModuleInput{ModuleType: module.Type, Trigger: module.Trigger})
 			}
-			service.kernel.Store.Event(graphId, "graph.created", map[string]any{"ownerTaskId": service.ownerTaskId, "revision": revision.Version})
+			kernel.Store.Event(graphId, "graph.created", map[string]any{"ownerTaskId": service.ownerTaskId, "revision": revision.Version})
 			return GraphCreateResult{GraphId: graphId, Definition: definition, Revision: revision.Version}
 		}).(GraphCreateResult)
 	}

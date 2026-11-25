@@ -15,9 +15,9 @@ import (
 // runs inside it from another goroutine and is rolled back with work it never joined.
 //
 // Three rules keep that invariant checkable at build time instead of as a hang at run time:
-//   1. every transaction and command callback receives the transaction's own store,
-//   2. its body reaches a store handle only through that store (rebind with ".scoped(tx)"),
-//   3. its body never captures a store or holder from the enclosing function.
+//  1. every transaction and command callback receives the transaction's own store,
+//  2. its body reaches a store handle only through that store (rebind with ".scoped(tx)"),
+//  3. its body never captures a store or holder from the enclosing function.
 //
 // Rule 3 is what carries the call graph: a helper that opens statements on a holder it received
 // is safe once the body rebound that holder, and unsafe the moment the body hands it the outer
@@ -127,6 +127,11 @@ func TestTransactionHandleGateRejectsEachBypass(t *testing.T) {
 			source: "func run() {\n\tout, err := exec.Command(\"echo\", \"hi\").Output()\n\t_, _ = out, err\n}",
 			want:   "",
 		},
+		{
+			name:   "a holder name inside a SQL string is not a capture",
+			source: "func (integration *GitIntegration) run() {\n\tintegration.store.Transaction(func(tx *TaskStore) any {\n\t\tgraphDBExec(tx.Db, \"INSERT INTO git_commits VALUES(?,?,?,?,?)\", \"integration\")\n\t\treturn nil\n\t})\n}",
+			want:   "",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -219,15 +224,16 @@ func (gate handleGate) check(text string) []callbackComplaint {
 			}
 			params := body[start:brace]
 			cb := balancedBody(body, brace)
-			rebound := reboundNames(cb)
+			code := codeOnly(cb)
+			rebound := reboundNames(code)
 			blocked := map[string]bool{}
 			if !strings.Contains(params, "tx *TaskStore") {
 				complaints = append(complaints, callbackComplaint{line, kind + " callback does not receive the transaction's store (tx *TaskStore)"})
 			} else {
-				complaints = append(complaints, handleComplaints(cb, kind, line, rebound)...)
+				complaints = append(complaints, handleComplaints(code, kind, line, rebound)...)
 			}
 			for name, kindOf := range captured {
-				if !regexp.MustCompile(`\b`+regexp.QuoteMeta(name)+`\b`).MatchString(usesOnly(cb, name)) {
+				if !regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`).MatchString(usesOnly(code, name)) {
 					continue
 				}
 				if !gate.rebindable[kindOf] && !blocked[kindOf] {
@@ -325,6 +331,47 @@ func callArguments(body string, afterOpen int) string {
 		}
 	}
 	return ""
+}
+
+// codeOnly blanks string literals and comments, keeping every byte offset and newline in place, so
+// that a table name inside a SQL string is not mistaken for a reference to a variable of that name.
+func codeOnly(body string) string {
+	cleaned := []byte(body)
+	for i := 0; i < len(cleaned); i++ {
+		switch cleaned[i] {
+		case '"':
+			for i++; i < len(cleaned) && cleaned[i] != '"'; i++ {
+				if cleaned[i] == '\\' {
+					cleaned[i] = ' '
+					i++
+				}
+				if cleaned[i] != '\n' {
+					cleaned[i] = ' '
+				}
+			}
+		case '`':
+			for i++; i < len(cleaned) && cleaned[i] != '`'; i++ {
+				if cleaned[i] != '\n' {
+					cleaned[i] = ' '
+				}
+			}
+		case '\'':
+			for i++; i < len(cleaned) && cleaned[i] != '\''; i++ {
+				if cleaned[i] == '\\' {
+					cleaned[i] = ' '
+					i++
+				}
+				cleaned[i] = ' '
+			}
+		case '/':
+			if i+1 < len(cleaned) && cleaned[i+1] == '/' {
+				for ; i < len(cleaned) && cleaned[i] != '\n'; i++ {
+					cleaned[i] = ' '
+				}
+			}
+		}
+	}
+	return string(cleaned)
 }
 
 // usesOnly returns the body with every rebinding statement removed, so that naming an enclosing

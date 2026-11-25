@@ -59,7 +59,8 @@ func (runtime *TaskRuntime) ensureSupervisorThread(projectID *string, requestID 
 			Raise("invalid_input", "A configured project is required")
 		}
 	}
-	result := runtime.store.Command(scope, requestID, map[string]any{"projectId": projectID}, func() any {
+	result := runtime.store.Command(scope, requestID, map[string]any{"projectId": projectID}, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		query := "SELECT id FROM conversations WHERE role='global'"
 		args := []any{}
 		if projectID != nil {

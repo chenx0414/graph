@@ -20,7 +20,8 @@ func (runtime *TaskRuntime) steerGraphNode(caller, graphID, nodeID, text, reques
 	lock.Lock()
 	defer lock.Unlock()
 	payload := map[string]any{"graphId": graphID, "nodeId": nodeID, "text": text}
-	intent := runtime.store.Command(scope+":intent", requestID, payload, func() any {
+	intent := runtime.store.Command(scope+":intent", requestID, payload, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		execution := runtime.kernel.RunningExecution(graphID, nodeID)
 		if execution == nil {
 			Raise("steering_unavailable", "This node has no running turn to steer")
@@ -31,7 +32,7 @@ func (runtime *TaskRuntime) steerGraphNode(caller, graphID, nodeID, text, reques
 	executionID := kernelString(intentRecord["executionId"])
 	prior := kernelRow(runtime.store.Db, "SELECT receipt FROM commands WHERE scope=? AND request_id=?", scope+":result", requestID)
 	if prior != nil {
-		return runtime.store.Command(scope+":result", requestID, payload, func() any { return nil })
+		return runtime.store.Command(scope+":result", requestID, payload, func(tx *TaskStore) any { return nil })
 	}
 	lane := runtime.residentGraphLane()
 	if lane.options.Steer == nil {
@@ -40,7 +41,8 @@ func (runtime *TaskRuntime) steerGraphNode(caller, graphID, nodeID, text, reques
 	if err := lane.options.Steer(graphID, nodeID, executionID, text, ContentDigest(scope+":"+requestID)); err != nil {
 		Raise("steering_unavailable", err.Error())
 	}
-	return runtime.store.Command(scope+":result", requestID, payload, func() any {
+	return runtime.store.Command(scope+":result", requestID, payload, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		actor := "agent"
 		if strings.HasPrefix(caller, "user:") {
 			actor = "user"

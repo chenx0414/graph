@@ -27,7 +27,8 @@ func (k *KernelStore) DeliverDirect(taskID, endpoint string, value any) DirectDe
 	if defect := ValidateProtocolValue(revision.Definition.Protocols[ref.Protocol], value, endpoint); defect != nil && *defect != "" {
 		Raise("invalid_input", *defect)
 	}
-	return k.Store.Transaction(func() any {
+	return k.Store.Transaction(func(tx *TaskStore) any {
+		k := k.scoped(tx)
 		requireProjectActive(k.Store, k.Store.Task(taskID).ProjectID)
 		if reason := verificationDispatchBlock(k, taskID, owner, k.LatestRevision(taskID).Definition); reason != "" {
 			Raise("verification_required", reason)
@@ -113,7 +114,8 @@ func (k *KernelStore) DeliveriesFor(executionID string) []DeliveryRow {
 
 func (k *KernelStore) RecordModuleDelivery(taskID, moduleID, edgeID, fromEndpoint, toEndpoint, protocol string, value any, revisionVersion int) DeliveryRow {
 	_ = moduleID
-	return k.Store.Transaction(func() any {
+	return k.Store.Transaction(func(tx *TaskStore) any {
+		k := k.scoped(tx)
 		id := graphUUID()
 		createdAt := NowMillis()
 		seqRow, _ := g5One(k.Db, "SELECT COALESCE(MAX(seq),0) AS s FROM kernel_deliveries WHERE task_id=?", taskID)
@@ -146,7 +148,8 @@ func (k *KernelStore) publishGraphOutputs(taskID, endpoint string, value any, so
 }
 
 func (k *KernelStore) BroadcastModule(taskID, moduleID string, outputs map[string]any, transitionID string) []DeliveryRow {
-	return k.Store.Transaction(func() any {
+	return k.Store.Transaction(func(tx *TaskStore) any {
+		k := k.scoped(tx)
 		if transitionID != "" {
 			if row, ok := g5One(k.Db, "SELECT routed FROM kernel_transition_outbox WHERE transition_id=?", transitionID); ok && g5Int(row["routed"]) == 1 {
 				return []DeliveryRow{}

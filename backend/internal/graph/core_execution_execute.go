@@ -30,8 +30,8 @@ func (e *Execution) execute(node ExecutionNodeRow) bool {
 	}
 	adapter := e.adapterFor(spec.Action)
 	if adapter == nil || adapter.Kind != spec.Kind {
-		e.store.Transaction(func() any {
-			e.block(node, "adapter_error", map[string]any{"reason": "No " + spec.Kind + " adapter for " + spec.Action}, nil)
+		e.store.Transaction(func(tx *TaskStore) any {
+			e.lifecycle.scoped(tx).Block(node.TaskId, node.Id, "adapter_error", map[string]any{"reason": "No " + spec.Kind + " adapter for " + spec.Action}, nil)
 			return nil
 		})
 		graphDatabaseMu.Unlock()
@@ -40,8 +40,8 @@ func (e *Execution) execute(node ExecutionNodeRow) bool {
 	if spec.Kind == "agent" && e.models != nil && node.InstanceId != nil {
 		selected := PickModel(PickModelInput{Spec: spec, Models: e.models})
 		if selected == nil {
-			e.store.Transaction(func() any {
-				e.block(node, "model_unavailable", map[string]any{"requested": spec.Model}, nil)
+			e.store.Transaction(func(tx *TaskStore) any {
+				e.lifecycle.scoped(tx).Block(node.TaskId, node.Id, "model_unavailable", map[string]any{"requested": spec.Model}, nil)
 				return nil
 			})
 			graphDatabaseMu.Unlock()
@@ -84,8 +84,8 @@ func (e *Execution) execute(node ExecutionNodeRow) bool {
 	}
 	requiredGrant := adapter.Grant
 	if requiredGrant != nil && *requiredGrant != "" && !containsString(grants, *requiredGrant) {
-		e.store.Transaction(func() any {
-			InsertQuestion(e.store, QuestionInput{
+		e.store.Transaction(func(tx *TaskStore) any {
+			InsertQuestion(tx, QuestionInput{
 				TaskId:     node.TaskId,
 				NodeId:     node.Id,
 				Kind:       "permission",

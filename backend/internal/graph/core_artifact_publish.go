@@ -253,7 +253,8 @@ func (w *ArtifactWorkspace) Publish(input PublishArtifactInput) ArtifactRecord {
 	}
 	root := w.ensureRoot()
 	relative := w.ensureObject(root, digest, data)
-	result := w.store.Command(commandScope, input.RequestId, commandPayload, func() any {
+	result := w.store.Command(commandScope, input.RequestId, commandPayload, func(tx *TaskStore) any {
+		w := w.scoped(tx)
 		w.assertGraphAuthor(input.TaskId, namespace, name, actor)
 		fresh := w.current(input.TaskId, namespace, name)
 		freshLatest := 0

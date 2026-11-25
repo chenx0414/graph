@@ -38,7 +38,8 @@ func (w *ArtifactWorkspace) Retire(taskId, artifactId string, version int, reaso
 		return replayed
 	}
 	retiredAt := NowMillis()
-	result := w.store.Command(commandScope, requestId, commandPayload, func() any {
+	result := w.store.Command(commandScope, requestId, commandPayload, func(tx *TaskStore) any {
+		w := w.scoped(tx)
 		RetireArtifact(w.store, artifactId, version, retiredAt)
 		w.artifactEvent(targetTaskId, record.ArtifactId, record.Version, "artifact.retired", commandPayload)
 		record.State = "retired"
@@ -70,7 +71,8 @@ func (w *ArtifactWorkspace) Promote(input ArtifactPromoteInput) ArtifactRecord {
 	if replayed, ok := w.replay(commandScope, input.RequestId, commandPayload); ok {
 		return replayed
 	}
-	result := w.store.Command(commandScope, input.RequestId, commandPayload, func() any {
+	result := w.store.Command(commandScope, input.RequestId, commandPayload, func(tx *TaskStore) any {
+		w := w.scoped(tx)
 		latest := kernelRow(w.store.Db, `SELECT artifact_id,version FROM artifacts
         WHERE scope='project' AND owner_id=? AND namespace=? AND name=?
         ORDER BY version DESC LIMIT 1`, task.ProjectID, source.Namespace, source.Name)

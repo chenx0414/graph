@@ -14,7 +14,8 @@ func (k *KernelStore) Enqueue(taskID string, input QueueInsert) QueueRow {
 	if k.Store.IsTransaction() {
 		return k.EnqueueInCurrentTransaction(taskID, input)
 	}
-	return k.Store.Transaction(func() any {
+	return k.Store.Transaction(func(tx *TaskStore) any {
+		k := k.scoped(tx)
 		requireProjectActive(k.Store, k.Store.Task(taskID).ProjectID)
 		return k.EnqueueInCurrentTransaction(taskID, input)
 	}).(QueueRow)
@@ -103,7 +104,8 @@ func (k *KernelStore) NextQueued(taskID, nodeID string) *QueueRow {
 }
 
 func (k *KernelStore) ClaimQueued(taskID string, seq int64) *QueueRow {
-	return k.Store.Transaction(func() any {
+	return k.Store.Transaction(func(tx *TaskStore) any {
+		k := k.scoped(tx)
 		row, ok := g5One(k.Db, "SELECT * FROM kernel_queue WHERE task_id=? AND seq=?", taskID, seq)
 		if !ok {
 			Raise("invalid_queue", "Unknown queue item "+kernelItoa(seq))

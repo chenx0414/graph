@@ -55,7 +55,8 @@ func (runtime *TaskRuntime) SpawnAgent(parent AgentSpawnParent, input AgentSpawn
 	result := runtime.store.Command("agent-spawn:"+requestId, requestId, map[string]any{
 		"parent": parent.AgentId, "objective": objective, "name": input.Name, "model": input.Model,
 		"workspace": workspaceMode,
-	}, func() any {
+	}, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		return runtime.spawnAgentTransaction(parent, input, workspaceMode)
 	})
 	record, _ := jsonRecord(result)

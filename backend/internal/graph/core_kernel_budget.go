@@ -65,7 +65,8 @@ func (k *KernelStore) ReserveNodeTokens(taskID, nodeID string, budget TokenBudge
 	if !isSafeInteger(amount) || amount < 0 {
 		Raise("invalid_adapter", "A bounded token reservation is required")
 	}
-	k.Store.Transaction(func() any {
+	k.Store.Transaction(func(tx *TaskStore) any {
+		k := k.scoped(tx)
 		k.ensureNodeState(taskID, nodeID)
 		g5Exec(k.Db, "UPDATE kernel_node_state SET reserved=reserved+? WHERE task_id=? AND node_id=?", int64(amount), taskID, nodeID)
 		if executionID != "" {
@@ -79,7 +80,8 @@ func (k *KernelStore) ReleaseNodeTokens(taskID, nodeID string, amount float64, e
 	if !isSafeInteger(amount) || amount < 0 {
 		return
 	}
-	k.Store.Transaction(func() any {
+	k.Store.Transaction(func(tx *TaskStore) any {
+		k := k.scoped(tx)
 		k.ensureNodeState(taskID, nodeID)
 		g5Exec(k.Db, "UPDATE kernel_node_state SET reserved=MAX(0,reserved-?) WHERE task_id=? AND node_id=?", int64(amount), taskID, nodeID)
 		if executionID != "" {
@@ -102,7 +104,8 @@ func (k *KernelStore) ResumeNode(taskID, nodeID string) {
 }
 
 func (k *KernelStore) ReconcileNodeUsage(taskID, nodeID, decision string) {
-	k.Store.Transaction(func() any {
+	k.Store.Transaction(func(tx *TaskStore) any {
+		k := k.scoped(tx)
 		k.ensureNodeState(taskID, nodeID)
 		row, _ := g5One(k.Db, "SELECT used,reserved FROM kernel_node_state WHERE task_id=? AND node_id=?", taskID, nodeID)
 		if decision == "record" {
@@ -121,7 +124,8 @@ func (k *KernelStore) RequestBudget(taskID, nodeID, executionID, reason string) 
 	if execution == nil || execution.TaskId != taskID || execution.NodeId != nodeID || execution.TokenBudget == nil || execution.TokenBudget.Unlimited {
 		return
 	}
-	k.Store.Transaction(func() any {
+	k.Store.Transaction(func(tx *TaskStore) any {
+		k := k.scoped(tx)
 		if _, exists := g5One(k.Db, "SELECT 1 FROM questions WHERE task_id=? AND node_id=? AND kind='budget' AND status='open'", taskID, nodeID); exists {
 			return nil
 		}

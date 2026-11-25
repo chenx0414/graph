@@ -5,7 +5,8 @@ func (runtime *TaskRuntime) recoverWorkGraphs() {
 		func() {
 			defer func() {
 				if recovered := recover(); recovered != nil {
-					runtime.store.Transaction(func() any {
+					runtime.store.Transaction(func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 						runtime.store.Event(item.OwnerTaskID, "work.graph.recovery.failed", map[string]any{"workId": item.WorkID, "graphKey": item.GraphKey, "reason": graphServiceErrorMessage(recovered)})
 						return nil
 					})
@@ -53,7 +54,8 @@ func (runtime *TaskRuntime) recoverTransferredGraphPreparations() {
 }
 
 func (runtime *TaskRuntime) markInterruptedGraphPreparations() {
-	runtime.store.Transaction(func() any {
+	runtime.store.Transaction(func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		rows := kernelRows(runtime.store.Db, `SELECT r.graph_id FROM kernel_create_requests r WHERE r.state='preparing'
  AND COALESCE((SELECT MAX(e.cursor) FROM events e WHERE e.task_id=r.graph_id AND e.type='graph.preparation.recovery_required'),0)
  <= COALESCE((SELECT MAX(e.cursor) FROM events e WHERE e.task_id=r.graph_id AND e.type='graph.preparation.recovery_cleared'),0)`)

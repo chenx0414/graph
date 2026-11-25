@@ -21,7 +21,8 @@ func (conversations *TaskRuntimeConversations) NewContext(conversationId, reques
 	}
 	result := runtime.store.Command("conversation:"+conversationId+":context", requestId, map[string]any{
 		"type": "new_context", "conversationId": conversationId,
-	}, func() any {
+	}, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		discarded := runtime.store.DiscardPendingAnswers(row.AnchorTaskId, kernelString(master["id"]), "context_reset", NowMillis())
 		runtime.store.Event(row.AnchorTaskId, "conversation.context_reset", map[string]any{
 			"conversationId": conversationId, "identity": identity, "reset": reset, "discardedAnswers": discarded,

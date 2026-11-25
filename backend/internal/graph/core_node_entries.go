@@ -64,7 +64,7 @@ func AppendNodeEntry(store *TaskStore, input NodeEntryInput) int64 {
 	if store.IsTransaction() {
 		insert()
 	} else {
-		store.Transaction(func() any { insert(); return nil })
+		store.Transaction(func(tx *TaskStore) any { insert(); return nil })
 	}
 	row := kernelRow(store.Db, "SELECT seq FROM node_entries WHERE id=?", id)
 	seq := kernelInt(row["seq"])

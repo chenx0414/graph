@@ -34,7 +34,8 @@ func (runtime *TaskRuntime) DelegateFromGlobal(taskID string, input DelegateWork
 	requireProjectActive(runtime.store, input.ProjectID)
 	work := runtime.CreateWork(WorkCreate{ConversationID: caller.Id, ProjectID: input.ProjectID, SourceMessageID: input.SourceMessageID, Brief: input.Brief, Acceptance: input.Acceptance}, input.RequestID)
 	thread := runtime.OpenProjectThread(input.ProjectID, input.RequestID+":thread")
-	result := runtime.store.Command("work:delegate:"+work.ID, input.RequestID, map[string]any{"revision": work.Revision, "target": thread.ConversationID}, func() any {
+	result := runtime.store.Command("work:delegate:"+work.ID, input.RequestID, map[string]any{"revision": work.Revision, "target": thread.ConversationID}, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		requireProjectActive(runtime.store, input.ProjectID)
 		current := runtime.store.workInTransaction(work.ID)
 		if current.ProjectID == nil || *current.ProjectID != input.ProjectID || current.ConversationID != caller.Id {

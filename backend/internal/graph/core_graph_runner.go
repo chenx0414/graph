@@ -348,7 +348,7 @@ func (runner *GraphRunner) recordRefusedDelivery(moduleId, deliveryId string, re
 	runner.recordUnjudged(moduleId, deliveryId, operationId, reason)
 	if brake {
 		message := panicMessage(recovered)
-		kernel.Store.Transaction(func() any {
+		kernel.Store.Transaction(func(tx *TaskStore) any {
 			WakeForBlockedNode(kernel.Store, runner.options.GraphId, BlockedNodeWake{NodeID: moduleId, Reason: message, IncidentID: deliveryId, HasIncident: true})
 			return nil
 		})
@@ -359,7 +359,7 @@ func (runner *GraphRunner) failModule(moduleId, deliveryId string, recovered any
 	kernel := runner.options.Kernel
 	kernel.SetNodeQueuePaused(runner.options.GraphId, moduleId, true)
 	reason := panicMessage(recovered)
-	kernel.Store.Transaction(func() any {
+	kernel.Store.Transaction(func(tx *TaskStore) any {
 		kernel.Store.Event(runner.options.GraphId, "graph.module.failed", map[string]any{"moduleId": moduleId, "deliveryId": deliveryId, "reason": reason})
 		WakeForBlockedNode(kernel.Store, runner.options.GraphId, BlockedNodeWake{NodeID: moduleId, Reason: reason, IncidentID: deliveryId, HasIncident: true})
 		return nil

@@ -26,12 +26,13 @@ func (runtime *GraphRuntime) Create(definition any, request, projectId string) C
 	if request == "" {
 		request = parsed.Name
 	}
-	created := runtime.kernel.Store.Transaction(func() any {
+	created := runtime.kernel.Store.Transaction(func(tx *TaskStore) any {
+		kernel := runtime.kernel.scoped(tx)
 		if runtime.taskRow() != nil {
 			Raise("invalid_graph", "Graph "+runtime.graphId+" already exists")
 		}
-		runtime.kernel.Store.CreateGraphTask(runtime.graphId, projectId, request, NowMillis())
-		revision := runtime.kernel.InsertRevision(runtime.graphId, parsed, "create")
+		kernel.Store.CreateGraphTask(runtime.graphId, projectId, request, NowMillis())
+		revision := kernel.InsertRevision(runtime.graphId, parsed, "create")
 		result := CreatedGraph{GraphId: runtime.graphId, Definition: parsed}
 		result.Revision.Version = revision.Version
 		return result
@@ -82,7 +83,8 @@ func (runtime *GraphRuntime) Patch(baseRevision int, changes PatchChange) GraphP
 			Raise("invalid_graph", "Retire names unknown node or module "+id)
 		}
 	}
-	return runtime.kernel.Store.Transaction(func() any {
+	return runtime.kernel.Store.Transaction(func(tx *TaskStore) any {
+		kernel := runtime.kernel.scoped(tx)
 		var removed []string
 		for id := range latest.Definition.Nodes {
 			if _, ok := parsed.Nodes[id]; !ok {
@@ -104,41 +106,41 @@ func (runtime *GraphRuntime) Patch(baseRevision int, changes PatchChange) GraphP
 			if !containsString(changes.Retire, id) {
 				Raise("invalid_graph", "Removing "+id+" requires explicit retire")
 			}
-			pending := kernelRow(runtime.kernel.DB, "SELECT 1 FROM kernel_queue WHERE task_id=? AND node_id=? AND state IN ('queued','claimed','failed') LIMIT 1", runtime.graphId, id)
-			inbox := kernelRow(runtime.kernel.DB, "SELECT 1 FROM kernel_module_inbox WHERE task_id=? AND module_id=? AND processed=0 LIMIT 1", runtime.graphId, id)
-			running := kernelRow(runtime.kernel.DB, "SELECT 1 FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' LIMIT 1", runtime.graphId, id)
-			outbox := kernelRow(runtime.kernel.DB, "SELECT 1 FROM kernel_transition_outbox o JOIN kernel_module_transitions t ON t.id=o.transition_id WHERE t.task_id=? AND t.module_id=? AND o.routed=0 LIMIT 1", runtime.graphId, id)
+			pending := kernelRow(kernel.DB, "SELECT 1 FROM kernel_queue WHERE task_id=? AND node_id=? AND state IN ('queued','claimed','failed') LIMIT 1", runtime.graphId, id)
+			inbox := kernelRow(kernel.DB, "SELECT 1 FROM kernel_module_inbox WHERE task_id=? AND module_id=? AND processed=0 LIMIT 1", runtime.graphId, id)
+			running := kernelRow(kernel.DB, "SELECT 1 FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' LIMIT 1", runtime.graphId, id)
+			outbox := kernelRow(kernel.DB, "SELECT 1 FROM kernel_transition_outbox o JOIN kernel_module_transitions t ON t.id=o.transition_id WHERE t.task_id=? AND t.module_id=? AND o.routed=0 LIMIT 1", runtime.graphId, id)
 			if pending != nil || inbox != nil || running != nil || outbox != nil {
 				Raise("pending_work", "Cannot remove "+id+": settle or explicitly cancel its pending work first")
 			}
 		}
-		revision := runtime.kernel.InsertRevision(runtime.graphId, parsed, changes.Reason)
+		revision := kernel.InsertRevision(runtime.graphId, parsed, changes.Reason)
 		for id, node := range parsed.Nodes {
 			if _, ok := latest.Definition.Nodes[id]; !ok {
-				runtime.kernel.AdmitNode(runtime.graphId, revision.Version, id, AdmitNodeInput{InstanceId: graphUUID()})
+				kernel.AdmitNode(runtime.graphId, revision.Version, id, AdmitNodeInput{InstanceId: graphUUID()})
 			} else {
 				encoded, err := json.Marshal(node)
 				if err != nil {
 					panic(err)
 				}
-				runtime.kernel.ApplyNodeRevision(runtime.graphId, id, revision.Version, string(encoded))
+				kernel.ApplyNodeRevision(runtime.graphId, id, revision.Version, string(encoded))
 			}
 		}
 		for id, module := range parsed.Modules {
 			if _, ok := latest.Definition.Modules[id]; !ok {
-				runtime.kernel.AdmitModule(runtime.graphId, revision.Version, id, AdmitModuleInput{ModuleType: module.Type, Trigger: module.Trigger})
+				kernel.AdmitModule(runtime.graphId, revision.Version, id, AdmitModuleInput{ModuleType: module.Type, Trigger: module.Trigger})
 			} else {
-				runtime.kernel.ApplyModuleRevision(runtime.graphId, id, revision.Version, module.Type, module.Trigger)
+				kernel.ApplyModuleRevision(runtime.graphId, id, revision.Version, module.Type, module.Trigger)
 			}
 		}
 		for _, id := range removed {
 			nodeId := id
-			runtime.kernel.FinishNativePauses(runtime.graphId, &nodeId)
+			kernel.FinishNativePauses(runtime.graphId, &nodeId)
 		}
 		for _, id := range removed {
-			runtime.kernel.RetireNode(runtime.graphId, id)
+			kernel.RetireNode(runtime.graphId, id)
 		}
-		runtime.kernel.Store.Event(runtime.graphId, "graph.patched", map[string]any{"revision": revision.Version, "previousRevision": latest.Version, "reason": changes.Reason})
+		kernel.Store.Event(runtime.graphId, "graph.patched", map[string]any{"revision": revision.Version, "previousRevision": latest.Version, "reason": changes.Reason})
 		return GraphPatchResult{Revision: revision.Version}
 	}).(GraphPatchResult)
 }

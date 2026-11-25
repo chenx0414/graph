@@ -56,7 +56,8 @@ func (k *KernelStore) ModuleTransaction(action func() any) any {
 	if k.moduleTransactionActive {
 		return action()
 	}
-	return k.Store.Transaction(func() any {
+	return k.Store.Transaction(func(tx *TaskStore) any {
+		k := k.scoped(tx)
 		k.moduleTransactionActive = true
 		defer func() { k.moduleTransactionActive = false }()
 		return action()
@@ -102,7 +103,8 @@ func (k *KernelStore) AdmitModule(taskID string, revisionVersion int, moduleID s
 }
 
 func (k *KernelStore) StartExecution(taskID string, input StartExecutionRequest) ExecutionRow {
-	return k.Store.Transaction(func() any {
+	return k.Store.Transaction(func(tx *TaskStore) any {
+		k := k.scoped(tx)
 		existing := k.Execution(input.ExecutionId)
 		if existing != nil {
 			if existing.TaskId != taskID || existing.NodeId != input.NodeId || (existing.SubmissionId != nil && !hasNodeCompletion(k.Store.Path, input.ExecutionId)) || existing.State != "blocked" {
@@ -146,7 +148,7 @@ func (k *KernelStore) FinishExecution(executionID, state string) {
 		finish()
 		return
 	}
-	k.Store.Transaction(func() any { finish(); return nil })
+	k.Store.Transaction(func(tx *TaskStore) any { finish(); return nil })
 }
 
 func (k *KernelStore) Execution(executionID string) *ExecutionRow {
@@ -226,7 +228,8 @@ func (k *KernelStore) assertOutputsOpen(taskID string) {
 }
 
 func (k *KernelStore) Submit(executionID string, request SubmitRequest) SubmitReceipt {
-	return k.Store.Transaction(func() any {
+	return k.Store.Transaction(func(tx *TaskStore) any {
+		k := k.scoped(tx)
 		execution := k.Execution(executionID)
 		if execution == nil {
 			refuseMessage("Unknown execution " + executionID)

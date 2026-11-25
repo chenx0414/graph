@@ -234,7 +234,8 @@ func (conversations *TaskRuntimeConversations) SelectModel(conversationId, model
 	requested := taskRuntimeAsThinkingLevel(thinkingLevel)
 	result := runtime.store.Command("conversation:"+conversationId, requestId, map[string]any{
 		"type": "select_model", "model": strings.TrimSpace(model), "thinkingLevel": requested,
-	}, func() any {
+	}, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		var entry *ConfiguredModel
 		for _, candidate := range runtime.liveConfiguredEntries() {
 			if candidate.Id == strings.TrimSpace(model) {

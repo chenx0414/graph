@@ -17,7 +17,8 @@ func PublishConversationDelta(store *TaskStore, input PiAdapterConversationDelta
 	if !reset {
 		text = input.Delta
 	}
-	store.Transaction(func() any {
+	store.Transaction(func(tx *TaskStore) any {
+		store := tx
 		kernelExec(store.Db, `INSERT INTO conversation_streams(
       operation_id,conversation_id,entry_id,part_id,ordinal,text,length,updated_at
     ) VALUES(?,?,?,?,?,?,?,?)

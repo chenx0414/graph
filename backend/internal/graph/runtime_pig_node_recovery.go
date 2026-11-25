@@ -40,7 +40,8 @@ func (runtime *TaskRuntime) restorePigNode(frozen pigkernel.FrozenExecution) {
 }
 
 func (runtime *TaskRuntime) requeuePigNode(execution *ExecutionRow) {
-	runtime.store.Transaction(func() any {
+	runtime.store.Transaction(func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		runtime.kernel.BlockFailedExecution(execution.Id)
 		runtime.kernel.RequeueFailedItem(execution.TaskId, execution.NodeId, "Original kernel receipt retained for settlement")
 		return nil
@@ -48,7 +49,8 @@ func (runtime *TaskRuntime) requeuePigNode(execution *ExecutionRow) {
 }
 
 func (runtime *TaskRuntime) stopPigNode(execution *ExecutionRow) {
-	runtime.store.Transaction(func() any {
+	runtime.store.Transaction(func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		runtime.kernel.FailQueuedItem(execution.TaskId, execution.NodeId, pigNodeStoppedReason)
 		runtime.kernel.ParkNode(execution.TaskId, execution.NodeId)
 		runtime.store.BlockTaskPhase(execution.TaskId)

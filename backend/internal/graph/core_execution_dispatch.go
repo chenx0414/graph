@@ -182,8 +182,8 @@ func (e *Execution) reportGraphFailure(taskId string, failure any) {
 	}
 	func() {
 		defer func() { _ = recover() }()
-		e.store.Transaction(func() any {
-			e.store.Event(taskId, "graph.failed", map[string]any{"reason": reason})
+		e.store.Transaction(func(tx *TaskStore) any {
+			tx.Event(taskId, "graph.failed", map[string]any{"reason": reason})
 			return nil
 		})
 	}()

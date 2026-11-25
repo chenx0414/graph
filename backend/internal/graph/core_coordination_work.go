@@ -39,7 +39,8 @@ func normalizeWork(brief string, acceptance []string) (string, []string) {
 func (runtime *TaskRuntime) CreateWork(input WorkCreate, requestID string) WorkRecord {
 	runtime.ensureOpen()
 	input.Brief, input.Acceptance = normalizeWork(input.Brief, input.Acceptance)
-	result := runtime.store.Command("work:create:"+input.ConversationID, requestID, input, func() any {
+	result := runtime.store.Command("work:create:"+input.ConversationID, requestID, input, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		conversation := ConversationRowOf(runtime.store, input.ConversationID)
 		if conversation.Role != ConversationGlobal && conversation.Role != ConversationProject {
 			Raise("invalid_input", "Work requires a supervisor thread")
@@ -76,7 +77,8 @@ func (runtime *TaskRuntime) CreateWork(input WorkCreate, requestID string) WorkR
 func (runtime *TaskRuntime) ReviseWork(id string, input WorkEdit, requestID string) WorkRecord {
 	runtime.ensureOpen()
 	input.Brief, input.Acceptance = normalizeWork(input.Brief, input.Acceptance)
-	result := runtime.store.Command("work:revise:"+id, requestID, input, func() any {
+	result := runtime.store.Command("work:revise:"+id, requestID, input, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		current := runtime.store.workInTransaction(id)
 		if input.ProjectID != nil {
 			if !runtime.allowedProjects()[*input.ProjectID] {

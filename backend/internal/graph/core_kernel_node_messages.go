@@ -28,7 +28,8 @@ func SendKernelNodeMessage(kernel *KernelStore, graphID, nodeID string, input No
 	if from != nil {
 		actor = "peer:" + *from
 	}
-	return kernel.Store.Command("node-message:"+graphID+":"+nodeID+":"+actor, input.RequestID, nodeMessageCommand{Text: text, From: from}, func() any {
+	return kernel.Store.Command("node-message:"+graphID+":"+nodeID+":"+actor, input.RequestID, nodeMessageCommand{Text: text, From: from}, func(tx *TaskStore) any {
+		kernel := kernel.scoped(tx)
 		if from != nil {
 			nodes := revisionNodeMap(kernel.LatestRevision(graphID))
 			if _, ok := nodes[*from]; !ok || *from == nodeID {
@@ -61,7 +62,8 @@ func SendKernelMainMessage(kernel *KernelStore, graphID, from string, input Node
 	if text == "" || len([]rune(text)) > 100000 {
 		Raise("invalid_input", "A message of 1–100000 characters is required")
 	}
-	return kernel.Store.Command("node-message:"+graphID+":main:peer:"+from, input.RequestID, nodeMessageCommand{Text: text, From: &from}, func() any {
+	return kernel.Store.Command("node-message:"+graphID+":main:peer:"+from, input.RequestID, nodeMessageCommand{Text: text, From: &from}, func(tx *TaskStore) any {
+		kernel := kernel.scoped(tx)
 		graph := NewGraphRuntime(kernel, graphID, nil)
 		nodes := revisionNodeMap(kernel.LatestRevision(graphID))
 		if _, ok := nodes[from]; !ok {

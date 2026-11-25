@@ -196,7 +196,8 @@ func (w *ArtifactWorkspace) Read(taskId, artifactId string, version int, maxByte
 	if hex.EncodeToString(sum[:]) != record.Digest || len(data) != record.Size {
 		Raise("artifact_integrity", "Artifact content no longer matches its published digest")
 	}
-	w.store.Transaction(func() any {
+	w.store.Transaction(func(tx *TaskStore) any {
+		w := w.scoped(tx)
 		w.artifactEvent(taskId, record.ArtifactId, record.Version, "artifact.accessed", map[string]any{
 			"artifactId": record.ArtifactId, "version": record.Version,
 		})

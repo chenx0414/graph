@@ -41,7 +41,8 @@ func KernelProviderGate(kernel *KernelStore, graphId, nodeId string, limit *Toke
 					}
 					panic(recovered)
 				}()
-				kernel.Store.Transaction(func() any {
+				kernel.Store.Transaction(func(tx *TaskStore) any {
+		kernel := kernel.scoped(tx)
 					execution := kernel.RunningExecution(graphId, nodeId)
 					if execution == nil {
 						Raise("invalid_adapter", "Provider send has no active execution")
@@ -81,7 +82,8 @@ func KernelProviderGate(kernel *KernelStore, graphId, nodeId string, limit *Toke
 			if UsageSourceOf(usage) == UsageUnknown {
 				usage = nil
 			}
-			kernel.Store.Transaction(func() any {
+			kernel.Store.Transaction(func(tx *TaskStore) any {
+		kernel := kernel.scoped(tx)
 				call := kernel.ProviderCall(id, graphId, nodeId)
 				if call == nil || call.State != "inflight" {
 					Raise("invalid_adapter", "Provider call is absent or already settled")
@@ -123,7 +125,8 @@ func ReconcileKernelUsage(kernel *KernelStore, graphId, callId string, usage Tok
 			Raise("invalid_input", "Reconciliation requires non-negative token counts")
 		}
 	}
-	return kernel.Store.Transaction(func() any {
+	return kernel.Store.Transaction(func(tx *TaskStore) any {
+		kernel := kernel.scoped(tx)
 		call := kernel.ProviderCallOfTask(graphId, callId)
 		if call == nil {
 			Raise("invalid_input", "Unknown provider call")

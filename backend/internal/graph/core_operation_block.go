@@ -20,7 +20,8 @@ func (l *OperationLifecycle) HandleDispatchRefusal(operation Operation, refusal 
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
-		l.store.Transaction(func() {
+		l.store.Transaction(func(tx *TaskStore) {
+		l := l.scoped(tx)
 			for _, call := range kernelRows(l.store.Db, "SELECT id FROM invocations WHERE operation_id=? AND cost IS NULL", operation.Id) {
 				l.store.RecordInvocationUsage(kernelString(call["id"]), nil, CanonicalJSON(map[string]any{"unknown": true}))
 			}

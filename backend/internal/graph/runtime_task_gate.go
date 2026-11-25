@@ -91,7 +91,8 @@ func (gate *TaskSendGate) dispatch(id string, reservation float64, send func() a
 	if modelName == "" {
 		modelName = gate.model.Id
 	}
-	gate.store.Transaction(func() {
+	gate.store.Transaction(func(tx *TaskStore) {
+		gate := gate.scoped(tx)
 		if gate.store.InvocationExists(id) {
 			Raise("invalid_input", "Invocation already dispatched")
 		}
@@ -107,7 +108,8 @@ func (gate *TaskSendGate) dispatch(id string, reservation float64, send func() a
 }
 
 func (gate *TaskSendGate) settle(id string, usage *TokenUsage) {
-	gate.store.Transaction(func() {
+	gate.store.Transaction(func(tx *TaskStore) {
+		gate := gate.scoped(tx)
 		settled, found := gate.store.InvocationUsage(id)
 		if !found {
 			Raise("not_found", "Unknown invocation")

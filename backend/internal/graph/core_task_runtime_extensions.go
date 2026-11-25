@@ -38,7 +38,8 @@ func hasPendingExtensionReload() bool {
 
 func (runtime *TaskRuntime) ReloadExtensions(requestId string, deferred bool) map[string]any {
 	runtime.ensureOpen()
-	return runtime.store.Command("extensions:reload", requestId, map[string]any{"type": "reload-extensions", "deferred": deferred}, func() any {
+	return runtime.store.Command("extensions:reload", requestId, map[string]any{"type": "reload-extensions", "deferred": deferred}, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		if inFlight := kernelRow(runtime.store.Db, `SELECT id FROM operations
         WHERE state='dispatched' LIMIT 1`); inFlight != nil {
 			if !deferred {

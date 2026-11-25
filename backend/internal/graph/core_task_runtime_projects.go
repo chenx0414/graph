@@ -25,7 +25,8 @@ func (runtime *TaskRuntime) Prepare(input TaskRuntimeProjectPrepareInput) any {
 	opId := graphUUID()
 	headBefore := runtime.git.ProjectHead(input.ProjectId)
 	fingerprintBefore := runtime.git.ProjectFingerprint(input.ProjectId)
-	runtime.store.Transaction(func() any {
+	runtime.store.Transaction(func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		RecordGitOperation(runtime.store, opId, "project:"+input.ProjectId, "prepare", "intent",
 			CanonicalJSON(map[string]any{"payload": payload, "requestId": input.RequestId, "headBefore": headBefore, "fingerprintBefore": fingerprintBefore}))
 		return nil
@@ -39,7 +40,8 @@ func (runtime *TaskRuntime) Prepare(input TaskRuntimeProjectPrepareInput) any {
 
 func (runtime *TaskRuntime) settlePrepare(opId, requestId string, payload map[string]any, prep *ProjectPreparation, result map[string]any) any {
 	encoded := CanonicalJSON(payload)
-	return runtime.store.Transaction(func() any {
+	return runtime.store.Transaction(func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		SettleGitOperation(runtime.store, opId, "succeeded", CanonicalJSON(result))
 		duplicate := kernelRow(runtime.store.Db, "SELECT payload,receipt FROM commands WHERE scope=? AND request_id=?", "projects", requestId)
 		if duplicate != nil {

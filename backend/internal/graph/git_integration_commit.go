@@ -84,9 +84,9 @@ func (integration *GitIntegration) Integrate(operation GitIntegrateInput) *GitMe
 	if !merged.Ok {
 		return &merged
 	}
-	integration.store.Transaction(func() any {
-		integration.store.SetTaskIntegrationSha(operation.TaskId, merged.Sha)
-		graphDBExec(integration.store.Db, "INSERT INTO git_commits VALUES(?,?,?,?,?)", merged.Sha, operation.TaskId, operation.NodeId, operation.Id, "integration")
+	integration.store.Transaction(func(tx *TaskStore) any {
+		tx.SetTaskIntegrationSha(operation.TaskId, merged.Sha)
+		graphDBExec(tx.Db, "INSERT INTO git_commits VALUES(?,?,?,?,?)", merged.Sha, operation.TaskId, operation.NodeId, operation.Id, "integration")
 		return nil
 	})
 	return &merged
@@ -165,9 +165,9 @@ func (integration *GitIntegration) TryDeliver(taskId string, expectedCommit *str
 			return integration.recheckAgainstTarget(taskId, integrationPath, *task.TargetBranch, next)
 		}
 	}
-	integration.store.Transaction(func() any {
-		integration.store.SetTaskTargetSha(taskId, *integrationSha)
-		SettleGitOperation(integration.store, opId, "succeeded", CanonicalJSON(map[string]any{"sha": *integrationSha}))
+	integration.store.Transaction(func(tx *TaskStore) any {
+		tx.SetTaskTargetSha(taskId, *integrationSha)
+		SettleGitOperation(tx, opId, "succeeded", CanonicalJSON(map[string]any{"sha": *integrationSha}))
 		return nil
 	})
 	return GitDeliverResult{Status: "merged"}

@@ -69,7 +69,8 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 	})
 	runtime.store.RebuildExecutionSlots()
 
-	runtime.store.Transaction(func() any {
+	runtime.store.Transaction(func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		for _, project := range runtime.configuredProjects() {
 			if strings.TrimSpace(project.Id) == "" || strings.TrimSpace(project.Root) == "" {
 				Raise("invalid_input", "Project identity, root and grants must be nonempty strings")
@@ -102,7 +103,8 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 		runtime.scheduler = runtime.models.ModelScheduler
 	}
 	if runtime.models != nil {
-		runtime.store.Transaction(func() any {
+		runtime.store.Transaction(func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 			for _, entry := range runtime.models.Entries {
 				kernelExec(runtime.store.Db, "INSERT OR REPLACE INTO models VALUES(?,?)", entry.Id, CanonicalJSON(entry))
 			}
@@ -110,7 +112,8 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 		})
 	}
 	if runtime.live != nil {
-		runtime.store.Transaction(func() any {
+		runtime.store.Transaction(func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 			for _, entry := range runtime.live.Entries() {
 				kernelExec(runtime.store.Db, "INSERT OR REPLACE INTO models VALUES(?,?)", entry.Id, CanonicalJSON(entry))
 			}

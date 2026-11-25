@@ -8,7 +8,8 @@ func (runtime *TaskRuntime) stopGraphNode(caller, graphID, nodeID, requestID str
 	lock.Lock()
 	defer lock.Unlock()
 	payload := map[string]any{"graphId": graphID, "nodeId": nodeID}
-	result := runtime.store.Command(scope, requestID, payload, func() any {
+	result := runtime.store.Command(scope, requestID, payload, func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		actor := "agent"
 		if strings.HasPrefix(caller, "user:") {
 			actor = "user"
@@ -50,6 +51,6 @@ func (runtime *TaskRuntime) stopGraphNode(caller, graphID, nodeID, requestID str
 			}
 		}
 	}
-	runtime.store.Command(scope+":dispatched", requestID, payload, func() any { return map[string]any{"dispatched": true} })
+	runtime.store.Command(scope+":dispatched", requestID, payload, func(tx *TaskStore) any { return map[string]any{"dispatched": true} })
 	return result
 }

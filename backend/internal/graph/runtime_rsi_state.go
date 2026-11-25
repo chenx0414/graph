@@ -409,7 +409,8 @@ func (service *RsiService) AckRestart(id string, store *TaskStore) RsiAckRestart
 			touched = append(touched, value)
 		}
 	}
-	store.Transaction(func() any {
+	store.Transaction(func(tx *TaskStore) any {
+		store := tx
 		messages := kernelRows(store.Db, "SELECT id,conversation_id,text,data FROM messages WHERE kind='rsi' AND json_extract(data,'$.id')=?", id)
 		for _, message := range messages {
 			conversationID := graphDBString(message, "conversation_id")

@@ -33,7 +33,8 @@ func rsiPanicMessage(recovered any) string {
 }
 
 func (service *RsiService) rsiRecord(context RsiApplyContext, receipt RsiReceipt) {
-	context.Store.Transaction(func() any {
+	context.Store.Transaction(func(tx *TaskStore) any {
+		context := context.scoped(tx)
 		if receipt.RestartRequired && receipt.Commit != nil && context.OperationId != nil {
 			AwaitRsiReload(context.Store, receipt.Id, *context.OperationId, *receipt.Commit)
 		}
