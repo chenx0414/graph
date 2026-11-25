@@ -24,7 +24,8 @@ func (runtime *TaskRuntime) SweepUnsettledOperations(now int64) int {
       WHERE o.state='unknown' AND o.settled_at IS NULL
         AND o.dispatched_at IS NOT NULL AND o.dispatched_at<=?
         AND (c.id IS NULL OR c.archived_at IS NULL)
-        AND NOT EXISTS (SELECT 1 FROM questions q WHERE json_extract(q.data,'$.operationId')=o.id)
+        AND NOT EXISTS (SELECT 1 FROM questions q
+          WHERE COALESCE(q.operation_id,json_extract(q.data,'$.operationId'))=o.id)
       ORDER BY o.dispatched_at LIMIT ?`, now-int64(SettledOperationCutoff), limit)
 	raised := 0
 	for _, row := range rows {

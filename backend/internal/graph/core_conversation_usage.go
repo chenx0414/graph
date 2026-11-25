@@ -36,6 +36,8 @@ func TurnFailureText(reason string, kind ...TurnFailureKind) string {
 
 const EmptyReplyNotice = "本轮模型没有返回任何内容（finish_reason=stop，没有任何文字）。消息已保留，再发一次即可继续。"
 
+const TurnLostToRestartNotice = "这一轮被重载打断：上游没有回复，也没有用量。消息已保留，再发一次即可继续。"
+
 var turnFailureOutputKeys = []string{"error", "setupError"}
 
 func TurnFailureReason(result OperationResult) TurnFailure {
@@ -149,6 +151,10 @@ func RecordConversationOutput(store *TaskStore, operation Operation, result Oper
 }
 
 func RecordConversationInterruption(store *TaskStore, operation Operation, reason string, kind ...TurnFailureKind) {
+	recordConversationTurnNotice(store, operation, "error", TurnFailureText(reason, kind...), nil)
+}
+
+func recordConversationTurnNotice(store *TaskStore, operation Operation, kind, text string, data map[string]any) {
 	if operation.Kind != "agent" {
 		return
 	}
@@ -163,18 +169,24 @@ func RecordConversationInterruption(store *TaskStore, operation Operation, reaso
 	if OperationReplied(store, &operation.Id) {
 		return
 	}
-	if kernelRow(store.Db, "SELECT id FROM messages WHERE operation_id=? AND role='system' AND kind='error' LIMIT 1", operation.Id) != nil {
+	if kernelRow(store.Db, "SELECT id FROM messages WHERE operation_id=? AND role='system' AND kind=? LIMIT 1", operation.Id, kind) != nil {
 		return
 	}
 	AppendMessage(store, MessageInput{
 		ConversationID: conversation.Id,
 		Role:           MessageRoleSystem,
-		Kind:           "error",
-		Text:           TurnFailureText(reason, kind...),
+		Kind:           kind,
+		Text:           text,
 		State:          MessageStateDone,
+		Data:           data,
 		OperationID:    &operation.Id,
 		Turn:           operation.Attempt,
 	})
+}
+
+func RecordLostTurnNotice(store *TaskStore, operation Operation) {
+	recordConversationTurnNotice(store, operation, "notice", TurnLostToRestartNotice,
+		map[string]any{"source": map[string]any{"form": "notice", "summary": "这一轮被重载打断"}})
 }
 
 func ReleaseMessages(store *TaskStore, operationId string) {

@@ -94,8 +94,10 @@ func (l *OperationLifecycle) Recover() int {
 				"reason":      "Recovered after restart with no live worker",
 				"quiescent":   true,
 			})
+			RecordLostTurnNotice(l.store, operationFrom(row))
 			l.Block(kernelString(row["task_id"]), kernelString(row["node_id"]), "recovery", map[string]any{
-				"reason": "Dispatch was recorded; external outcome and worker liveness require reconciliation",
+				"operationId": kernelString(row["id"]),
+				"reason":      "Dispatch was recorded; external outcome and worker liveness require reconciliation",
 			}, operationLifecycleStringPtr(kernelString(row["id"])))
 		}
 		stranded := kernelRows(l.store.Db, `WITH candidates AS MATERIALIZED (
