@@ -44,7 +44,6 @@ type storeState struct {
 	listeners         []func(string)
 	waiters           []chan struct{}
 	txMu              sync.Mutex
-	txDepth           int
 	agentExecutions   *executionSlotPool
 	programExecutions *executionSlotPool
 	transactionExec   func(statement string) error

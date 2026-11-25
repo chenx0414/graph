@@ -182,7 +182,7 @@ func (service *graphManagementService) applyAcceptanceLimitations(plan acceptanc
 	if !graphAcceptanceDeliveryMatches(task, report) {
 		Raise("invalid_graph", "The Git delivery of "+plan.graphId+" does not match its current integration commit; a delivery mismatch cannot be waived")
 	}
-	service.kernel.ModuleTransaction(func() any {
+	service.kernel.ModuleTransaction(func(kernel *KernelStore) any {
 		commit := report.Commit
 		revision := 0
 		if latest := service.kernel.LatestRevision(plan.graphId); latest != nil {

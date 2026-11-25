@@ -9,7 +9,7 @@ func (runtime *ModuleRuntime) ReopenAfterPending(moduleId string) ModuleEvaluati
 	lock := moduleLock(runtime.kernel, runtime.taskId, moduleId)
 	lock.Lock()
 	defer lock.Unlock()
-	return runtime.kernel.ModuleTransaction(func() any { return runtime.Reopen(moduleId) }).(ModuleEvaluation)
+	return runtime.kernel.ModuleTransaction(func(kernel *KernelStore) any { return runtime.Reopen(moduleId) }).(ModuleEvaluation)
 }
 
 func (runtime *ModuleRuntime) Reopen(moduleId string) ModuleEvaluation {
@@ -62,7 +62,7 @@ func (runtime *ModuleRuntime) deliverEvaluatedUnlocked(moduleId, inputName strin
 	control, _ := record["control"].(map[string]any)
 	reopen, _ := control["reopen"].(string)
 	if reopen == inputName {
-		return runtime.kernel.ModuleTransaction(func() any {
+		return runtime.kernel.ModuleTransaction(func(kernel *KernelStore) any {
 			judged := runtime.acceptControl(moduleId, inputName, value)
 			if deliveryId != "" {
 				runtime.kernel.MarkDeliveryProcessed(deliveryId)
@@ -99,7 +99,7 @@ func (runtime *ModuleRuntime) deliverEvaluatedUnlocked(moduleId, inputName strin
 		if len(missing) > 0 {
 			reason = "waiting for " + joinComma(missing)
 		}
-		runtime.kernel.ModuleTransaction(func() any {
+		runtime.kernel.ModuleTransaction(func(kernel *KernelStore) any {
 			runtime.kernel.RecordModuleTransition(runtime.taskId, ModuleTransitionInput{
 				ModuleId: moduleId, InputName: inputName, InputValue: inputs, StateBefore: state, StateAfter: state,
 				Outputs: map[string]any{}, RuleVersion: implementationVersion, Reason: reason,
@@ -153,7 +153,7 @@ func (runtime *ModuleRuntime) deliverEvaluatedUnlocked(moduleId, inputName strin
 	if verdict != "" {
 		verdictPtr = &verdict
 	}
-	recorded := runtime.kernel.ModuleTransaction(func() any {
+	recorded := runtime.kernel.ModuleTransaction(func(kernel *KernelStore) any {
 		row := runtime.kernel.RecordModuleTransition(runtime.taskId, ModuleTransitionInput{
 			ModuleId: moduleId, InputName: inputName, InputValue: inputs, StateBefore: state, StateAfter: result.State,
 			Verdict: verdictPtr, Outputs: result.Outputs, RuleVersion: implementationVersion, Reason: reason,

@@ -45,7 +45,7 @@ func (service *graphManagementService) GraphCreate(input GraphCreateInput) any {
 		created = GraphCreateResult{GraphId: graphId, Definition: latest.Definition, Revision: latest.Version}
 	} else {
 		created = service.kernel.Store.Transaction(func(tx *TaskStore) any {
-		kernel := service.kernel.scoped(tx)
+			kernel := service.kernel.scoped(tx)
 			if conversation := ConversationForTask(kernel.Store, service.ownerTaskId); conversation != nil && conversation.Role == ConversationHistory {
 				Raise("permission", "Historical conversations cannot create graph work")
 			}

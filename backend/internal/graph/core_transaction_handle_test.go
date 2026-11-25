@@ -132,6 +132,16 @@ func TestTransactionHandleGateRejectsEachBypass(t *testing.T) {
 			source: "func (integration *GitIntegration) run() {\n\tintegration.store.Transaction(func(tx *TaskStore) any {\n\t\tgraphDBExec(tx.Db, \"INSERT INTO git_commits VALUES(?,?,?,?,?)\", \"integration\")\n\t\treturn nil\n\t})\n}",
 			want:   "",
 		},
+		{
+			name:   "a wrapper that forwards the store it was given is accepted",
+			source: "func (k *KernelStore) run(action func(*TaskStore) any) any {\n\tif k.Store.IsTransaction() {\n\t\treturn action(k.Store)\n\t}\n\treturn k.Store.Transaction(action)\n}",
+			want:   "",
+		},
+		{
+			name:   "a callback value that is not the transaction's store is rejected",
+			source: "func (k *KernelStore) run(apply func() any) any {\n\treturn k.Store.Transaction(apply)\n}",
+			want:   "callback is a value",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -213,10 +223,13 @@ func (gate handleGate) check(text string) []callbackComplaint {
 			kind := body[call[2]:call[3]]
 			argsAt := call[1]
 			args := callArguments(body, argsAt)
+			line := 1 + strings.Count(text[:open]+body[:call[0]], "\n")
 			if args == "" {
+				if !passedThrough(callArgsOnly(body, argsAt), functionParams(text, fn)) && (kind == "Transaction" || !strings.HasSuffix(body[:call[0]], "exec")) {
+					complaints = append(complaints, callbackComplaint{line, kind + " callback is a value, so the transaction cannot hand it the store it owns"})
+				}
 				continue
 			}
-			line := 1 + strings.Count(text[:open]+body[:call[0]], "\n")
 			start := argsAt + strings.Index(args, "func")
 			brace := start + strings.Index(body[start:argsAt+len(args)], "{")
 			if brace < start {
@@ -292,7 +305,7 @@ func (gate handleGate) capturedHolders(fn []int, text, body string) map[string]s
 	if fn[2] >= 0 && gate.holders[text[fn[6]:fn[7]]] {
 		names[text[fn[2]:fn[3]]] = text[fn[6]:fn[7]]
 	}
-	for _, param := range strings.Split(text[fn[10]:fn[11]], ",") {
+	for _, param := range strings.Split(functionParams(text, fn), ",") {
 		fields := strings.Fields(param)
 		if len(fields) == 2 && gate.holders[strings.TrimPrefix(fields[1], "*")] {
 			names[fields[0]] = strings.TrimPrefix(fields[1], "*")
@@ -309,6 +322,65 @@ func (gate handleGate) capturedHolders(fn []int, text, body string) map[string]s
 		}
 	}
 	return names
+}
+
+// functionParams returns the parameter list of the function whose signature starts at fn[0],
+// scanning to its matching parenthesis: a regexp stops at the ")" inside "func(*TaskStore) any".
+func functionParams(text string, fn []int) string {
+	open := fn[9]
+	if open < 0 || open >= len(text) || text[open] != '(' {
+		return ""
+	}
+	depth := 0
+	for i := open; i < len(text); i++ {
+		switch text[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return text[open+1 : i]
+			}
+		}
+	}
+	return ""
+}
+
+// callArgsOnly returns the argument list of the call that opened at afterOpen-1 without requiring an
+// inline func literal, so a forwarded callback can still be recognised by its declared type.
+func callArgsOnly(body string, afterOpen int) string {
+	depth := 1
+	for i := afterOpen; i < len(body); i++ {
+		switch body[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return body[afterOpen:i]
+			}
+		}
+	}
+	return ""
+}
+
+// passedThrough reports whether the callback handed to a transaction is a parameter of the
+// enclosing function declared func(*TaskStore) any: the wrapper forwards the store it was given, so
+// its own body receives the transaction's handle and there is nothing to rebind.
+func passedThrough(args, params string) bool {
+	declared := map[string]bool{}
+	for _, param := range strings.Split(params, ",") {
+		fields := strings.Fields(strings.ReplaceAll(param, "func(*TaskStore) any", "func(*TaskStore)any"))
+		if len(fields) == 2 && fields[1] == "func(*TaskStore)any" {
+			declared[fields[0]] = true
+		}
+	}
+	for _, arg := range strings.Split(args, ",") {
+		if declared[strings.TrimSpace(arg)] {
+			return true
+		}
+	}
+	return false
 }
 
 // callArguments returns the argument list of the call that opened at afterOpen-1, or "" when the

@@ -1,7 +1,8 @@
 package graph
 
 func RecoverMaster(store *TaskStore, taskId, reason string) bool {
-	apply := func() any {
+	apply := func(tx *TaskStore) any {
+		store := tx
 		master := questionMasterNode(store, taskId)
 		if master == nil {
 			return false
@@ -39,9 +40,9 @@ func RecoverMaster(store *TaskStore, taskId, reason string) bool {
 		return len(released) > 0
 	}
 	if store.IsTransaction() {
-		released, _ := apply().(bool)
+		released, _ := apply(store).(bool)
 		return released
 	}
-	released, _ := store.Transaction(apply).(bool)
+	released, _ := store.Transaction(func(tx *TaskStore) any { return apply(tx) }).(bool)
 	return released
 }

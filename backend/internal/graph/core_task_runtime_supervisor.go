@@ -38,7 +38,7 @@ func (supervisor *TaskRuntimeSupervisor) ControlTask(input TaskRuntimeControlInp
 			payload["instruction"] = input.Instruction
 		}
 		receipt := runtime.store.Command(scope, input.RequestId, payload, func(tx *TaskStore) any {
-		runtime := runtime.scoped(tx)
+			runtime := runtime.scoped(tx)
 			if !paused {
 				requireArchiveResumeInstruction(runtime.store, supervisor.taskId, target, input.SourceMessageID, input.Instruction)
 			}
@@ -95,7 +95,7 @@ func (supervisor *TaskRuntimeSupervisor) ControlTask(input TaskRuntimeControlInp
 	case "archive", "restore":
 		archived := input.Action == "archive"
 		return runtime.store.Command(scope, input.RequestId, map[string]any{"type": input.Action, "taskId": target}, func(tx *TaskStore) any {
-		runtime := runtime.scoped(tx)
+			runtime := runtime.scoped(tx)
 			changed := runtime.store.RestoreTask(target)
 			if archived {
 				changed = runtime.store.ArchiveTask(target)
@@ -107,7 +107,7 @@ func (supervisor *TaskRuntimeSupervisor) ControlTask(input TaskRuntimeControlInp
 		})
 	case "delete":
 		return runtime.store.Command(scope, input.RequestId, map[string]any{"type": "delete", "taskId": target}, func(tx *TaskStore) any {
-		runtime := runtime.scoped(tx)
+			runtime := runtime.scoped(tx)
 			removed, err := runtime.store.DeleteTask(target)
 			if err != nil {
 				Raise("invalid_state", err.Error())
@@ -138,7 +138,7 @@ func (supervisor *TaskRuntimeSupervisor) ControlTask(input TaskRuntimeControlInp
 		}
 		steered := runtime.execution.Steer(active.Id, text)
 		return runtime.store.Transaction(func(tx *TaskStore) any {
-		runtime := runtime.scoped(tx)
+			runtime := runtime.scoped(tx)
 			return map[string]any{
 				"taskId":      target,
 				"nodeId":      nodeId,

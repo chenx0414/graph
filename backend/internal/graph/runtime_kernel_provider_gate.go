@@ -42,7 +42,7 @@ func KernelProviderGate(kernel *KernelStore, graphId, nodeId string, limit *Toke
 					panic(recovered)
 				}()
 				kernel.Store.Transaction(func(tx *TaskStore) any {
-		kernel := kernel.scoped(tx)
+					kernel := kernel.scoped(tx)
 					execution := kernel.RunningExecution(graphId, nodeId)
 					if execution == nil {
 						Raise("invalid_adapter", "Provider send has no active execution")
@@ -83,7 +83,7 @@ func KernelProviderGate(kernel *KernelStore, graphId, nodeId string, limit *Toke
 				usage = nil
 			}
 			kernel.Store.Transaction(func(tx *TaskStore) any {
-		kernel := kernel.scoped(tx)
+				kernel := kernel.scoped(tx)
 				call := kernel.ProviderCall(id, graphId, nodeId)
 				if call == nil || call.State != "inflight" {
 					Raise("invalid_adapter", "Provider call is absent or already settled")

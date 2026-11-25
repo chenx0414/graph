@@ -8,7 +8,8 @@ func (l *OperationLifecycle) CancelBeforeDispatch(operationId, reason string) {
 	if reason == "" {
 		reason = "Cancelled before dispatch"
 	}
-	l.transaction(func() any {
+	l.transaction(func(tx *TaskStore) any {
+		l := l.scoped(tx)
 		row := l.operationRow(operationId)
 		l.markNotSent(row, operationNotSentOptions{ResetNode: true, EventReason: operationLifecycleStringPtr(reason)})
 		ReleaseMessages(l.store, operationId)
@@ -17,7 +18,8 @@ func (l *OperationLifecycle) CancelBeforeDispatch(operationId, reason string) {
 }
 
 func (l *OperationLifecycle) MarkPreparationFailed(operationId, reason string) {
-	l.transaction(func() any {
+	l.transaction(func(tx *TaskStore) any {
+		l := l.scoped(tx)
 		row := l.operationRow(operationId)
 		l.markNotSent(row, operationNotSentOptions{ResetNode: false})
 		ReleaseMessages(l.store, operationId)
@@ -28,7 +30,8 @@ func (l *OperationLifecycle) MarkPreparationFailed(operationId, reason string) {
 }
 
 func (l *OperationLifecycle) Dispatch(operation Operation) {
-	l.transaction(func() any {
+	l.transaction(func(tx *TaskStore) any {
+		l := l.scoped(tx)
 		now := NowMillis()
 		l.store.MarkOperationDispatchedAt(operation.Id, now)
 		l.store.SetNodeRunning(operation.TaskId, operation.NodeId)
@@ -45,7 +48,8 @@ func (l *OperationLifecycle) Dispatch(operation Operation) {
 }
 
 func (l *OperationLifecycle) Report(id string, generation int, result OperationResult) string {
-	return l.transaction(func() any {
+	return l.transaction(func(tx *TaskStore) any {
+		l := l.scoped(tx)
 		row := l.operationRow(id)
 		if int(kernelInt(row["generation"])) != generation || generation != l.generation {
 			Raise("stale_generation", "Worker generation is stale")
@@ -86,7 +90,8 @@ func (l *OperationLifecycle) Reconcile(id string, reconcile func(operation Opera
 		evidence.Result != nil && evidence.Result.Outcome == "completed" {
 		integrate(operation)
 	}
-	l.transaction(func() any {
+	l.transaction(func(tx *TaskStore) any {
+		l := l.scoped(tx)
 		current := kernelRow(l.store.Db, "SELECT state,result FROM operations WHERE id=?", id)
 		if kernelString(current["state"]) != "unknown" {
 			return nil

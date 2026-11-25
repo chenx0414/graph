@@ -14,9 +14,9 @@ func NewOperationLifecycle(store *TaskStore, hooks OperationLifecycleHooks) *Ope
 	return &OperationLifecycle{store: store, hooks: hooks}
 }
 
-func (l *OperationLifecycle) transaction(action func() any) any {
+func (l *OperationLifecycle) transaction(action func(*TaskStore) any) any {
 	if l.store.IsTransaction() {
-		return action()
+		return action(l.store)
 	}
 	return l.store.Transaction(action)
 }
@@ -72,7 +72,8 @@ func operationSnapshotOf(row map[string]any) *OperationSnapshot {
 }
 
 func (l *OperationLifecycle) Recover() int {
-	return l.transaction(func() any {
+	return l.transaction(func(tx *TaskStore) any {
+		l := l.scoped(tx)
 		l.store.BumpRuntimeGeneration()
 		row := kernelRow(l.store.Db, "SELECT generation FROM runtime")
 		generation := int(kernelInt(row["generation"]))

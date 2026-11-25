@@ -75,10 +75,10 @@ func ensureMainRecipe(catalog *Catalog, bootstrap PresetBootstrap, log func(stri
 		if existing == nil {
 			catalog.SaveAgentCombination(AgentCombination{
 				Id: "main", Name: "Atlas_main",
-				Description:      "持续面对用户、规划任务、设计并监控 Graph，并在确认范围内组装和调用 subagents。",
-				Mode:             "main",
-				Tags:             []string{"main", "system"},
-				Resources:        []AgentCombinationResource{},
+				Description: "持续面对用户、规划任务、设计并监控 Graph，并在确认范围内组装和调用 subagents。",
+				Mode:        "main",
+				Tags:        []string{"main", "system"},
+				Resources:   []AgentCombinationResource{},
 			})
 			return
 		}

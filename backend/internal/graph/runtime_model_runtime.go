@@ -31,16 +31,16 @@ func ToPiModel(entry ModelEntry) piModelView {
 	headers := ModelRequestHeaders(entry)
 	thinkingLevelMap := ThinkingLevelMapFor(entry)
 	model := piModelView{
-		Id:       entry.Id,
-		Name:     entry.Id,
-		Provider: entry.Provider,
-		Api:      entry.Api,
-		BaseUrl:  entry.BaseUrl,
+		Id:            entry.Id,
+		Name:          entry.Id,
+		Provider:      entry.Provider,
+		Api:           entry.Api,
+		BaseUrl:       entry.BaseUrl,
 		Reasoning:     true,
 		Input:         []ModelInput{"text"},
 		ContextWindow: entry.ContextWindow,
 		MaxTokens:     entry.MaxTokens,
-		Cost: ModelCost{Input: 0, Output: 0, CacheRead: 0, CacheWrite: 0},
+		Cost:          ModelCost{Input: 0, Output: 0, CacheRead: 0, CacheWrite: 0},
 	}
 	if entry.ModelId != "" {
 		model.Id = entry.ModelId
@@ -219,10 +219,10 @@ func providerRequestBody(api ModelApi, request ProviderRequest) ([]byte, error) 
 	}
 	if string(api) == "openai-responses" {
 		payload := map[string]any{
-			"model":    request.Model,
-			"input":    request.Messages,
-			"stream":   request.Stream,
-			"store":    false,
+			"model":  request.Model,
+			"input":  request.Messages,
+			"stream": request.Stream,
+			"store":  false,
 		}
 		if request.System != nil {
 			payload["instructions"] = *request.System

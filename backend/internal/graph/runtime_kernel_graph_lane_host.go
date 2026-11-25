@@ -325,8 +325,8 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 					InstanceID: session.Binding.InstanceId, Tool: call.Tool, Ms: call.Ms, IsError: call.IsError, Target: target,
 				})
 			},
-			SkillPaths:  append([]string{}, workerConfig.SkillPaths...),
-			SkillFolder: stringPointerValue(workerConfig.SkillFolder),
+			SkillPaths:              append([]string{}, workerConfig.SkillPaths...),
+			SkillFolder:             stringPointerValue(workerConfig.SkillFolder),
 			PiExtensionPaths:        append([]string{}, workerConfig.PiExtensionPaths...),
 			PiExtensionTools:        append([]string{}, workerConfig.PiExtensionTools...),
 			ExtensionProcessAllowed: true,
@@ -346,7 +346,7 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 			Request:  nodeRequest,
 			Gate:     nativeGate,
 			Codemode: codemodeSettings(state.options.Codemode, state.options.StateDir),
-			Ungated: []string{"submit"},
+			Ungated:  []string{"submit"},
 			Stream: func(_ any, context map[string]any, _ map[string]any) (ModelEventStream, error) {
 				channel, err := nodeChannel(context, nil, WorkerModelOptions{})
 				if err != nil {

@@ -12,8 +12,8 @@ func DeliverChildResult(store *TaskStore, child ConversationRow, operation Opera
 	if child.Role != ConversationChild || operation.Kind != "agent" {
 		return
 	}
-	withStoreTx(store, func() any {
-		deliverChildResultInTransaction(store, child, operation, result)
+	withStoreTx(store, func(tx *TaskStore) any {
+		deliverChildResultInTransaction(tx, child, operation, result)
 		return nil
 	})
 }

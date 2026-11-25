@@ -7,7 +7,6 @@ import (
 	"strings"
 )
 
-
 func rsiChangeContent(root string, change RsiFileChange, index int) string {
 	if change.FromPath == nil {
 		if change.Content == nil {

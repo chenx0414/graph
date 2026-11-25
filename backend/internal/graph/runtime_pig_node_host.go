@@ -17,23 +17,23 @@ import (
 )
 
 type PigNodeHostOptions struct {
-	GraphId  string
-	NodeId   string
-	Role     string
-	Database string
-	Store *TaskStore
-	Request AgentSessionRequest
-	Gate SendGate
-	Ungated []string
-	Stream PromptStreamFunc
-	StreamOptions func() map[string]any
-	Codemode CodemodeSettings
-	RequestId func() string
-	Usage func() *PiTurnUsage
-	PreAdmission func() []string
-	OnEvent func(event map[string]any)
-	OnToolCall func(call pigkernel.ToolCallRecord)
-	OnReady func(sessionId string, sessionFile string)
+	GraphId          string
+	NodeId           string
+	Role             string
+	Database         string
+	Store            *TaskStore
+	Request          AgentSessionRequest
+	Gate             SendGate
+	Ungated          []string
+	Stream           PromptStreamFunc
+	StreamOptions    func() map[string]any
+	Codemode         CodemodeSettings
+	RequestId        func() string
+	Usage            func() *PiTurnUsage
+	PreAdmission     func() []string
+	OnEvent          func(event map[string]any)
+	OnToolCall       func(call pigkernel.ToolCallRecord)
+	OnReady          func(sessionId string, sessionFile string)
 	RecoveredAttempt func() int
 }
 

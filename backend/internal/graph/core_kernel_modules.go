@@ -18,8 +18,8 @@ func (k *KernelStore) ModuleInput(taskID, moduleID, name string) *ModuleInputRow
 }
 
 func (k *KernelStore) SetModuleInput(taskID, moduleID, name string, value any, source *string) {
-	k.ModuleTransaction(func() any {
-		k.setModuleInputInTransaction(taskID, moduleID, name, value, source)
+	k.ModuleTransaction(func(kernel *KernelStore) any {
+		kernel.setModuleInputInTransaction(taskID, moduleID, name, value, source)
 		return nil
 	})
 }
@@ -36,22 +36,22 @@ func (k *KernelStore) setModuleInputInTransaction(taskID, moduleID, name string,
 func (k *KernelStore) RecordModuleTransition(taskID string, input ModuleTransitionInput) ModuleTransitionRow {
 	id := graphUUID()
 	createdAt := NowMillis()
-	k.ModuleTransaction(func() any {
+	k.ModuleTransaction(func(kernel *KernelStore) any {
 		var verdict any
 		if input.Verdict != nil {
 			verdict = *input.Verdict
 		}
-		g5Exec(k.Db, "INSERT INTO kernel_module_transitions(id,task_id,module_id,input_name,input_value,state_before,state_after,verdict,outputs,rule_version,reason,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", id, taskID, input.ModuleId, input.InputName, k.Content.Encode(input.InputValue), k.Content.Encode(input.StateBefore), k.Content.Encode(input.StateAfter), verdict, k.Content.Encode(input.Outputs), input.RuleVersion, input.Reason, createdAt)
+		g5Exec(kernel.Db, "INSERT INTO kernel_module_transitions(id,task_id,module_id,input_name,input_value,state_before,state_after,verdict,outputs,rule_version,reason,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", id, taskID, input.ModuleId, input.InputName, kernel.Content.Encode(input.InputValue), kernel.Content.Encode(input.StateBefore), kernel.Content.Encode(input.StateAfter), verdict, kernel.Content.Encode(input.Outputs), input.RuleVersion, input.Reason, createdAt)
 		routed := 0
 		if len(input.Outputs) == 0 {
 			routed = 1
 		}
-		g5Exec(k.Db, "INSERT INTO kernel_transition_outbox(transition_id,routed) VALUES(?,?)", id, routed)
+		g5Exec(kernel.Db, "INSERT INTO kernel_transition_outbox(transition_id,routed) VALUES(?,?)", id, routed)
 		triggered := 0
 		if input.Verdict != nil {
 			triggered = 1
 		}
-		g5Exec(k.Db, "UPDATE kernel_modules SET state=?, rule_version=?, triggered=CASE WHEN ?=1 THEN 1 ELSE triggered END WHERE task_id=? AND module_id=?", k.Content.Encode(input.StateAfter), input.RuleVersion, triggered, taskID, input.ModuleId)
+		g5Exec(kernel.Db, "UPDATE kernel_modules SET state=?, rule_version=?, triggered=CASE WHEN ?=1 THEN 1 ELSE triggered END WHERE task_id=? AND module_id=?", kernel.Content.Encode(input.StateAfter), input.RuleVersion, triggered, taskID, input.ModuleId)
 		return nil
 	})
 	return ModuleTransitionRow{ModuleTransitionInput: input, Id: id, CreatedAt: createdAt}

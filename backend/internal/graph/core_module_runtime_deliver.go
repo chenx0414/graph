@@ -28,7 +28,7 @@ func (runtime *ModuleRuntime) Deliver(moduleId, inputName string, value any) Mod
 func (runtime *ModuleRuntime) ConsumeDelivery(moduleId, inputName string, value any, deliveryId string) ModuleEvaluation {
 	var evaluation ModuleEvaluation
 	if err := portRecover(func() {
-		evaluation = runtime.kernel.ModuleTransaction(func() any {
+		evaluation = runtime.kernel.ModuleTransaction(func(kernel *KernelStore) any {
 			control := runtime.acceptControl(moduleId, inputName, value)
 			if control == nil {
 				runtime.kernel.SetModuleInput(runtime.taskId, moduleId, inputName, value, moduleRuntimeSource("delivery:"+deliveryId))

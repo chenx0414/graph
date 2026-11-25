@@ -124,7 +124,7 @@ type CredentialRecoveryRequest struct {
 }
 
 type OperationLifecycleHooks struct {
-	CanReplayBeforeSend func(operation Operation) bool
+	CanReplayBeforeSend  func(operation Operation) bool
 	OnCredentialRejected func(CredentialRecoveryRequest) bool
 }
 
@@ -132,7 +132,7 @@ type OperationAdmitInput struct {
 	Node        OperationNode
 	Reservation int64
 	Prepare     func(attempt int) OperationIntent
-	AfterIntent func(operation Operation)
+	AfterIntent func(store *TaskStore, operation Operation)
 }
 
 type OperationQuery struct {

@@ -52,7 +52,7 @@ type GraphControlInput struct {
 	RequestID       string
 	Text            string
 	Proof           string
-	Limitations []GraphAcceptanceLimitation
+	Limitations     []GraphAcceptanceLimitation
 }
 
 type GraphSendInput struct {

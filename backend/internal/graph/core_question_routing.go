@@ -69,8 +69,8 @@ var questionPolicies = map[string]QuestionPolicy{
 	"recovery":             {Owner: QuestionOwnerMain, Answers: []string{"retry", "acknowledge"}, RetryOnMessage: true, Escalate: true},
 	"result_noncompliant":  {Owner: QuestionOwnerMain, Answers: []string{"retry", "wait", "pause"}, Escalate: true},
 	"git_dirty":            {Owner: QuestionOwnerMain, Answers: []string{"acknowledge"}},
-	"rework":  {Owner: QuestionOwnerMain, Answers: []string{"respond", "retry", "wait", "pause"}, Escalate: true},
-	"stalled": {Owner: QuestionOwnerMain, Answers: []string{"respond", "retry", "wait", "pause"}, Escalate: true},
+	"rework":               {Owner: QuestionOwnerMain, Answers: []string{"respond", "retry", "wait", "pause"}, Escalate: true},
+	"stalled":              {Owner: QuestionOwnerMain, Answers: []string{"respond", "retry", "wait", "pause"}, Escalate: true},
 }
 
 type questionMaster struct {
@@ -296,7 +296,8 @@ func PendingHumanChecks(store *TaskStore, conversationId string) []map[string]an
 }
 
 func ApproveHumanCheck(store *TaskStore, questionId, note string) bool {
-	apply := func() any {
+	apply := func(tx *TaskStore) any {
+		store := tx
 		row := kernelRow(store.Db, "SELECT task_id,node_id,data FROM questions WHERE id=? AND kind='human_check' AND status='open'", questionId)
 		if row == nil {
 			return false
@@ -319,10 +320,10 @@ func ApproveHumanCheck(store *TaskStore, questionId, note string) bool {
 		return true
 	}
 	if store.IsTransaction() {
-		approved, _ := apply().(bool)
+		approved, _ := apply(store).(bool)
 		return approved
 	}
-	approved, _ := store.Transaction(apply).(bool)
+	approved, _ := store.Transaction(func(tx *TaskStore) any { return apply(tx) }).(bool)
 	return approved
 }
 

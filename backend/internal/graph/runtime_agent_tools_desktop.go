@@ -24,9 +24,9 @@ const desktopEnvelopeLimit = 400_000
 var desktopCommandName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 
 type DesktopRun struct {
-	Stdout string
-	Stderr string
-	Code *int
+	Stdout   string
+	Stderr   string
+	Code     *int
 	TimedOut bool
 }
 
@@ -228,7 +228,7 @@ func desktopExecutionContextOf(input AgentToolsInput) desktopExecutionContext {
 
 func (context desktopExecutionContext) details() map[string]any {
 	return map[string]any{
-		"role": context.Role,
+		"role":  context.Role,
 		"probe": "agent-desktop permissions", "evidence": "host",
 	}
 }

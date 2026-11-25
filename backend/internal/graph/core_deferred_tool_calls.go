@@ -52,12 +52,12 @@ func deferredToolCallRetentionLeft(call DeferredToolCall) int64 {
 }
 
 const (
-	DeferredToolAccepted DeferredToolCallState = "accepted"
-	DeferredToolRunning DeferredToolCallState = "running"
-	DeferredToolSettled DeferredToolCallState = "settled"
-	DeferredToolFailed DeferredToolCallState = "failed"
-	DeferredToolCancelled DeferredToolCallState = "cancelled"
-	DeferredToolTimedOut DeferredToolCallState = "timed_out"
+	DeferredToolAccepted    DeferredToolCallState = "accepted"
+	DeferredToolRunning     DeferredToolCallState = "running"
+	DeferredToolSettled     DeferredToolCallState = "settled"
+	DeferredToolFailed      DeferredToolCallState = "failed"
+	DeferredToolCancelled   DeferredToolCallState = "cancelled"
+	DeferredToolTimedOut    DeferredToolCallState = "timed_out"
 	DeferredToolInterrupted DeferredToolCallState = "interrupted"
 )
 

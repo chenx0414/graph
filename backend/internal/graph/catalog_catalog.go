@@ -253,4 +253,3 @@ func (catalog *Catalog) Capabilities() []CapabilityRecord {
 func (catalog *Catalog) CapabilitiesView() []CapabilityRecord {
 	return catalog.library.CapabilitiesView()
 }
-

@@ -11,60 +11,60 @@ import (
 )
 
 type FrozenExecution struct {
-	Identity string `json:"identity"`
-	ExecutionId string `json:"executionId"`
-	InputRequestId string `json:"inputRequestId"`
-	PreAdmissionInvocationIds []string `json:"preAdmissionInvocationIds"`
-	Model any `json:"model"`
-	Agent FrozenExecutionAgent `json:"agent"`
-	ExtensionName string `json:"extensionName"`
-	Tools []FrozenExecutionTool `json:"tools"`
-	Policy FrozenExecutionPolicy `json:"policy"`
-	Configuration FrozenExecutionConfiguration `json:"configuration"`
+	Identity                  string                       `json:"identity"`
+	ExecutionId               string                       `json:"executionId"`
+	InputRequestId            string                       `json:"inputRequestId"`
+	PreAdmissionInvocationIds []string                     `json:"preAdmissionInvocationIds"`
+	Model                     any                          `json:"model"`
+	Agent                     FrozenExecutionAgent         `json:"agent"`
+	ExtensionName             string                       `json:"extensionName"`
+	Tools                     []FrozenExecutionTool        `json:"tools"`
+	Policy                    FrozenExecutionPolicy        `json:"policy"`
+	Configuration             FrozenExecutionConfiguration `json:"configuration"`
 }
 
 type FrozenExecutionAgent struct {
-	Model any `json:"model"`
+	Model        any    `json:"model"`
 	Instructions string `json:"instructions"`
-	Cwd string `json:"cwd"`
+	Cwd          string `json:"cwd"`
 }
 
 type FrozenExecutionTool struct {
-	Name string `json:"name"`
+	Name        string `json:"name"`
 	Description string `json:"description"`
-	Parameters any `json:"parameters"`
+	Parameters  any    `json:"parameters"`
 }
 
 type FrozenExecutionConfiguration struct {
-	ExecutionConfiguration any `json:"executionConfiguration"`
-	CredentialReference any `json:"credentialReference"`
-	HeaderCredentials []string `json:"headerCredentials"`
-	Descriptor any `json:"descriptor"`
+	ExecutionConfiguration any      `json:"executionConfiguration"`
+	CredentialReference    any      `json:"credentialReference"`
+	HeaderCredentials      []string `json:"headerCredentials"`
+	Descriptor             any      `json:"descriptor"`
 }
 
 type FrozenExecutionPolicy struct {
-	Workspace string `json:"workspace"`
-	StateDir string `json:"stateDir"`
-	SkillPaths []string `json:"skillPaths"`
-	SkillFolder string `json:"skillFolder"`
-	PiExtensionPaths []string `json:"piExtensionPaths"`
-	ReadRoots []string `json:"readRoots"`
-	WriteRoots []string `json:"writeRoots"`
-	ProtectedPaths []string `json:"protectedPaths"`
-	FilesystemAccess string `json:"filesystemAccess"`
-	NativeTools []string `json:"nativeTools"`
-	AllowedToolNames []string `json:"allowedToolNames"`
-	PiExtensionTools []string `json:"piExtensionTools"`
-	BundleDigest string `json:"bundleDigest"`
-	ToolPolicyDigest string `json:"toolPolicyDigest"`
-	RuntimePolicyDigest string `json:"runtimePolicyDigest"`
-	ThinkingLevel *string `json:"thinkingLevel"`
+	Workspace           string   `json:"workspace"`
+	StateDir            string   `json:"stateDir"`
+	SkillPaths          []string `json:"skillPaths"`
+	SkillFolder         string   `json:"skillFolder"`
+	PiExtensionPaths    []string `json:"piExtensionPaths"`
+	ReadRoots           []string `json:"readRoots"`
+	WriteRoots          []string `json:"writeRoots"`
+	ProtectedPaths      []string `json:"protectedPaths"`
+	FilesystemAccess    string   `json:"filesystemAccess"`
+	NativeTools         []string `json:"nativeTools"`
+	AllowedToolNames    []string `json:"allowedToolNames"`
+	PiExtensionTools    []string `json:"piExtensionTools"`
+	BundleDigest        string   `json:"bundleDigest"`
+	ToolPolicyDigest    string   `json:"toolPolicyDigest"`
+	RuntimePolicyDigest string   `json:"runtimePolicyDigest"`
+	ThinkingLevel       *string  `json:"thinkingLevel"`
 }
 
 type FrozenExecutionRecovery struct {
-	Record FrozenExecution
+	Record     FrozenExecution
 	Descriptor map[string]any
-	Identity string
+	Identity   string
 }
 
 func frozenExecutionOfRequest(request AgentSessionRequest, preAdmission []string) FrozenExecution {

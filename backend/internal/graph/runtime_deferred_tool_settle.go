@@ -18,7 +18,8 @@ func finalizeDeferredToolCall(store *TaskStore, call DeferredToolCall, outcome d
 		outcome.State = DeferredToolSettled
 	}
 	pending := DeferredToolCall{}
-	final := withStoreTx(store, func() any {
+	final := withStoreTx(store, func(tx *TaskStore) any {
+		store := tx
 		current := DeferredToolCallById(store, call.Id)
 		if current == nil {
 			Raise("not_found", "The deferred tool call is not there")

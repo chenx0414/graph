@@ -107,10 +107,10 @@ func TestFleetRejectsUnknownAndChatConversations(t *testing.T) {
 
 func TestFleetTruncatesEventsAndArtifactsAtTwoHundred(t *testing.T) {
 	fixture := seedFleetFixture(t)
-	fixture.store.Transaction(func() any {
+	fixture.store.Transaction(func(tx *TaskStore) any {
 		for index := 0; index < 205; index++ {
-			fixture.exec(t, `INSERT INTO events(task_id,type,data,timestamp) VALUES('t-work','node.entry','{"nodeId":"n4"}',?)`, 7000+index)
-			fixture.exec(t, `INSERT INTO artifacts(artifact_id,version,scope,owner_id,task_id,project_id,namespace,name,
+			execInTransaction(t, tx, `INSERT INTO events(task_id,type,data,timestamp) VALUES('t-work','node.entry','{"nodeId":"n4"}',?)`, 7000+index)
+			execInTransaction(t, tx, `INSERT INTO artifacts(artifact_id,version,scope,owner_id,task_id,project_id,namespace,name,
 				logical_key,digest,object_path,size,media_type,title,producer_node_id,producer_instance_id,visibility,trust,
 				state,metadata,created_at) VALUES(?,'1','task','t-work','t-work','p1','shared',?,
 				?,'sha','/tmp/x',1,'text/plain','', 'n4','i-n4','task','trusted','published','{}',?)`,
@@ -132,9 +132,9 @@ func TestFleetTruncatesEventsAndArtifactsAtTwoHundred(t *testing.T) {
 
 func TestFleetTruncatesAgentsBeyondOneThousandAndKeepsFullStats(t *testing.T) {
 	fixture := seedFleetFixture(t)
-	fixture.store.Transaction(func() any {
+	fixture.store.Transaction(func(tx *TaskStore) any {
 		for index := 0; index < 1001; index++ {
-			RegisterAgent(fixture.store, AgentRegistration{
+			RegisterAgent(tx, AgentRegistration{
 				Id: "child-" + itoa(index), ParentId: "c-global", Kind: "child", Role: "worker",
 			})
 		}

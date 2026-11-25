@@ -46,7 +46,7 @@ func (stream *controlledStream) brokenToolCall() error {
 type providerLineReader struct {
 	body  io.ReadCloser
 	lines chan providerLine
-	done chan struct{}
+	done  chan struct{}
 }
 
 type providerLine struct {

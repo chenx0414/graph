@@ -47,7 +47,7 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 		}
 		deliveryId := kernelString(operation["delivery_id"])
 		moduleId := kernelString(operation["module_id"])
-		service.kernel.ModuleTransaction(func() any {
+		service.kernel.ModuleTransaction(func(kernel *KernelStore) any {
 			service.kernel.CancelModuleOperation(operationId)
 			service.kernel.MarkDeliveryProcessed(deliveryId)
 			service.kernel.Store.Event(input.GraphId, unjudgedEvent, map[string]any{
@@ -121,7 +121,7 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 				Raise("invalid_input", "Pause/resume requires a target in the current graph definition")
 			}
 			service.kernel.Store.Transaction(func(tx *TaskStore) any {
-		kernel := service.kernel.scoped(tx)
+				kernel := service.kernel.scoped(tx)
 				if !paused {
 					requireProjectActive(kernel.Store, kernel.Store.Task(input.GraphId).ProjectID)
 					if input.AgentTaskID != "" {
@@ -139,7 +139,7 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 			return graph.State()
 		}
 		service.kernel.Store.Transaction(func(tx *TaskStore) any {
-		kernel := service.kernel.scoped(tx)
+			kernel := service.kernel.scoped(tx)
 			if !paused && input.AgentTaskID != "" {
 				requireArchiveResumeInstruction(kernel.Store, input.AgentTaskID, input.GraphId, input.SourceMessageID, input.Instruction)
 			}
@@ -169,7 +169,7 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 			Raise("invalid_queue", "Submitted work cannot be sent again")
 		}
 		service.kernel.Store.Transaction(func(tx *TaskStore) any {
-		kernel := service.kernel.scoped(tx)
+			kernel := service.kernel.scoped(tx)
 			requireProjectActive(kernel.Store, kernel.Store.Task(input.GraphId).ProjectID)
 			if input.Action == "retry" && kernel.HasPendingProviderCall(input.GraphId, nodeId) {
 				Raise("unknown_usage", "Reconcile the node's pending provider calls before retrying")

@@ -56,54 +56,38 @@ func (s *TaskStore) IsTransaction() bool {
 	return s.InTransaction()
 }
 
+// InTransaction reports whether this store is the handle a transaction body was given. It is a
+// property of the handle, not of the store: a second goroutine holding the pool store is not inside
+// the first goroutine's transaction and must not write on its connection.
 func (s *TaskStore) InTransaction() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.txDepth > 0
+	return s.inTx
 }
 
-func (s *TaskStore) setTx(active bool) {
-	s.mu.Lock()
-	if active {
-		s.txDepth++
-	} else if s.txDepth > 0 {
-		s.txDepth--
-	}
-	s.mu.Unlock()
-}
-
+// Transaction runs a body on a connection it owns. The body receives the store as seen from
+// inside that transaction, and the transaction commits or rolls back on the same connection, so a
+// statement from another goroutine can never end up inside it.
 func (s *TaskStore) Transaction(action any) any {
-	if s.InTransaction() {
+	if s.inTx {
 		return storeTransactionAction(s, action)
 	}
 	s.txMu.Lock()
 	defer s.txMu.Unlock()
-	if s.InTransaction() {
-		return storeTransactionAction(s, action)
-	}
-	if err := s.runTransactionStatement("BEGIN IMMEDIATE"); err != nil {
-		panic(err)
-	}
-	s.setTx(true)
-	var result any
-	settled := false
+	handle, end := s.transactionConn()
+	ended := false
 	defer func() {
-		s.setTx(false)
-		if !settled {
-			if err := s.runTransactionStatement("ROLLBACK"); err != nil {
-				panic(err)
-			}
+		if ended {
+			return
 		}
-		if rec := recover(); rec != nil {
-			panic(rec)
+		if err := end(false); err != nil {
+			panic(err)
 		}
 	}()
-	result = storeTransactionAction(s, action)
-	if err := s.runTransactionStatement("COMMIT"); err != nil {
-		settled = true
+	inTx := s.transactionScoped(handle)
+	result := storeTransactionAction(inTx, action)
+	ended = true
+	if err := end(true); err != nil {
 		panic(err)
 	}
-	settled = true
 	s.emitChange()
 	return result
 }

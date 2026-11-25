@@ -11,7 +11,7 @@ const HARNESS_BACKLOG_ARTIFACT = "harness-backlog"
 const HARNESS_SOURCE_BACKLOG = "backlog"
 
 var (
-	harnessBacklogID = regexp.MustCompile(`\*\*([A-Za-z]{2,4}-[0-9]+)\*\*`)
+	harnessBacklogID    = regexp.MustCompile(`\*\*([A-Za-z]{2,4}-[0-9]+)\*\*`)
 	harnessBacklogFixed = regexp.MustCompile("Fixed@\\s*`?([0-9a-f]{7,40})`?")
 )
 

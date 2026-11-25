@@ -4,7 +4,6 @@ import (
 	"strings"
 )
 
-
 type DeferredToolCallView struct {
 	ToolCallId  string `json:"toolCallId"`
 	Name        string `json:"name"`

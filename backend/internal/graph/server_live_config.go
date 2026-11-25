@@ -2,7 +2,6 @@ package graph
 
 import (
 	"sync"
-
 )
 
 type ResolvedCredential struct {
@@ -129,7 +128,6 @@ func (live *LiveConfig) MasterModel() string {
 	defer live.mu.Unlock()
 	return live.state.MasterModel
 }
-
 
 func (live *LiveConfig) Enabled() bool {
 	live.mu.Lock()

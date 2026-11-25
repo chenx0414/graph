@@ -10,7 +10,10 @@ func (k *KernelStore) PublishRevision(taskID string, definition GraphDefinition,
 		Raise("invalid_definition", "A revision reason is required")
 	}
 	parsed := ParseGraphDefinition(definition)
-	return k.tx(func() any { return k.InsertRevision(taskID, parsed, reason, version...) }).(*RevisionRow)
+	return k.tx(func(tx *TaskStore) any {
+		k := k.scoped(tx)
+		return k.InsertRevision(taskID, parsed, reason, version...)
+	}).(*RevisionRow)
 }
 
 func (k *KernelStore) InsertRevision(taskID string, definition GraphDefinition, reason string, version ...int) *RevisionRow {
@@ -52,15 +55,12 @@ func (k *KernelStore) LatestRevision(taskID string) *RevisionRow {
 	return k.Revision(taskID, int(g5Int(row["version"])))
 }
 
-func (k *KernelStore) ModuleTransaction(action func() any) any {
+func (k *KernelStore) ModuleTransaction(action func(*KernelStore) any) any {
 	if k.moduleTransactionActive {
-		return action()
+		return action(k)
 	}
 	return k.Store.Transaction(func(tx *TaskStore) any {
-		k := k.scoped(tx)
-		k.moduleTransactionActive = true
-		defer func() { k.moduleTransactionActive = false }()
-		return action()
+		return action(k.scoped(tx))
 	})
 }
 
@@ -139,16 +139,19 @@ func (k *KernelStore) SetExecutionState(executionID, state string) {
 }
 
 func (k *KernelStore) FinishExecution(executionID, state string) {
-	finish := func() {
+	finish := func(k *KernelStore) {
 		now := NowMillis()
 		k.CloseExecutionTiming(executionID, now)
 		g5Exec(k.Db, "UPDATE kernel_executions SET state=?, ended_at=? WHERE id=?", state, now, executionID)
 	}
 	if k.Store.IsTransaction() {
-		finish()
+		finish(k)
 		return
 	}
-	k.Store.Transaction(func(tx *TaskStore) any { finish(); return nil })
+	k.Store.Transaction(func(tx *TaskStore) any {
+		finish(k.scoped(tx))
+		return nil
+	})
 }
 
 func (k *KernelStore) Execution(executionID string) *ExecutionRow {

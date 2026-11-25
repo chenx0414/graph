@@ -12,7 +12,7 @@ func (k *KernelStore) EnqueueInCurrentTransaction(taskID string, input QueueInse
 
 func (k *KernelStore) Enqueue(taskID string, input QueueInsert) QueueRow {
 	if k.Store.IsTransaction() {
-		return k.EnqueueInCurrentTransaction(taskID, input)
+		return k.scoped(k.Store).EnqueueInCurrentTransaction(taskID, input)
 	}
 	return k.Store.Transaction(func(tx *TaskStore) any {
 		k := k.scoped(tx)

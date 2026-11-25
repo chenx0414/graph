@@ -29,7 +29,7 @@ func (runtime *GraphRuntime) SettleCompletion() string {
 	task := runtime.kernel.Store.Task(runtime.graphId)
 	currentCommit := task.IntegrationSha
 	humanQuestions := kernelRows(runtime.kernel.DB, "SELECT id,data FROM questions WHERE task_id=? AND kind='human_check' AND status='open'", runtime.graphId)
-	runtime.kernel.ModuleTransaction(func() any {
+	runtime.kernel.ModuleTransaction(func(kernel *KernelStore) any {
 		for _, question := range humanQuestions {
 			var data map[string]any
 			if err := json.Unmarshal([]byte(kernelString(question["data"])), &data); err != nil {
@@ -68,7 +68,7 @@ func (runtime *GraphRuntime) SettleCompletion() string {
 	acceptance := GraphAcceptance(runtime.kernel, runtime.graphId, runtime.artifacts)
 	task = runtime.kernel.Store.Task(runtime.graphId)
 	if !acceptance.Ready || !graphAcceptanceDeliveryMatches(task, acceptance) {
-		runtime.kernel.ModuleTransaction(func() any {
+		runtime.kernel.ModuleTransaction(func(kernel *KernelStore) any {
 			readyHuman := true
 			for _, item := range acceptance.Items {
 				if item.Status == "passed" || item.Status == "waived" {
@@ -96,7 +96,7 @@ func (runtime *GraphRuntime) SettleCompletion() string {
 		})
 		return "blocked"
 	}
-	runtime.kernel.ModuleTransaction(func() any {
+	runtime.kernel.ModuleTransaction(func(kernel *KernelStore) any {
 		runtime.setPhase("completed")
 		task := runtime.kernel.Store.Task(runtime.graphId)
 		var sha any

@@ -33,8 +33,8 @@ type HarnessDifference struct {
 }
 
 type HarnessComparison struct {
-	GraphId string `json:"graphId"`
-	Domain  string `json:"domain,omitempty"`
+	GraphId      string                         `json:"graphId"`
+	Domain       string                         `json:"domain,omitempty"`
 	Baseline     string                         `json:"baseline"`
 	BaselineNode string                         `json:"baselineNodeId"`
 	Candidates   []HarnessCandidateFacts        `json:"candidates"`

@@ -294,9 +294,9 @@ func encodeURIComponent(s string) string {
 	return b.String()
 }
 
-func withStoreTx(store *TaskStore, apply func() any) any {
+func withStoreTx(store *TaskStore, apply func(*TaskStore) any) any {
 	if store.InTransaction() {
-		return apply()
+		return apply(store)
 	}
-	return store.Transaction(apply)
+	return store.Transaction(func(tx *TaskStore) any { return apply(tx) })
 }

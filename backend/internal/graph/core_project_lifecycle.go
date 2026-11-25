@@ -43,7 +43,7 @@ func (runtime *TaskRuntime) ArchiveProject(projectID, requestID string) ProjectL
 	result, childTasks := func() (any, []string) {
 		defer graphDatabaseMu.Unlock()
 		result := runtime.store.Command("project:archive:"+projectID, requestID, map[string]any{"projectId": projectID}, func(tx *TaskStore) any {
-		runtime := runtime.scoped(tx)
+			runtime := runtime.scoped(tx)
 			before := runtime.projectLifecycleInTransaction(projectID)
 			if !before.Archived {
 				runtime.store.ArchiveProject(projectID, NowMillis())
@@ -128,7 +128,7 @@ func (runtime *TaskRuntime) resumeWork(workID, requestID string, instruction *Wo
 			payload["instruction"] = instruction
 		}
 		return runtime.store.Command("work:resume:"+workID, requestID, payload, func(tx *TaskStore) any {
-		runtime := runtime.scoped(tx)
+			runtime := runtime.scoped(tx)
 			work := runtime.store.workInTransaction(workID)
 			if work.ProjectID == nil {
 				Raise("invalid_input", "Work has no project")

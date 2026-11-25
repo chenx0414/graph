@@ -1,7 +1,7 @@
 package graph
 
 type SecretPersistRequest struct {
-	Ref string `json:"ref"`
+	Ref   string  `json:"ref"`
 	Value *string `json:"value"`
 }
 

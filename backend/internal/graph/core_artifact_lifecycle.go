@@ -1,7 +1,6 @@
 package graph
 
-import (
-)
+import ()
 
 func (w *ArtifactWorkspace) Retire(taskId, artifactId string, version int, reason, requestId string, actor any) ArtifactRecord {
 	record := w.Get(taskId, artifactId, &version, "")

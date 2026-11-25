@@ -1,7 +1,6 @@
 package graph
 
-import (
-)
+import ()
 
 type TokenBudget struct {
 	Budget    float64 `json:"budget"`

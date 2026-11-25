@@ -108,12 +108,12 @@ type cliOptions struct {
 	dynamic         bool
 	help            bool
 	applicationRoot string
-	kernelDatabase string
-	kernelMode string
-	kernelModel    string
-	kernelPrompt   string
-	kernelIdentity string
-	kernelMcp string
+	kernelDatabase  string
+	kernelMode      string
+	kernelModel     string
+	kernelPrompt    string
+	kernelIdentity  string
+	kernelMcp       string
 }
 
 func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {

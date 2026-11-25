@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 )
 
-
 type RsiReloadHooks struct {
 	Pause  func(store *TaskStore, excludeTaskID string) []string
 	Resume func(store *TaskStore, ids []string) []string

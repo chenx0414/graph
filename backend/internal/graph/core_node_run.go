@@ -174,7 +174,7 @@ func NodeRun(store *TaskStore, taskId, nodeId string, query NodeEntryQuery) Node
 		Node: nodeView, Instance: instance, Session: session, Operations: operations,
 		Invocations: invocations, Questions: questions, Queued: queued, Evidence: evidence, Timing: timing,
 		Throughput: nodeThroughput(store, taskId, nodeId),
-		Entries: page.Entries, EntryCount: page.EntryCount, HasOlder: page.HasOlder, HasNewer: page.HasNewer,
+		Entries:    page.Entries, EntryCount: page.EntryCount, HasOlder: page.HasOlder, HasNewer: page.HasNewer,
 		Phase: task.Phase,
 	}
 }

@@ -18,7 +18,7 @@ func RecoverKernelExecutions(kernel *KernelStore) []string {
 		return []string{}
 	}
 	interrupted := []string{}
-	kernel.ModuleTransaction(func() any {
+	kernel.ModuleTransaction(func(kernel *KernelStore) any {
 		ReconcileOperationResources(kernel)
 		ReleaseOperationLeasesOnRestart(kernel, "owner_restart")
 		kernelExec(kernel.Db, "UPDATE kernel_provider_calls SET state='unknown' WHERE state='inflight'")

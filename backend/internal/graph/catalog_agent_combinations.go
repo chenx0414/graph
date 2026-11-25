@@ -22,14 +22,14 @@ type AgentCombinationResource struct {
 }
 
 type AgentCombination struct {
-	Id               string                     `json:"id"`
-	Name             string                     `json:"name"`
-	Description      string                     `json:"description"`
-	Mode             AgentCombinationMode       `json:"mode,omitempty"`
-	Review           bool                       `json:"review"`
-	Tags             []string                   `json:"tags"`
-	SystemPrompt     string                     `json:"systemPrompt,omitempty"`
-	Resources        []AgentCombinationResource `json:"resources"`
+	Id           string                     `json:"id"`
+	Name         string                     `json:"name"`
+	Description  string                     `json:"description"`
+	Mode         AgentCombinationMode       `json:"mode,omitempty"`
+	Review       bool                       `json:"review"`
+	Tags         []string                   `json:"tags"`
+	SystemPrompt string                     `json:"systemPrompt,omitempty"`
+	Resources    []AgentCombinationResource `json:"resources"`
 }
 
 type AgentCombinationResolved struct {
@@ -54,9 +54,9 @@ type AgentCombinationDocument struct {
 }
 
 type DefinitionSpec struct {
-	SystemPrompt     string              `json:"systemPrompt,omitempty"`
-	Capabilities     []CapabilityBinding `json:"capabilities,omitempty"`
-	Prompts          *struct {
+	SystemPrompt string              `json:"systemPrompt,omitempty"`
+	Capabilities []CapabilityBinding `json:"capabilities,omitempty"`
+	Prompts      *struct {
 		Agent *CapabilityBinding `json:"agent,omitempty"`
 		Tool  *CapabilityBinding `json:"tool,omitempty"`
 	} `json:"prompts,omitempty"`

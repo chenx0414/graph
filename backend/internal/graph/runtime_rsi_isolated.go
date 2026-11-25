@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 )
 
-
 func rsiIsolatedWorktree(root string, owned []string) (string, bool, func()) {
 	head := RevParse(root, "HEAD")
 	if head == nil {

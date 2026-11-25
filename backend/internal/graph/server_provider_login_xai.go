@@ -3,12 +3,12 @@ package graph
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -19,7 +19,7 @@ const (
 	xaiScope         = "openid profile email offline_access grok-cli:access api:access"
 	xaiUserAgent     = "graph-xai-oauth"
 	xaiRefreshSuffix = "_REFRESH"
-	xaiRefreshLead = 5 * time.Minute
+	xaiRefreshLead   = 5 * time.Minute
 )
 
 type xaiDeviceLogin struct {

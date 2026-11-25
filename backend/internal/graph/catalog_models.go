@@ -23,11 +23,11 @@ type ModelThinkingOption struct {
 }
 
 type ModelCost struct {
-	Input      float64 `json:"input"`
-	Output     float64 `json:"output"`
-	CacheRead  float64 `json:"cacheRead"`
-	CacheWrite float64 `json:"cacheWrite"`
-	Tiers []ModelCostTier `json:"tiers,omitempty"`
+	Input      float64         `json:"input"`
+	Output     float64         `json:"output"`
+	CacheRead  float64         `json:"cacheRead"`
+	CacheWrite float64         `json:"cacheWrite"`
+	Tiers      []ModelCostTier `json:"tiers,omitempty"`
 }
 
 type ModelCostTier struct {
@@ -62,7 +62,7 @@ type ModelEntry struct {
 	Headers              map[string]string  `json:"headers,omitempty"`
 	CredentialId         string             `json:"credentialId,omitempty"`
 	ModelId              string             `json:"modelId,omitempty"`
-	FallbackModelId string `json:"fallbackModelId,omitempty"`
+	FallbackModelId      string             `json:"fallbackModelId,omitempty"`
 }
 
 type ModelEntryView struct {

@@ -7,11 +7,11 @@ import (
 )
 
 const (
-	pigNativeLsLimit = 500
-	pigNativeFindLimit = 1000
-	pigNativeGrepLimit = 100
-	pigNativeMaxBytes = 50 * 1024
-	pigNativeMaxLines = 2000
+	pigNativeLsLimit        = 500
+	pigNativeFindLimit      = 1000
+	pigNativeGrepLimit      = 100
+	pigNativeMaxBytes       = 50 * 1024
+	pigNativeMaxLines       = 2000
 	pigNativeGrepLineLength = 500
 )
 

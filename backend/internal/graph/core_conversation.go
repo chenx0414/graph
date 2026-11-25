@@ -122,11 +122,11 @@ type MessageInput struct {
 	Role           MessageRole
 	Kind           string
 	Text           string
-	Data        Json
-	State       MessageState
-	OperationID *string
-	Turn        int
-	MessageID *string
+	Data           Json
+	State          MessageState
+	OperationID    *string
+	Turn           int
+	MessageID      *string
 }
 
 type AppendedMessage struct {
@@ -152,20 +152,19 @@ type TurnFailure struct {
 }
 
 type ConversationMasterUsageView struct {
-	CachedInput     int64  `json:"cachedInput"`
-	CacheInput      int64  `json:"cacheInput"`
-	ContextTokens   *int64 `json:"contextTokens"`
-	CacheReadTokens *int64 `json:"cacheReadTokens"`
+	CachedInput         int64    `json:"cachedInput"`
+	CacheInput          int64    `json:"cacheInput"`
+	ContextTokens       *int64   `json:"contextTokens"`
+	CacheReadTokens     *int64   `json:"cacheReadTokens"`
 	RequestCacheHitRate *float64 `json:"requestCacheHitRate"`
-	CacheUsedAt     *int64 `json:"cacheUsedAt"`
-	OutputTokens    *int64   `json:"outputTokens"`
-	LatencyMs       *int64   `json:"latencyMs"`
-	TokensPerSecond *float64 `json:"tokensPerSecond"`
-	FirstTokenMs    *int64   `json:"firstTokenMs"`
-	UploadMs        *int64   `json:"uploadMs"`
-	ServerWaitMs    *int64   `json:"serverWaitMs"`
+	CacheUsedAt         *int64   `json:"cacheUsedAt"`
+	OutputTokens        *int64   `json:"outputTokens"`
+	LatencyMs           *int64   `json:"latencyMs"`
+	TokensPerSecond     *float64 `json:"tokensPerSecond"`
+	FirstTokenMs        *int64   `json:"firstTokenMs"`
+	UploadMs            *int64   `json:"uploadMs"`
+	ServerWaitMs        *int64   `json:"serverWaitMs"`
 }
-
 
 func RecordTurnRefusal(store *TaskStore, conversationId string, reason string) {
 	text := TurnFailureText(reason, TurnFailureSetup)

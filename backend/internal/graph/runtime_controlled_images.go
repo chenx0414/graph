@@ -1,6 +1,5 @@
 package graph
 
-
 func controlledImageParts(value any) []map[string]any {
 	parts := []map[string]any{}
 	visit := func(item any) {

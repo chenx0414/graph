@@ -2,7 +2,6 @@ package graph
 
 import (
 	"strings"
-
 )
 
 func NewKernelStore(store *TaskStore) *KernelStore {
@@ -100,9 +99,9 @@ func kernelColumns(db sqlh, table string) map[string]bool {
 	return out
 }
 
-func (k *KernelStore) tx(action func() any) any {
+func (k *KernelStore) tx(action func(*TaskStore) any) any {
 	if k.Store.IsTransaction() {
-		return action()
+		return action(k.Store)
 	}
 	return k.Store.Transaction(action)
 }

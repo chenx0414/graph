@@ -25,7 +25,8 @@ type PendingWake struct {
 }
 
 func WakeMaster(store *TaskStore, intent WakeIntent) bool {
-	apply := func() any {
+	apply := func(tx *TaskStore) any {
+		store := tx
 		row, ok := sqliteOne(store.DB, `SELECT c.id AS conversation_id,c.anchor_task_id,c.archived_at,m.id AS master_id
       FROM tasks t
       LEFT JOIN kernel_graph_owners g ON g.task_id=t.id

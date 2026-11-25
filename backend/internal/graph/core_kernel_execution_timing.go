@@ -5,7 +5,7 @@ func (k *KernelStore) SetExecutionWaiting(executionID string, waiting bool, now 
 	if len(now) > 0 {
 		at = now[0]
 	}
-	update := func() {
+	update := func(k *KernelStore) {
 		var changes int64
 		if waiting {
 			changes, _ = g5Exec(k.Db, `UPDATE kernel_executions SET
@@ -26,10 +26,13 @@ func (k *KernelStore) SetExecutionWaiting(executionID string, waiting bool, now 
 		}
 	}
 	if k.Store.IsTransaction() {
-		update()
+		update(k.scoped(k.Store))
 		return
 	}
-	k.Store.Transaction(update)
+	k.Store.Transaction(func(tx *TaskStore) any {
+		update(k.scoped(tx))
+		return nil
+	})
 }
 
 func (k *KernelStore) CloseExecutionTiming(executionID string, now ...int64) {

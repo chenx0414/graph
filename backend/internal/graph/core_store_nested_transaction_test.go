@@ -15,11 +15,12 @@ func TestRecoveryInsideATransactionDoesNotDeadlock(t *testing.T) {
 	kernel := NewKernelStore(store)
 
 	recovered := false
-	store.Transaction(func() any {
-		store.Event("t1", "during", map[string]any{"n": 1})
+	store.Transaction(func(tx *TaskStore) any {
+		tx.Event("t1", "during", map[string]any{"n": 1})
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
+					kernel := NewKernelStore(tx)
 					kernel.SetNodeQueuePaused("t1", "n1", true)
 					kernel.BlockNode("t1", "n1", panicMessage(r))
 					recovered = true

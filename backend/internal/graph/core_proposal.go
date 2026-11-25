@@ -146,4 +146,3 @@ func numberValue(value any) float64 {
 		return 0
 	}
 }
-

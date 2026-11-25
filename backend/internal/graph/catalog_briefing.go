@@ -7,10 +7,10 @@ import (
 )
 
 type BriefingAgentCombination struct {
-	Id               string `json:"id"`
-	Name             string `json:"name"`
-	Description      string `json:"description"`
-	Status           string `json:"status"`
+	Id          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Status      string `json:"status"`
 }
 
 type BriefingCatalog struct {

@@ -46,7 +46,7 @@ type CapabilityOperationOptions struct {
 	NativeTools          []string
 	OnPermissionRequired func(CapabilityPermissionRequest)
 	HostTools            func(readRoots []string) []ToolDefinition
-	NativeToolsProvider func(granted []string) []ToolDefinition
+	NativeToolsProvider  func(granted []string) []ToolDefinition
 }
 
 type CapabilityOperation struct {
@@ -71,7 +71,7 @@ type CapabilityOperation struct {
 	UnixSockets              []string
 	PiExtensionPaths         []string
 	PiExtensionTools         []string
-	McpServers        []McpServerRef
+	McpServers               []McpServerRef
 	Close                    func()
 }
 

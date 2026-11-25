@@ -2,10 +2,10 @@ package graph
 
 type PiAdapterStreamOptions struct {
 	EstimateMissing bool
-	OnRequest func(callId string, profile map[string]any)
-	OnSend func(sent PiAdapterSentRequest)
-	OnTransport func(observation ProviderTransportObservation)
-	HasFallback bool
+	OnRequest       func(callId string, profile map[string]any)
+	OnSend          func(sent PiAdapterSentRequest)
+	OnTransport     func(observation ProviderTransportObservation)
+	HasFallback     bool
 }
 
 type PiAdapterSentRequest struct {

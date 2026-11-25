@@ -14,9 +14,9 @@ const HARNESS_EVIDENCE_MAX_TEXT = 600
 
 type HarnessEvidenceInput struct {
 	GraphId string
-	NodeId string
-	Kind string
-	Limit int
+	NodeId  string
+	Kind    string
+	Limit   int
 }
 
 type HarnessEvidenceToolError struct {

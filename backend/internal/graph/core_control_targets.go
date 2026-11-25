@@ -3,7 +3,6 @@ package graph
 import (
 	"encoding/json"
 	"fmt"
-
 )
 
 type ActiveOperation struct {

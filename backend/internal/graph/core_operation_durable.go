@@ -14,7 +14,8 @@ type durableCompletion struct {
 }
 
 func (lifecycle *OperationLifecycle) acceptDurableCompletion(receipt durableCompletion) {
-	lifecycle.transaction(func() any {
+	lifecycle.transaction(func(tx *TaskStore) any {
+		lifecycle := lifecycle.scoped(tx)
 		row := lifecycle.operationRow(receipt.ExecutionId)
 		state := kernelString(row["state"])
 		if state != "unknown" && state != "dispatched" {

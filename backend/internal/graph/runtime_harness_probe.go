@@ -9,14 +9,14 @@ import (
 )
 
 const (
-	HARNESS_EXPERIENCE_NAMESPACE = "plans"
-	HARNESS_EXPERIENCE_PREFIX = "harness-experience"
-	HARNESS_EXPERIENCE_SCHEMA = "graph.harness-experience@2"
-	HARNESS_MAX_CANDIDATES = 12
+	HARNESS_EXPERIENCE_NAMESPACE   = "plans"
+	HARNESS_EXPERIENCE_PREFIX      = "harness-experience"
+	HARNESS_EXPERIENCE_SCHEMA      = "graph.harness-experience@2"
+	HARNESS_MAX_CANDIDATES         = 12
 	HARNESS_EXPERIENCE_MAX_ENTRIES = 200
-	HARNESS_EXPERIENCE_MAX_BYTES = 262144
-	HARNESS_MAX_FINAL_MESSAGE = 2000
-	HARNESS_MAX_OUTPUT_VALUE = 2000
+	HARNESS_EXPERIENCE_MAX_BYTES   = 262144
+	HARNESS_MAX_FINAL_MESSAGE      = 2000
+	HARNESS_MAX_OUTPUT_VALUE       = 2000
 )
 
 type HarnessProbeVariant struct {
@@ -28,9 +28,9 @@ type HarnessProbeVariant struct {
 }
 
 type HarnessProbeInput struct {
-	Task   string `json:"task"`
-	Recipe string `json:"recipe,omitempty"`
-	Model  string `json:"model,omitempty"`
+	Task        string                `json:"task"`
+	Recipe      string                `json:"recipe,omitempty"`
+	Model       string                `json:"model,omitempty"`
 	BaseHarness string                `json:"baseHarness,omitempty"`
 	Variants    []HarnessProbeVariant `json:"variants"`
 	Domain      string                `json:"domain,omitempty"`
@@ -45,7 +45,7 @@ type HarnessProbeCandidate struct {
 }
 
 type HarnessProbeResult struct {
-	GraphId string `json:"graphId"`
+	GraphId    string                  `json:"graphId"`
 	GraphPhase string                  `json:"graphPhase"`
 	Task       string                  `json:"task"`
 	Candidates []HarnessProbeCandidate `json:"candidates"`

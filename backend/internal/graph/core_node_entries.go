@@ -55,16 +55,19 @@ func nodeEntryData(data Json) any {
 
 func AppendNodeEntry(store *TaskStore, input NodeEntryInput) int64 {
 	id := newUUID()
-	insert := func() {
+	insert := func(store *TaskStore) {
 		kernelExec(store.Db, `INSERT INTO node_entries(id,task_id,node_id,instance_id,activation_id,operation_id,role,kind,text,data,created_at)
 		  VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
 			id, input.TaskID, input.NodeID, nodeEntryID(input.InstanceID), nodeEntryID(input.ActivationID), nodeEntryID(input.OperationID),
 			input.Role, input.Kind, input.Text, nodeEntryData(input.Data), NowMillis())
 	}
 	if store.IsTransaction() {
-		insert()
+		insert(store)
 	} else {
-		store.Transaction(func(tx *TaskStore) any { insert(); return nil })
+		store.Transaction(func(tx *TaskStore) any {
+			insert(tx)
+			return nil
+		})
 	}
 	row := kernelRow(store.Db, "SELECT seq FROM node_entries WHERE id=?", id)
 	seq := kernelInt(row["seq"])

@@ -76,8 +76,7 @@ var agentLegacyPromptDefaults = map[AgentPromptKey][]string{
 	},
 }
 
-var agentLegacyPromptReplacements = map[AgentPromptKey][][2]string{
-}
+var agentLegacyPromptReplacements = map[AgentPromptKey][][2]string{}
 
 func agentContextUniqueSorted(values []string) []string {
 	seen := map[string]bool{}

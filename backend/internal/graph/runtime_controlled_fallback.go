@@ -1,23 +1,22 @@
 package graph
 
-
 type ModelFallbackRecord struct {
-	PrimaryModel string
-	Error string
+	PrimaryModel  string
+	Error         string
 	FallbackModel string
-	SameModel bool
+	SameModel     bool
 }
 
 type modelStreamFallback struct {
 	primary   ModelEventStream
 	primaryID string
 	fallback  *ModelEntry
-	open func(ModelEntry) (ModelEventStream, error)
-	record func(ModelFallbackRecord)
+	open      func(ModelEntry) (ModelEventStream, error)
+	record    func(ModelFallbackRecord)
 
 	active   ModelEventStream
 	switched bool
-	failure string
+	failure  string
 }
 
 func StreamWithModelFallback(primary ModelEventStream, primaryID string, fallback *ModelEntry, open func(ModelEntry) (ModelEventStream, error), record func(ModelFallbackRecord)) ModelEventStream {

@@ -9,11 +9,11 @@ import (
 type UsageProviderId string
 
 const (
-	UsageProviderOpenCodeGo UsageProviderId = "opencode-go"
+	UsageProviderOpenCodeGo  UsageProviderId = "opencode-go"
 	UsageProviderCommandGoat UsageProviderId = "command-goat"
-	UsageProviderDeepSeek UsageProviderId = "deepseek"
-	UsageProviderGrok UsageProviderId = "grok"
-	UsageProviderChatGPT UsageProviderId = "chatgpt"
+	UsageProviderDeepSeek    UsageProviderId = "deepseek"
+	UsageProviderGrok        UsageProviderId = "grok"
+	UsageProviderChatGPT     UsageProviderId = "chatgpt"
 )
 
 var usageProviderOrder = []UsageProviderId{
@@ -174,8 +174,8 @@ type UsageService interface {
 }
 
 type UsageServiceOptions struct {
-	Env map[string]string
-	Home string
+	Env        map[string]string
+	Home       string
 	LoadConfig func() (GraphConfig, map[string]string)
 }
 

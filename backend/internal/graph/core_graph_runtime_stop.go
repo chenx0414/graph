@@ -29,7 +29,7 @@ func (runtime *GraphRuntime) SettleStop() string {
 	if queued > 0 || running > 0 {
 		return "stopping"
 	}
-	runtime.kernel.ModuleTransaction(func() any {
+	runtime.kernel.ModuleTransaction(func(kernel *KernelStore) any {
 		runtime.setPhase(PhaseStopped)
 		WakeMaster(runtime.kernel.Store, WakeIntent{TaskID: runtime.graphId, Kind: "task_stopped", DedupeKey: runtime.graphId + ":stopped", Data: map[string]any{"graphId": runtime.graphId}, HasData: true})
 		runtime.kernel.Store.Event(runtime.graphId, "graph.stopped", map[string]any{"revision": runtime.State().Revision})

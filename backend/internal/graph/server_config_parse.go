@@ -21,7 +21,7 @@ func configParseModel(raw any, path string, credentials map[string]CredentialCon
 	}
 	model := ModelEntry{
 		Id: entryID(entry, path), Provider: configAsString(entry["provider"], path+".provider"),
-		Api: ModelApi(api),
+		Api:           ModelApi(api),
 		BaseUrl:       configAsString(entry["baseUrl"], path+".baseUrl"),
 		ContextWindow: configPositiveInt(entry["contextWindow"], path+".contextWindow"),
 		MaxTokens:     configPositiveInt(entry["maxTokens"], path+".maxTokens"),

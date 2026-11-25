@@ -30,7 +30,7 @@ func TestAFailedCommitIsReportedAsACommitFailure(t *testing.T) {
 		return nil
 	}
 
-	recovered := recoverOf(func() { store.Transaction(func() any { return "work" }) })
+	recovered := recoverOf(func() { store.Transaction(func(tx *TaskStore) any { return "work" }) })
 	if recovered == nil {
 		t.Fatalf("a transaction that cannot commit must not report success")
 	}
@@ -55,7 +55,7 @@ func TestAFailedActionStillRollsBack(t *testing.T) {
 		return nil
 	}
 	recovered := recoverOf(func() {
-		store.Transaction(func() any { panic("the action failed") })
+		store.Transaction(func(tx *TaskStore) any { panic("the action failed") })
 	})
 	if recovered == nil {
 		t.Fatalf("an action that panics must not report success")

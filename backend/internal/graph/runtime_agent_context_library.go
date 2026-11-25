@@ -8,7 +8,7 @@ type AgentContextLibrary struct {
 	Root        string
 	ContextRoot string
 	defaults    resolvedAgentContextDefaults
-	overlay map[string]string
+	overlay     map[string]string
 }
 
 func (library *AgentContextLibrary) WithOverlay(overlay map[string]string) *AgentContextLibrary {
@@ -26,16 +26,16 @@ func (library *AgentContextLibrary) WithOverlay(overlay map[string]string) *Agen
 func NewAgentContextLibrary(root string, defaults AgentContextDefaults) *AgentContextLibrary {
 	library := &AgentContextLibrary{Root: root, ContextRoot: root}
 	library.defaults = resolvedAgentContextDefaults{
-		Identity:         agentContextDefault(defaults.Identity, AgentPromptDefaultIdentityText),
-		CommonRules:      agentContextDefault(defaults.CommonRules, DEFAULT_COMMON_RULES),
-		MainRules:        agentContextDefault(defaults.MainRules, DEFAULT_MAIN_RULES),
-		WorkerRules:      agentContextDefault(defaults.WorkerRules, DEFAULT_WORKER_RULES),
-		ReviewerRules:    agentContextDefault(defaults.ReviewerRules, DEFAULT_REVIEWER_RULES),
-		MainTools:        agentContextDefault(defaults.MainTools, DEFAULT_MAIN_TOOL_GUIDANCE),
-		WorkerTools:      agentContextDefault(defaults.WorkerTools, DEFAULT_WORKER_TOOL_GUIDANCE),
-		ReviewerTools:    agentContextDefault(defaults.ReviewerTools, DEFAULT_REVIEWER_TOOL_GUIDANCE),
-		Worker:           agentContextDefault(defaults.Worker, DEFAULT_WORKER_PROMPT),
-		Node:             agentContextDefault(defaults.Node, DEFAULT_NODE_PROMPT),
+		Identity:      agentContextDefault(defaults.Identity, AgentPromptDefaultIdentityText),
+		CommonRules:   agentContextDefault(defaults.CommonRules, DEFAULT_COMMON_RULES),
+		MainRules:     agentContextDefault(defaults.MainRules, DEFAULT_MAIN_RULES),
+		WorkerRules:   agentContextDefault(defaults.WorkerRules, DEFAULT_WORKER_RULES),
+		ReviewerRules: agentContextDefault(defaults.ReviewerRules, DEFAULT_REVIEWER_RULES),
+		MainTools:     agentContextDefault(defaults.MainTools, DEFAULT_MAIN_TOOL_GUIDANCE),
+		WorkerTools:   agentContextDefault(defaults.WorkerTools, DEFAULT_WORKER_TOOL_GUIDANCE),
+		ReviewerTools: agentContextDefault(defaults.ReviewerTools, DEFAULT_REVIEWER_TOOL_GUIDANCE),
+		Worker:        agentContextDefault(defaults.Worker, DEFAULT_WORKER_PROMPT),
+		Node:          agentContextDefault(defaults.Node, DEFAULT_NODE_PROMPT),
 	}
 	return library
 }

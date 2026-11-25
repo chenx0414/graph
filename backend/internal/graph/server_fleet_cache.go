@@ -42,7 +42,8 @@ func fleetSnapshotsForget(store *TaskStore) {
 	}
 }
 
-func fleetPayloadCached(store *TaskStore, conversationId string) []byte {	signature := fleetSignature(store, conversationId)
+func fleetPayloadCached(store *TaskStore, conversationId string) []byte {
+	signature := fleetSignature(store, conversationId)
 	key := fmt.Sprintf("%p|%s", store, conversationId)
 	fleetSnapshots.Lock()
 	if cached, ok := fleetSnapshots.values[key]; ok && cached.signature == signature {

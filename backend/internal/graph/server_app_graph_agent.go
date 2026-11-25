@@ -21,13 +21,13 @@ type appGraphExperience struct {
 }
 
 type appGraphAgent struct {
-	ID               string               `json:"id"`
-	Version          int                  `json:"version"`
-	Name             string               `json:"name"`
-	Description      string               `json:"description"`
-	Review           bool                 `json:"review"`
-	Capabilities     []appGraphCapability `json:"capabilities"`
-	Experience       appGraphExperience   `json:"experience"`
+	ID           string               `json:"id"`
+	Version      int                  `json:"version"`
+	Name         string               `json:"name"`
+	Description  string               `json:"description"`
+	Review       bool                 `json:"review"`
+	Capabilities []appGraphCapability `json:"capabilities"`
+	Experience   appGraphExperience   `json:"experience"`
 }
 
 func (app *GraphApp) appGraphAgentDetail(definitionVersion string) any {
@@ -93,7 +93,7 @@ func (app *GraphApp) appGraphAgentDetail(definitionVersion string) any {
 	}
 	return appGraphAgent{
 		ID: id, Version: version, Name: name, Description: description,
-		Review: review,
+		Review:       review,
 		Capabilities: app.appGraphAgentCapabilities(definition),
 		Experience:   appGraphExperience{Task: experience.Task, Samples: reversed},
 	}

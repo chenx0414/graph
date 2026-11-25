@@ -5,7 +5,8 @@ import (
 )
 
 func (l *OperationLifecycle) Block(taskId, nodeId, kind string, data Json, operationId *string) string {
-	return l.transaction(func() any {
+	return l.transaction(func(tx *TaskStore) any {
+		l := l.scoped(tx)
 		node := l.nodeRow(taskId, nodeId)
 		l.store.SetNodeBlocked(taskId, nodeId)
 		l.store.BlockActivation(kernelString(node["activation_id"]))
@@ -38,7 +39,8 @@ func (l *OperationLifecycle) Block(taskId, nodeId, kind string, data Json, opera
 }
 
 func (l *OperationLifecycle) Answer(taskId, questionId string, answer Answer, models func() []ModelEntry) {
-	l.transaction(func() any {
+	l.transaction(func(tx *TaskStore) any {
+		l := l.scoped(tx)
 		question := kernelRow(l.store.Db, "SELECT * FROM questions WHERE id=? AND task_id=?", questionId, taskId)
 		if question == nil || kernelString(question["status"]) != "open" {
 			Raise("invalid_question", "No open question in this task")
@@ -195,7 +197,8 @@ func (l *OperationLifecycle) releaseFailedTurnMessages(question map[string]any) 
 }
 
 func (l *OperationLifecycle) Escalate(taskId, questionId, prompt string) string {
-	return l.transaction(func() any {
+	return l.transaction(func(tx *TaskStore) any {
+		l := l.scoped(tx)
 		row := kernelRow(l.store.Db, `SELECT node_id,kind,data FROM questions
         WHERE id=? AND task_id=? AND status='open'`, questionId, taskId)
 		if row == nil {

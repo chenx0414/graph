@@ -20,8 +20,8 @@ func TestRetentionJoinsTheTransactionItIsCalledFrom(t *testing.T) {
 	kernelExec(store.DB, "INSERT INTO tasks(id,project_id,request,created_seq) VALUES('t1','p','probe',1)")
 
 	completed := false
-	store.Transaction(func() any {
-		store.ApplyRetention(RetentionOptions{Now: NowMillis()})
+	store.Transaction(func(tx *TaskStore) any {
+		tx.ApplyRetention(RetentionOptions{Now: NowMillis()})
 		// Reaching this line at all is the assertion: the pre-fix sweep blocked forever on
 		// txMu, so the test failed by timing out instead of reporting a message.
 		completed = true
@@ -32,8 +32,8 @@ func TestRetentionJoinsTheTransactionItIsCalledFrom(t *testing.T) {
 	}
 	// A sweep inside a transaction must not have committed it: the store is idle again, so the
 	// next transaction starts from a clean depth rather than a half-open one.
-	store.Transaction(func() any {
-		store.Event("t1", "after", map[string]any{"n": 1})
+	store.Transaction(func(tx *TaskStore) any {
+		tx.Event("t1", "after", map[string]any{"n": 1})
 		return nil
 	})
 	if row := kernelRow(store.DB, "SELECT count(*) AS n FROM events WHERE task_id='t1' AND type='after'"); kernelInt(row["n"]) != 1 {

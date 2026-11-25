@@ -6,7 +6,7 @@ type RuntimeError struct {
 	Code    string
 	Message string
 	Field   string
-	Status int
+	Status  int
 }
 
 func (e *RuntimeError) Error() string {

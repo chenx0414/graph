@@ -36,7 +36,7 @@ type piAdapterRunInput struct {
 	TurnOrdinalsMu    *sync.Mutex
 	SystemChanges     *map[string]*piAdapterPending
 	SystemChangesMu   *sync.Mutex
-	InterruptSignal *AbortSignal
+	InterruptSignal   *AbortSignal
 }
 
 func stringValue(value *string) string {

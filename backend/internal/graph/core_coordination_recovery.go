@@ -6,7 +6,7 @@ func (runtime *TaskRuntime) recoverWorkGraphs() {
 			defer func() {
 				if recovered := recover(); recovered != nil {
 					runtime.store.Transaction(func(tx *TaskStore) any {
-		runtime := runtime.scoped(tx)
+						runtime := runtime.scoped(tx)
 						runtime.store.Event(item.OwnerTaskID, "work.graph.recovery.failed", map[string]any{"workId": item.WorkID, "graphKey": item.GraphKey, "reason": graphServiceErrorMessage(recovered)})
 						return nil
 					})

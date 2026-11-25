@@ -8,7 +8,7 @@ import (
 type ProviderCredentialKind string
 
 const (
-	ProviderCredentialKindAPIKey ProviderCredentialKind = "api-key"
+	ProviderCredentialKindAPIKey       ProviderCredentialKind = "api-key"
 	ProviderCredentialKindSubscription ProviderCredentialKind = "subscription"
 )
 
@@ -19,18 +19,18 @@ const ModelApiOpenAIResponses ModelApi = "openai-responses"
 const ModelApiAnthropicMessages ModelApi = "anthropic-messages"
 
 type PlatformPresetRecord struct {
-	OAuthProvider  string                 `json:"oauthProvider,omitempty"`
-	ID             string                 `json:"id"`
-	Label          string                 `json:"label"`
-	API            ModelApi               `json:"api"`
-	BaseURL        string                 `json:"baseUrl"`
-	CredentialRef  string                 `json:"credentialRef"`
-	CredentialKind ProviderCredentialKind `json:"credentialKind"`
-	ModelsListSupported bool              `json:"modelsListSupported"`
-	Headers             map[string]string `json:"headers,omitempty"`
-	DocsURL             *string           `json:"docsUrl,omitempty"`
-	Notes               []string          `json:"notes"`
-	Unsupported bool `json:"unsupported,omitempty"`
+	OAuthProvider       string                 `json:"oauthProvider,omitempty"`
+	ID                  string                 `json:"id"`
+	Label               string                 `json:"label"`
+	API                 ModelApi               `json:"api"`
+	BaseURL             string                 `json:"baseUrl"`
+	CredentialRef       string                 `json:"credentialRef"`
+	CredentialKind      ProviderCredentialKind `json:"credentialKind"`
+	ModelsListSupported bool                   `json:"modelsListSupported"`
+	Headers             map[string]string      `json:"headers,omitempty"`
+	DocsURL             *string                `json:"docsUrl,omitempty"`
+	Notes               []string               `json:"notes"`
+	Unsupported         bool                   `json:"unsupported,omitempty"`
 }
 
 const CUSTOM_PLATFORM_ID = "custom"

@@ -1,7 +1,8 @@
 package graph
 
 func (l *OperationLifecycle) Admit(input OperationAdmitInput) Operation {
-	return l.transaction(func() any {
+	return l.transaction(func(tx *TaskStore) any {
+		l := l.scoped(tx)
 		if input.Reservation < 0 {
 			Raise("invalid_adapter", "A bounded token reservation is required")
 		}
@@ -11,7 +12,7 @@ func (l *OperationLifecycle) Admit(input OperationAdmitInput) Operation {
 		l.store.RecordOperationIntent(operation.Id, operation.TaskId, operation.NodeId, operation.InstanceId, operation.Generation, CanonicalJSON(operation), 0, operation.ActivationId)
 		ReserveOperation(l.store, operation.Id, input.Reservation)
 		if input.AfterIntent != nil {
-			input.AfterIntent(operation)
+			input.AfterIntent(l.store, operation)
 		}
 		l.store.PrepareActivation(operation.ActivationId, CanonicalJSON(operation.InputVersions))
 		l.store.SetNodePreparing(operation.TaskId, operation.NodeId)

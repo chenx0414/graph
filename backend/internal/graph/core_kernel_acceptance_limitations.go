@@ -43,7 +43,8 @@ func acceptanceLimitationRowOf(row map[string]any) AcceptanceLimitationRow {
 }
 
 func (k *KernelStore) RecordAcceptanceLimitations(taskID string, entries []AcceptanceLimitationEntry) []AcceptanceLimitationRow {
-	k.tx(func() any {
+	k.tx(func(tx *TaskStore) any {
+		k := k.scoped(tx)
 		created := NowMillis()
 		for _, entry := range entries {
 			var request any

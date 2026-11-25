@@ -7,9 +7,9 @@ import (
 )
 
 type ResolvedPiExtensionSource struct {
-	Entries []string `json:"entries"`
+	Entries   []string `json:"entries"`
 	ReadRoots []string `json:"readRoots"`
-	Version *string `json:"version"`
+	Version   *string  `json:"version"`
 }
 
 type PiExtensionSourceInput struct {
@@ -19,9 +19,9 @@ type PiExtensionSourceInput struct {
 }
 
 type PiExtensionSourceStatus struct {
-	Installed *string `json:"installed"`
-	Latest *string `json:"latest"`
-	Available bool `json:"available"`
+	Installed   *string  `json:"installed"`
+	Latest      *string  `json:"latest"`
+	Available   bool     `json:"available"`
 	InstallGaps []string `json:"installGaps"`
 }
 

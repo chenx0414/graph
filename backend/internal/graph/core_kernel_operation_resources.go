@@ -3,7 +3,7 @@ package graph
 import "encoding/json"
 
 func ReconcileOperationResources(kernel *KernelStore, operationID ...string) {
-	kernel.ModuleTransaction(func() any {
+	kernel.ModuleTransaction(func(kernel *KernelStore) any {
 		query := `SELECT id,task_id,resource_receipt FROM kernel_module_operations
       WHERE worker_active=1 AND resource_receipt IS NOT NULL AND state IN ('dispatched','uncertain','failed','unknown')`
 		args := []any{}
@@ -43,7 +43,7 @@ func ReclaimStaleOperationLeases(kernel *KernelStore, reason string) int {
 
 func releaseOperationLeases(kernel *KernelStore, reason, held string, args []any) int {
 	released := 0
-	kernel.ModuleTransaction(func() any {
+	kernel.ModuleTransaction(func(kernel *KernelStore) any {
 		rows := sqliteRows(kernel.Store.DB, "SELECT id,task_id FROM kernel_module_operations WHERE "+held, args...)
 		for _, row := range rows {
 			changed := sqliteChanges(kernel.Store.DB, "UPDATE kernel_module_operations SET worker_active=0 WHERE id=? AND worker_active=1", sqlString(row["id"]))

@@ -50,7 +50,7 @@ func (s *TaskStore) setWorkDraftState(workID string, version, expected int64, ac
 }
 
 const (
-	draftCurrent = false
+	draftCurrent  = false
 	draftAnyState = true
 )
 

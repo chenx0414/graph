@@ -26,8 +26,8 @@ type ProviderTransportObservation struct {
 	ErrorCodes                    []string
 	ErrorNames                    []string
 	UsageRecoverableFromTransport *bool
-	Attempt *int
-	DelayMs *int
+	Attempt                       *int
+	DelayMs                       *int
 }
 
 func (observation ProviderTransportObservation) Fields() map[string]any {

@@ -1,6 +1,5 @@
 package graph
 
-
 func controlledAnthropicSystem(system string) []any {
 	return []any{map[string]any{
 		"type": "text", "text": system, "cache_control": controlledAnthropicCacheControl(),

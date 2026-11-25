@@ -6,10 +6,10 @@ import (
 )
 
 type SupervisorNotice struct {
-	Text      string
-	Milestone string
-	WorkID   string
-	Evidence string
+	Text            string
+	Milestone       string
+	WorkID          string
+	Evidence        string
 	EvidenceExcerpt string
 	ArtifactID      string
 	ArtifactVersion int

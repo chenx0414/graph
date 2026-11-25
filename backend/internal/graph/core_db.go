@@ -1,7 +1,6 @@
 package graph
 
-import (
-)
+import ()
 
 func graphDBRow(db sqlh, query string, args ...any) (map[string]any, bool) {
 	rows := graphDBAll(db, query, args...)

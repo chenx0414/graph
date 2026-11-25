@@ -30,7 +30,7 @@ type CapabilityManifest struct {
 	Base           bool                    `json:"base,omitempty"`
 	Runtime        *CapabilityRuntimeDecl  `json:"runtime,omitempty"`
 	Tags           []string                `json:"tags,omitempty"`
-	Extra map[string]any `json:"-"`
+	Extra          map[string]any          `json:"-"`
 }
 
 func (manifest CapabilityManifest) MarshalJSON() ([]byte, error) {

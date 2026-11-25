@@ -200,10 +200,10 @@ func (e *Execution) admit(node ExecutionNodeRow, spec NodeSpec, reservation int6
 				combinations := []BriefingAgentCombination{}
 				for _, item := range e.catalog.AgentCombinations() {
 					combinations = append(combinations, BriefingAgentCombination{
-						Id:               item.Id,
-						Name:             item.Name,
-						Description:      item.Description,
-						Status:           item.Status,
+						Id:          item.Id,
+						Name:        item.Name,
+						Description: item.Description,
+						Status:      item.Status,
 					})
 				}
 				extra.Catalog = &BriefingCatalog{Definitions: definitions, AgentCombinations: combinations}
@@ -309,36 +309,36 @@ func (e *Execution) admit(node ExecutionNodeRow, spec NodeSpec, reservation int6
 			Prepare: func(attempt int) OperationIntent {
 				return intent
 			},
-			AfterIntent: func(admitted Operation) {
-				ConsumeRsiContinuation(e.store, admitted)
-				ConsumePauseContinuation(e.store, admitted.TaskId, admitted.NodeId, admitted.Id)
+			AfterIntent: func(store *TaskStore, admitted Operation) {
+				ConsumeRsiContinuation(store, admitted)
+				ConsumePauseContinuation(store, admitted.TaskId, admitted.NodeId, admitted.Id)
 				if len(answerQuestionIDs) > 0 {
-					e.store.MarkAnswersDelivered(answerQuestionIDs, admitted.Id, NowMillis())
+					store.MarkAnswersDelivered(answerQuestionIDs, admitted.Id, NowMillis())
 				}
 				resolved := admitted.Context.AgentContext
 				if resolved != nil && handoffPackage != nil {
-					FreezeContextHandoff(e.store, *resolved, FreezeContextHandoffInput{
+					FreezeContextHandoff(store, *resolved, FreezeContextHandoffInput{
 						TaskId:      admitted.TaskId,
 						OperationId: admitted.Id,
 						NodeId:      admitted.NodeId,
 						InstanceId:  *admitted.InstanceId,
 						Package:     *handoffPackage,
 					})
-					e.store.Event(admitted.TaskId, "context.requested", map[string]any{
+					store.Event(admitted.TaskId, "context.requested", map[string]any{
 						"nodeId":       admitted.NodeId,
 						"operationId":  admitted.Id,
 						"purpose":      string(resolved.Purpose),
 						"independence": string(resolved.Independence),
 						"sourceNodeId": nil,
 					})
-					e.store.Event(admitted.TaskId, "context.mode_selected", map[string]any{
+					store.Event(admitted.TaskId, "context.mode_selected", map[string]any{
 						"nodeId":           admitted.NodeId,
 						"operationId":      admitted.Id,
 						"mode":             string(resolved.Mode),
 						"reasonCode":       resolved.ReasonCode,
 						"sourceInstanceId": nil,
 					})
-					e.store.Event(admitted.TaskId, "context.handoff_frozen", map[string]any{
+					store.Event(admitted.TaskId, "context.handoff_frozen", map[string]any{
 						"nodeId":            admitted.NodeId,
 						"operationId":       admitted.Id,
 						"handoffId":         resolved.HandoffId,
@@ -347,7 +347,7 @@ func (e *Execution) admit(node ExecutionNodeRow, spec NodeSpec, reservation int6
 					})
 				}
 				if conversation != nil && len(chatMessages) > 0 {
-					DeliverMessages(e.store, admitted.Id, admitted.Attempt, chatMessages)
+					DeliverMessages(store, admitted.Id, admitted.Attempt, chatMessages)
 				}
 			},
 		})

@@ -65,8 +65,8 @@ func ValidateProbeRequest(input any) ProbeRequestValidation {
 }
 
 type ProbeTarget struct {
-	BaseURL string   `json:"baseUrl"`
-	API     ModelApi `json:"api"`
+	BaseURL string            `json:"baseUrl"`
+	API     ModelApi          `json:"api"`
 	APIKey  *string           `json:"apiKey,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
 }

@@ -1,14 +1,14 @@
 package graph
 
 type PiAdapterChannels struct {
-	Supervisor func(taskId string) PiAdapterSupervisor
-	Catalog *Catalog
-	Peers func(taskId string) PiAdapterPeers
-	AgentContext *AgentContextLibrary
-	BootstrapPrompts map[string]string
+	Supervisor          func(taskId string) PiAdapterSupervisor
+	Catalog             *Catalog
+	Peers               func(taskId string) PiAdapterPeers
+	AgentContext        *AgentContextLibrary
+	BootstrapPrompts    map[string]string
 	BootstrapToolPrompt *string
-	SystemContext *PiAdapterSystemContext
-	Rsi *PiAdapterRsi
+	SystemContext       *PiAdapterSystemContext
+	Rsi                 *PiAdapterRsi
 }
 
 type PiAdapterSupervisor struct {
@@ -27,7 +27,7 @@ type PiAdapterSupervisor struct {
 	BindProject      func(input PiAdapterBindProject) any
 	ListProblems     func() any
 	ResolveProblem   func(input PiAdapterResolveProblem) any
-	GraphManagement AgentToolsGraphManagement
+	GraphManagement  AgentToolsGraphManagement
 }
 
 type PiAdapterDraftAction struct {
@@ -80,10 +80,10 @@ type PiAdapterSystemContext struct {
 }
 
 type PiAdapterRsi struct {
-	Available bool
+	Available    bool
 	CheckoutRoot func() *string
-	Status func(compare bool) any
-	Apply  func(input any, context PiAdapterRsiContext) map[string]any
+	Status       func(compare bool) any
+	Apply        func(input any, context PiAdapterRsiContext) map[string]any
 }
 
 type PiAdapterRsiContext struct {

@@ -9,10 +9,10 @@ import (
 const MAX_TRANSIENT_RETRIES = 2
 
 type RetryDecisionRecord struct {
-	Retry bool `json:"retry"`
-	Attempt int `json:"attempt"`
-	Reason string `json:"reason"`
-	Exhausted bool `json:"exhausted"`
+	Retry     bool   `json:"retry"`
+	Attempt   int    `json:"attempt"`
+	Reason    string `json:"reason"`
+	Exhausted bool   `json:"exhausted"`
 }
 
 func RetryDecision(input struct {

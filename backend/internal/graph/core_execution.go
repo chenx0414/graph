@@ -21,7 +21,7 @@ type ExecutionNodeRow struct {
 
 type ExecutionGraph struct {
 	TaskId string
-	Run func() bool
+	Run    func() bool
 }
 
 type ExecutionSystemContext struct {
@@ -31,15 +31,15 @@ type ExecutionSystemContext struct {
 }
 
 type ExecutionExtras struct {
-	Fallback        *ActionAdapter
-	Catalog         *Catalog
-	Models          func() []ModelEntry
-	Git             *GitIntegration
-	AutoWake        bool
-	DispatchAllowed func() bool
-	Graphs          func() []ExecutionGraph
-	SystemContext   *ExecutionSystemContext
-	Artifacts       *ArtifactWorkspace
+	Fallback           *ActionAdapter
+	Catalog            *Catalog
+	Models             func() []ModelEntry
+	Git                *GitIntegration
+	AutoWake           bool
+	DispatchAllowed    func() bool
+	Graphs             func() []ExecutionGraph
+	SystemContext      *ExecutionSystemContext
+	Artifacts          *ArtifactWorkspace
 	CredentialRecovery func(CredentialRecoveryRequest) bool
 }
 

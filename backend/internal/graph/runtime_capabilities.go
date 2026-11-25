@@ -27,21 +27,21 @@ type RuntimeCapabilityProvisioning struct {
 }
 
 type RuntimeCapabilityLoadFact struct {
-	Id         string  `json:"id"`
-	Version    string  `json:"version"`
-	Kind       *string `json:"kind"`
-	Loaded     bool    `json:"loaded"`
-	Executable bool    `json:"executable"`
-	Reason     *string `json:"reason"`
-	Name       *string `json:"name,omitempty"`
-	Description *string `json:"description,omitempty"`
-	Path        *string `json:"path,omitempty"`
+	Id             string                         `json:"id"`
+	Version        string                         `json:"version"`
+	Kind           *string                        `json:"kind"`
+	Loaded         bool                           `json:"loaded"`
+	Executable     bool                           `json:"executable"`
+	Reason         *string                        `json:"reason"`
+	Name           *string                        `json:"name,omitempty"`
+	Description    *string                        `json:"description,omitempty"`
+	Path           *string                        `json:"path,omitempty"`
 	Source         *string                        `json:"source,omitempty"`
 	Tools          []string                       `json:"tools,omitempty"`
 	NetworkDomains []string                       `json:"networkDomains,omitempty"`
 	NetworkAccess  string                         `json:"networkAccess,omitempty"`
 	Provisioning   *RuntimeCapabilityProvisioning `json:"provisioning,omitempty"`
-	Runtime Json `json:"runtime,omitempty"`
+	Runtime        Json                           `json:"runtime,omitempty"`
 }
 
 type LoadedCapabilityPrompts struct {

@@ -60,8 +60,8 @@ type ComposeAgentSystemPromptInput struct {
 	RulesCommon       string
 	RulesRole         string
 	RulesRuntime      string
-	ExperienceContext    string
-	Role                 string
+	ExperienceContext string
+	Role              string
 }
 
 type ComposedAgentSystemPrompt struct {

@@ -17,14 +17,14 @@ type AgentContextTool struct {
 
 type AgentContextAssemblyOptions struct {
 	CapabilityBundleOptions
-	Action string
-	Runtime string
-	Role string
-	Workspace string
-	Library *AgentContextLibrary
-	FullAccess bool
-	Retrieval bool
-	Rsi bool
+	Action            string
+	Runtime           string
+	Role              string
+	Workspace         string
+	Library           *AgentContextLibrary
+	FullAccess        bool
+	Retrieval         bool
+	Rsi               bool
 	ExperienceContext string
 }
 
@@ -40,9 +40,9 @@ type AgentContextPreview struct {
 }
 
 type AgentContextAssembly struct {
-	Bundle *CapabilityBundleVersion
-	DisabledTools []string
-	Role string
+	Bundle            *CapabilityBundleVersion
+	DisabledTools     []string
+	Role              string
 	DefinitionVersion string
 
 	common       string
@@ -53,5 +53,5 @@ type AgentContextAssembly struct {
 	fullAccess   bool
 	rsi          bool
 	catalog      *Catalog
-	experience string
+	experience   string
 }

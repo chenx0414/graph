@@ -107,19 +107,19 @@ func (s *TaskStore) ApplyRetention(options RetentionOptions) RetentionApplied {
 	// Transaction locks txMu before it checks for an open transaction, so the sweep joins the
 	// caller's transaction when there is one and opens its own only when the store is idle.
 	applied := RetentionApplied{}
-	run := func() {
-		won, err := applyRetentionLocked(s.DB, doomed(options))
+	run := func(store *TaskStore) {
+		won, err := applyRetentionLocked(store.DB, doomed(options))
 		if err != nil {
 			panic(err)
 		}
 		applied = won
 	}
 	if s.InTransaction() {
-		run()
+		run(s)
 		return applied
 	}
 	s.Transaction(func(tx *TaskStore) any {
-		run()
+		run(tx)
 		return nil
 	})
 	return applied

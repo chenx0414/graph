@@ -322,7 +322,7 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 		return daemonSystemSummary(live, userHome, agentContext, server, usage)
 	}
 	server = OpenGraphServer(GraphServerOptions{
-		Ready: func() bool { return catalogReady },
+		Ready:    func() bool { return catalogReady },
 		StateDir: stateDir, Projects: config.Projects, Port: &port, AutoDrive: &autoDrive,
 		Codemode:      config.Codemode,
 		SystemContext: &TaskRuntimeSystemContext{SystemSummary: systemSummary},

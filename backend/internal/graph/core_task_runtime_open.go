@@ -104,7 +104,7 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 	}
 	if runtime.models != nil {
 		runtime.store.Transaction(func(tx *TaskStore) any {
-		runtime := runtime.scoped(tx)
+			runtime := runtime.scoped(tx)
 			for _, entry := range runtime.models.Entries {
 				kernelExec(runtime.store.Db, "INSERT OR REPLACE INTO models VALUES(?,?)", entry.Id, CanonicalJSON(entry))
 			}
@@ -113,7 +113,7 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 	}
 	if runtime.live != nil {
 		runtime.store.Transaction(func(tx *TaskStore) any {
-		runtime := runtime.scoped(tx)
+			runtime := runtime.scoped(tx)
 			for _, entry := range runtime.live.Entries() {
 				kernelExec(runtime.store.Db, "INSERT OR REPLACE INTO models VALUES(?,?)", entry.Id, CanonicalJSON(entry))
 			}

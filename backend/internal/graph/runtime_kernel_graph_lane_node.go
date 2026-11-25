@@ -123,8 +123,6 @@ func (state *kernelGraphLaneState) nodeWorkspace(graphId, nodeId string, revisio
 	return &workspace
 }
 
-
-
 type kernelGraphLaneNodeChannel struct {
 	inner   ModelEventStream
 	usage   TokenUsage

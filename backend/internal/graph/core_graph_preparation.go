@@ -40,7 +40,7 @@ func (service *graphManagementService) prepareGraph(graphID, sourceOwner, reques
 	}
 	if current.State == "failed" {
 		service.kernel.Store.Transaction(func(tx *TaskStore) any {
-		kernel := service.kernel.scoped(tx)
+			kernel := service.kernel.scoped(tx)
 			kernel.MarkCreateRequestPreparing(sourceOwner, requestID)
 			kernel.Store.Event(graphID, "graph.preparation.retry_started", map[string]any{"requestId": requestID})
 			return nil
@@ -50,7 +50,7 @@ func (service *graphManagementService) prepareGraph(graphID, sourceOwner, reques
 		if recovered := recover(); recovered != nil {
 			reason = graphServiceErrorMessage(recovered)
 			service.kernel.Store.Transaction(func(tx *TaskStore) any {
-		kernel := service.kernel.scoped(tx)
+				kernel := service.kernel.scoped(tx)
 				kernel.MarkCreateRequestFailed(sourceOwner, requestID, reason)
 				kernel.Store.BlockTask(graphID)
 				kernel.Store.Event(graphID, "graph.preparation.failed", map[string]any{"reason": reason, "requestId": requestID})

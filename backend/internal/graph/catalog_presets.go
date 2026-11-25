@@ -11,8 +11,8 @@ import (
 )
 
 type BootstrapDefinition struct {
-	Id               string     `json:"id"`
-	Review           bool       `json:"review,omitempty"`
+	Id     string `json:"id"`
+	Review bool   `json:"review,omitempty"`
 }
 
 type PresetFailure struct {

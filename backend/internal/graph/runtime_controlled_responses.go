@@ -1,6 +1,5 @@
 package graph
 
-
 func controlledResponsesInput(messages []any) []any {
 	out := []any{}
 	for index := 0; index < len(messages); index++ {

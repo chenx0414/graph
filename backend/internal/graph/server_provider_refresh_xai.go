@@ -12,7 +12,6 @@ import (
 	"time"
 )
 
-
 func xaiCredentialRejected(status int, message string) bool {
 	trimmed := strings.TrimSpace(message)
 	if status == 401 {

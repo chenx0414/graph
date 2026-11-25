@@ -33,15 +33,15 @@ type providerLogins struct {
 	values        map[string]*providerLogin
 	disconnecting map[string]bool
 	services      *AppServices
-	secrets    func() map[string]string
-	background context.Context
-	stop       context.CancelFunc
-	startOnce  sync.Once
-	refreshMutex sync.Mutex
-	relogin   map[string]string
-	refreshed map[string]time.Time
-	ask func(QuestionInput)
-	stateDir string
+	secrets       func() map[string]string
+	background    context.Context
+	stop          context.CancelFunc
+	startOnce     sync.Once
+	refreshMutex  sync.Mutex
+	relogin       map[string]string
+	refreshed     map[string]time.Time
+	ask           func(QuestionInput)
+	stateDir      string
 }
 
 var providerSecretRef = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)

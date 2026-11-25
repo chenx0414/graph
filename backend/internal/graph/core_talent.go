@@ -406,7 +406,7 @@ func TalentDetail(store *TaskStore, id string, version *int, capability func(id,
 	}
 	return map[string]any{
 		"id": id, "version": chosen.Version, "versions": versionNumbers,
-		"review": review,
+		"review":      review,
 		"description": description, "traceability": trace, "capabilities": capabilities, "prompts": prompts,
 	}
 }

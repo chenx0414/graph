@@ -9,8 +9,8 @@ type ProviderCredentialView struct {
 	Resolved           bool    `json:"resolved"`
 	DisplayName        *string `json:"displayName,omitempty"`
 	SharedLimitGroupID *string `json:"sharedLimitGroupId,omitempty"`
-	NeedsRelogin   bool   `json:"needsRelogin,omitempty"`
-	CredentialNote string `json:"credentialNote,omitempty"`
+	NeedsRelogin       bool    `json:"needsRelogin,omitempty"`
+	CredentialNote     string  `json:"credentialNote,omitempty"`
 }
 
 type ProviderView struct {
@@ -51,8 +51,8 @@ type PlatformView struct {
 	Notes                []string               `json:"notes"`
 	Custom               bool                   `json:"custom"`
 	CredentialConfigured bool                   `json:"credentialConfigured"`
-	Unsupported       bool   `json:"unsupported,omitempty"`
-	UnsupportedReason string `json:"unsupportedReason,omitempty"`
+	Unsupported          bool                   `json:"unsupported,omitempty"`
+	UnsupportedReason    string                 `json:"unsupportedReason,omitempty"`
 }
 
 type PlatformCatalog struct {

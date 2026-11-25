@@ -212,7 +212,7 @@ type OperationMessage struct {
 	RequirementVersion int               `json:"requirementVersion"`
 	Attachments        []AttachmentInput `json:"attachments,omitempty"`
 	Command            *string           `json:"command,omitempty"`
-	FreshSession bool `json:"freshSession,omitempty"`
+	FreshSession       bool              `json:"freshSession,omitempty"`
 }
 
 type OperationWake struct {
@@ -229,12 +229,12 @@ type RsiContinuation struct {
 }
 
 type OperationContext struct {
-	PreviousOutput  Json               `json:"previousOutput"`
-	RsiContinuation *RsiContinuation   `json:"rsiContinuation,omitempty"`
-	Wakes           []OperationWake    `json:"wakes,omitempty"`
-	Answers         []OperationAnswer  `json:"answers"`
-	Messages        []OperationMessage `json:"messages,omitempty"`
-	Briefing        *string            `json:"briefing,omitempty"`
+	PreviousOutput      Json                  `json:"previousOutput"`
+	RsiContinuation     *RsiContinuation      `json:"rsiContinuation,omitempty"`
+	Wakes               []OperationWake       `json:"wakes,omitempty"`
+	Answers             []OperationAnswer     `json:"answers"`
+	Messages            []OperationMessage    `json:"messages,omitempty"`
+	Briefing            *string               `json:"briefing,omitempty"`
 	BriefingSetupLength *int                  `json:"briefingSetupLength,omitempty"`
 	AgentContext        *ResolvedAgentContext `json:"agentContext,omitempty"`
 	OutputSchema        *SchemaRef            `json:"outputSchema,omitempty"`

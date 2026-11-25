@@ -32,9 +32,9 @@ type AssistantContentBlock struct {
 	Redacted          *bool   `json:"redacted,omitempty"`
 	Id                string  `json:"id,omitempty"`
 	Name              string  `json:"name,omitempty"`
-	Arguments        any     `json:"arguments,omitempty"`
-	ThoughtSignature *string `json:"thoughtSignature,omitempty"`
-	Namespace        *string `json:"namespace,omitempty"`
+	Arguments         any     `json:"arguments,omitempty"`
+	ThoughtSignature  *string `json:"thoughtSignature,omitempty"`
+	Namespace         *string `json:"namespace,omitempty"`
 }
 
 type AssistantToolCall struct {

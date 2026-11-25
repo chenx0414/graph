@@ -3,9 +3,9 @@ package graph
 import "strings"
 
 type controlledCompat struct {
-	supportsDeveloperRole bool
+	supportsDeveloperRole   bool
 	supportsReasoningEffort bool
-	thinkingFormat string
+	thinkingFormat          string
 }
 
 func controlledCompatFor(model map[string]any) controlledCompat {

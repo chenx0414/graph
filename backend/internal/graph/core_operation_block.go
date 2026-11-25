@@ -21,14 +21,15 @@ func (l *OperationLifecycle) HandleDispatchRefusal(operation Operation, refusal 
 			time.Sleep(20 * time.Millisecond)
 		}
 		l.store.Transaction(func(tx *TaskStore) {
-		l := l.scoped(tx)
+			l := l.scoped(tx)
 			for _, call := range kernelRows(l.store.Db, "SELECT id FROM invocations WHERE operation_id=? AND cost IS NULL", operation.Id) {
 				l.store.RecordInvocationUsage(kernelString(call["id"]), nil, CanonicalJSON(map[string]any{"unknown": true}))
 			}
 		})
 	}
 	if refusal.Code != "interrupted" && refusal.Code != "budget" {
-		return l.transaction(func() any {
+		return l.transaction(func(tx *TaskStore) any {
+			l := l.scoped(tx)
 			row := l.operationRow(operation.Id)
 			state := kernelString(row["state"])
 			if state != "dispatched" && state != "unknown" {
@@ -42,7 +43,8 @@ func (l *OperationLifecycle) HandleDispatchRefusal(operation Operation, refusal 
 			return true
 		}).(bool)
 	}
-	return l.transaction(func() any {
+	return l.transaction(func(tx *TaskStore) any {
+		l := l.scoped(tx)
 		row := l.operationRow(operation.Id)
 		state := kernelString(row["state"])
 		if state != "dispatched" && state != "unknown" {
@@ -139,7 +141,8 @@ func usageForEvent(unknown bool, total int64) any {
 }
 
 func (l *OperationLifecycle) MarkUncertain(operation Operation, reason string, quiescent bool) bool {
-	return l.transaction(func() any {
+	return l.transaction(func(tx *TaskStore) any {
+		l := l.scoped(tx)
 		current := kernelRow(l.store.Db, "SELECT state FROM operations WHERE id=?", operation.Id)
 		state := kernelString(current["state"])
 		if state != "dispatched" && state != "unknown" {

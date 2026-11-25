@@ -26,16 +26,16 @@ var agentStaticPrompts = []agentStaticPrompt{
 }
 
 type resolvedAgentContextDefaults struct {
-	Identity         string
-	CommonRules      string
-	MainRules        string
-	WorkerRules      string
-	ReviewerRules    string
-	MainTools        string
-	WorkerTools      string
-	ReviewerTools    string
-	Worker           string
-	Node             string
+	Identity      string
+	CommonRules   string
+	MainRules     string
+	WorkerRules   string
+	ReviewerRules string
+	MainTools     string
+	WorkerTools   string
+	ReviewerTools string
+	Worker        string
+	Node          string
 }
 
 type agentToolStateFile struct {

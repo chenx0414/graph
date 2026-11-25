@@ -18,13 +18,13 @@ type CredentialConfig struct {
 }
 
 type LimitsConfig struct {
-	Credentials         map[string]int `json:"credentials"`
-	SharedGroups        map[string]int `json:"sharedGroups"`
-	AgentExecutions     int            `json:"agentExecutions"`
-	ProgramExecutions   int            `json:"programExecutions"`
-	MaxAgents           int            `json:"maxAgents"`
-	SpawnDepth          int            `json:"spawnDepth"`
-	ChildrenPerAgent    int            `json:"childrenPerAgent"`
+	Credentials       map[string]int `json:"credentials"`
+	SharedGroups      map[string]int `json:"sharedGroups"`
+	AgentExecutions   int            `json:"agentExecutions"`
+	ProgramExecutions int            `json:"programExecutions"`
+	MaxAgents         int            `json:"maxAgents"`
+	SpawnDepth        int            `json:"spawnDepth"`
+	ChildrenPerAgent  int            `json:"childrenPerAgent"`
 }
 
 type GraphModels struct {
@@ -32,7 +32,7 @@ type GraphModels struct {
 }
 
 type GraphCodemode struct {
-	Enabled bool `json:"enabled"`
+	Enabled   bool `json:"enabled"`
 	TimeoutMs *int `json:"timeoutMs,omitempty"`
 }
 

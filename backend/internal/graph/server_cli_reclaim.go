@@ -27,13 +27,13 @@ Options:
   -h, --help               Print this help`
 
 type reclaimReport struct {
-	State string `json:"state"`
-	File  string `json:"file"`
-	Bytes int64  `json:"bytes"`
-	Plan RetentionPlan `json:"plan"`
-	Applied *RetentionApplied `json:"applied,omitempty"`
-	Backup string `json:"backup,omitempty"`
-	BytesAfter int64 `json:"bytesAfter,omitempty"`
+	State      string            `json:"state"`
+	File       string            `json:"file"`
+	Bytes      int64             `json:"bytes"`
+	Plan       RetentionPlan     `json:"plan"`
+	Applied    *RetentionApplied `json:"applied,omitempty"`
+	Backup     string            `json:"backup,omitempty"`
+	BytesAfter int64             `json:"bytesAfter,omitempty"`
 }
 
 func reclaimNumber(raw string, name string) int {

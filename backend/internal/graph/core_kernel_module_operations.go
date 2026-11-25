@@ -1,8 +1,8 @@
 package graph
 
 type KernelModuleOperation struct {
-	Id string
-	State string
+	Id     string
+	State  string
 	Result string
 }
 

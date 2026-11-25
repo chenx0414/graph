@@ -78,8 +78,8 @@ type CapabilityBundleInput struct {
 }
 
 type AgentCombinationSearchInput struct {
-	Query string     `json:"query,omitempty"`
-	Limit int        `json:"limit,omitempty"`
+	Query string `json:"query,omitempty"`
+	Limit int    `json:"limit,omitempty"`
 }
 
 type AgentCombinationSearchResult struct {
@@ -90,7 +90,7 @@ type AgentCombinationSearchResult struct {
 type CapabilityLibraryOptions struct {
 	CapabilityRoot string
 	RecipesPath    string
-	Projects func() []ProjectConfig
+	Projects       func() []ProjectConfig
 }
 
 type CapabilityLibrarySnapshot struct {

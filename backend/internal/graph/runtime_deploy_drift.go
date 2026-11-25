@@ -10,12 +10,12 @@ import (
 )
 
 type DeployDriftReport struct {
-	Root string `json:"root"`
-	Files []string `json:"files"`
-	Missing []string `json:"missing"`
-	Extra []string `json:"extra"`
+	Root         string   `json:"root"`
+	Files        []string `json:"files"`
+	Missing      []string `json:"missing"`
+	Extra        []string `json:"extra"`
 	RuntimeFiles []string `json:"runtimeFiles"`
-	Note string `json:"note"`
+	Note         string   `json:"note"`
 }
 
 var deployOriginPattern = regexp.MustCompile(`\[remote "origin"\][^[]*?\n\s*url = (.+)`)

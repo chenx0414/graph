@@ -2,7 +2,6 @@ package graph
 
 import "time"
 
-
 func (runtime *TaskRuntime) PauseForReload(store *TaskStore, excludeTaskID string) []string {
 	if runtime == nil || store == nil {
 		return nil

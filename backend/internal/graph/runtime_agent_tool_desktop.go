@@ -1,6 +1,5 @@
 package graph
 
-
 const desktopToolDescription = "One agent-desktop command+args; envelope unchanged. Headless unless headed:true " +
 	"(steals focus, moves the cursor). Output withheld unless include:output; repeat only when disposition.retry is \"safe\"."
 

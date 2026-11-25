@@ -2,13 +2,12 @@ package graph
 
 import "path/filepath"
 
-
 const CodemodeToolName = "codemode"
 
 type CodemodeSettings struct {
-	Enabled bool
+	Enabled   bool
 	TimeoutMs int
-	CacheDir string
+	CacheDir  string
 }
 
 func codemodeSettings(config GraphCodemode, stateDir string) CodemodeSettings {

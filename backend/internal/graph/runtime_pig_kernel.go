@@ -91,12 +91,12 @@ func PrintPigKernelReport(database string) error {
 }
 
 type PigKernelTurnOptions struct {
-	Database string
-	ModelId string
-	Prompt string
-	Identity string
-	Workspace string
-	McpServers []pigkernel.McpServerSpec
+	Database     string
+	ModelId      string
+	Prompt       string
+	Identity     string
+	Workspace    string
+	McpServers   []pigkernel.McpServerSpec
 	Instructions string
 }
 

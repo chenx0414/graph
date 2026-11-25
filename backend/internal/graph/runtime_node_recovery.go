@@ -8,9 +8,9 @@ var nodeRecoveryResolvers = struct {
 }{values: map[string]func(*FrozenExecutionRecovery) (*NodeRecoveryBinding, error){}}
 
 type NodeRecoveryBinding struct {
-	Config map[string]any
+	Config   map[string]any
 	Callback func(string, map[string]any) (any, error)
-	Close func()
+	Close    func()
 }
 
 func registerNodeRecoveryResolver(database string, resolver func(*FrozenExecutionRecovery) (*NodeRecoveryBinding, error)) {

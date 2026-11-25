@@ -1,6 +1,5 @@
 package graph
 
-
 func piAdapterRetrievalReach(network *PiAdapterNetwork, role string, gate SendGate) *RetrievalBroker {
 	systemDomains := []string{}
 	if role == "master" {

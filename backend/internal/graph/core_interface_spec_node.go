@@ -111,7 +111,7 @@ func interfaceSpecValidateNode(definition map[string]any, id string, node map[st
 			}
 		}
 	}
-		inputs, _ := node["inputs"].(map[string]any)
+	inputs, _ := node["inputs"].(map[string]any)
 	for port, ref := range inputs {
 		record, _ := ref.(map[string]any)
 		interfaceSpecAssertDeclared(definition, record, "Node "+id+" input "+port)

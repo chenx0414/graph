@@ -3,8 +3,8 @@ package graph
 import "strings"
 
 const (
-	WakeKindToolSettled WakeKind = "tool_settled"
-	deferredToolWakeTruncate = 1_000
+	WakeKindToolSettled      WakeKind = "tool_settled"
+	deferredToolWakeTruncate          = 1_000
 )
 
 func WakeForDeferredToolSettled(store *TaskStore, call DeferredToolCall) bool {

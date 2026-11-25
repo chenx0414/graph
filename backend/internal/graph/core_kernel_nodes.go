@@ -103,8 +103,8 @@ func (k *KernelStore) NoteNodeResubmit(taskID, nodeID string, allowed int) {
 }
 
 func (k *KernelStore) SetNodeQueuePaused(taskID, nodeID string, paused bool) {
-	k.ModuleTransaction(func() any {
-		k.SetNodeQueuePausedInCurrentTransaction(taskID, nodeID, paused)
+	k.ModuleTransaction(func(kernel *KernelStore) any {
+		kernel.SetNodeQueuePausedInCurrentTransaction(taskID, nodeID, paused)
 		return nil
 	})
 }

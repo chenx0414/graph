@@ -4,7 +4,6 @@ import (
 	"net/http"
 )
 
-
 func (app *GraphApp) serveConversationToolCalls(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().ToolCalls(conversationID))

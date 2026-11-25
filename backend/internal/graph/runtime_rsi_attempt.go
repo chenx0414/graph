@@ -7,7 +7,6 @@ import (
 	"strings"
 )
 
-
 type RsiAttemptRecord struct {
 	Id        string   `json:"id"`
 	Title     string   `json:"title"`

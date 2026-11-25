@@ -119,5 +119,3 @@ func capabilityCopyEnv(env map[string]string) map[string]string {
 	}
 	return out
 }
-
-
