@@ -28,6 +28,7 @@ func (service *graphManagementService) prepareGraph(graphID, sourceOwner, reques
 		return "Graph preparation failed; inspect the error and worktree before retrying"
 	}
 	admitted := service.kernel.Store.Transaction(func(tx *TaskStore) any {
+		service := service.scoped(tx)
 		kernel := service.kernel.scoped(tx)
 		if projectArchived(kernel.Store, projectID) || kernelRow(kernel.Db, "SELECT task_id FROM project_archive_pauses WHERE task_id=?", graphID) != nil {
 			return false
@@ -40,6 +41,7 @@ func (service *graphManagementService) prepareGraph(graphID, sourceOwner, reques
 	}
 	if current.State == "failed" {
 		service.kernel.Store.Transaction(func(tx *TaskStore) any {
+		service := service.scoped(tx)
 			kernel := service.kernel.scoped(tx)
 			kernel.MarkCreateRequestPreparing(sourceOwner, requestID)
 			kernel.Store.Event(graphID, "graph.preparation.retry_started", map[string]any{"requestId": requestID})
@@ -50,6 +52,7 @@ func (service *graphManagementService) prepareGraph(graphID, sourceOwner, reques
 		if recovered := recover(); recovered != nil {
 			reason = graphServiceErrorMessage(recovered)
 			service.kernel.Store.Transaction(func(tx *TaskStore) any {
+		service := service.scoped(tx)
 				kernel := service.kernel.scoped(tx)
 				kernel.MarkCreateRequestFailed(sourceOwner, requestID, reason)
 				kernel.Store.BlockTask(graphID)
@@ -63,6 +66,7 @@ func (service *graphManagementService) prepareGraph(graphID, sourceOwner, reques
 	}
 	service.prepare(graphID, targetBranch)
 	service.kernel.Store.Transaction(func(tx *TaskStore) any {
+		service := service.scoped(tx)
 		kernel := service.kernel.scoped(tx)
 		kernel.MarkCreateRequestReady(sourceOwner, requestID)
 		for _, work := range kernelRows(kernel.Db, "SELECT work_id,graph_key FROM work_graphs WHERE kernel_request_id=? AND owner_task_id=?", requestID, sourceOwner) {
@@ -93,6 +97,7 @@ func (service *graphManagementService) retryGraphPreparation(graphID, proof stri
 		proof = string([]rune(proof)[:4000])
 	}
 	row := service.kernel.Store.Transaction(func(tx *TaskStore) any {
+		service := service.scoped(tx)
 		kernel := service.kernel.scoped(tx)
 		task := kernel.Store.Task(graphID)
 		requireProjectActive(kernel.Store, task.ProjectID)

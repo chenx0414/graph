@@ -9,7 +9,10 @@ func (runtime *ModuleRuntime) ReopenAfterPending(moduleId string) ModuleEvaluati
 	lock := moduleLock(runtime.kernel, runtime.taskId, moduleId)
 	lock.Lock()
 	defer lock.Unlock()
-	return runtime.kernel.ModuleTransaction(func(kernel *KernelStore) any { return runtime.Reopen(moduleId) }).(ModuleEvaluation)
+	return runtime.kernel.ModuleTransaction(func(kernel *KernelStore) any {
+		runtime := runtime.scoped(kernel.Store)
+		return runtime.Reopen(moduleId)
+	}).(ModuleEvaluation)
 }
 
 func (runtime *ModuleRuntime) Reopen(moduleId string) ModuleEvaluation {
@@ -63,9 +66,10 @@ func (runtime *ModuleRuntime) deliverEvaluatedUnlocked(moduleId, inputName strin
 	reopen, _ := control["reopen"].(string)
 	if reopen == inputName {
 		return runtime.kernel.ModuleTransaction(func(kernel *KernelStore) any {
+			runtime := runtime.scoped(kernel.Store)
 			judged := runtime.acceptControl(moduleId, inputName, value)
 			if deliveryId != "" {
-				runtime.kernel.MarkDeliveryProcessed(deliveryId)
+				kernel.MarkDeliveryProcessed(deliveryId)
 			}
 			return *judged
 		}).(ModuleEvaluation)
@@ -100,12 +104,13 @@ func (runtime *ModuleRuntime) deliverEvaluatedUnlocked(moduleId, inputName strin
 			reason = "waiting for " + joinComma(missing)
 		}
 		runtime.kernel.ModuleTransaction(func(kernel *KernelStore) any {
-			runtime.kernel.RecordModuleTransition(runtime.taskId, ModuleTransitionInput{
+			runtime := runtime.scoped(kernel.Store)
+			kernel.RecordModuleTransition(runtime.taskId, ModuleTransitionInput{
 				ModuleId: moduleId, InputName: inputName, InputValue: inputs, StateBefore: state, StateAfter: state,
 				Outputs: map[string]any{}, RuleVersion: implementationVersion, Reason: reason,
 			})
 			if deliveryId != "" {
-				runtime.kernel.MarkDeliveryProcessed(deliveryId)
+				kernel.MarkDeliveryProcessed(deliveryId)
 			}
 			return nil
 		})
@@ -154,12 +159,13 @@ func (runtime *ModuleRuntime) deliverEvaluatedUnlocked(moduleId, inputName strin
 		verdictPtr = &verdict
 	}
 	recorded := runtime.kernel.ModuleTransaction(func(kernel *KernelStore) any {
-		row := runtime.kernel.RecordModuleTransition(runtime.taskId, ModuleTransitionInput{
+		runtime := runtime.scoped(kernel.Store)
+		row := kernel.RecordModuleTransition(runtime.taskId, ModuleTransitionInput{
 			ModuleId: moduleId, InputName: inputName, InputValue: inputs, StateBefore: state, StateAfter: result.State,
 			Verdict: verdictPtr, Outputs: result.Outputs, RuleVersion: implementationVersion, Reason: reason,
 		})
 		if deliveryId != "" {
-			runtime.kernel.MarkDeliveryProcessed(deliveryId)
+			kernel.MarkDeliveryProcessed(deliveryId)
 		}
 		return row
 	})

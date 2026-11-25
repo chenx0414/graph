@@ -360,6 +360,7 @@ func (runner *GraphRunner) failModule(moduleId, deliveryId string, recovered any
 	kernel.SetNodeQueuePaused(runner.options.GraphId, moduleId, true)
 	reason := panicMessage(recovered)
 	kernel.Store.Transaction(func(tx *TaskStore) any {
+		kernel := kernel.scoped(tx)
 		kernel.Store.Event(runner.options.GraphId, "graph.module.failed", map[string]any{"moduleId": moduleId, "deliveryId": deliveryId, "reason": reason})
 		WakeForBlockedNode(kernel.Store, runner.options.GraphId, BlockedNodeWake{NodeID: moduleId, Reason: reason, IncidentID: deliveryId, HasIncident: true})
 		return nil

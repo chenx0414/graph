@@ -33,9 +33,11 @@ var bareStoreUse = regexp.MustCompile(`\bstore\.([A-Za-z_][A-Za-z0-9_]*)`)
 
 var rebindPattern = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\s*:=\s*(?:[A-Za-z_][A-Za-z0-9_.]*\.)?scoped\(tx\)|([A-Za-z_][A-Za-z0-9_]*)\s*:=\s*tx\b`)
 
-var holderFieldPattern = regexp.MustCompile(`(?m)^\t[Ss]tore\s+\*TaskStore\b`)
+var holderFieldPattern = regexp.MustCompile(`(?m)^\t(?:[Ss]tore\s+\*TaskStore|kernel\s+\*KernelStore)\b`)
 
 var typePattern = regexp.MustCompile(`(?m)^type ([A-Za-z_][A-Za-z0-9_]*) struct \{`)
+
+var holderFieldReach = regexp.MustCompile(`\b([A-Za-z_]\w*)\.(?:kernel|store|Store)\.`)
 
 var localHolderPattern = regexp.MustCompile(`(?m)^[ \t]+([A-Za-z_][A-Za-z0-9_]*)\s*:?=\s*&?([A-Za-z_][A-Za-z0-9_]*)\{`)
 
@@ -240,10 +242,24 @@ func (gate handleGate) check(text string) []callbackComplaint {
 			code := codeOnly(cb)
 			rebound := reboundNames(code)
 			blocked := map[string]bool{}
+			seenReach := map[string]bool{}
 			if !strings.Contains(params, "tx *TaskStore") {
 				complaints = append(complaints, callbackComplaint{line, kind + " callback does not receive the transaction's store (tx *TaskStore)"})
 			} else {
 				complaints = append(complaints, handleComplaints(code, kind, line, rebound)...)
+			}
+			// A holder reached as a field of a captured value (service.kernel, runtime.store) is
+			// the same defect wearing one more selector: the body still writes on the pool.
+			for _, reach := range holderFieldReach.FindAllStringSubmatch(code, -1) {
+				root := reach[1]
+				if _, held := captured[root]; root == "tx" || rebound[root] || !held {
+					continue
+				}
+				if seenReach[reach[0]] {
+					continue
+				}
+				seenReach[reach[0]] = true
+				complaints = append(complaints, callbackComplaint{line, kind + " body reaches " + reach[0] + " without rebinding " + root + " onto tx"})
 			}
 			for name, kindOf := range captured {
 				if !regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`).MatchString(usesOnly(code, name)) {

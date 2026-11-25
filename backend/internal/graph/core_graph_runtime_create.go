@@ -85,6 +85,7 @@ func (runtime *GraphRuntime) Patch(baseRevision int, changes PatchChange) GraphP
 		}
 	}
 	return runtime.kernel.Store.Transaction(func(tx *TaskStore) any {
+		runtime := runtime.scoped(tx)
 		kernel := runtime.kernel.scoped(tx)
 		var removed []string
 		for id := range latest.Definition.Nodes {

@@ -30,6 +30,7 @@ func (runtime *GraphRuntime) SettleCompletion() string {
 	currentCommit := task.IntegrationSha
 	humanQuestions := kernelRows(runtime.kernel.DB, "SELECT id,data FROM questions WHERE task_id=? AND kind='human_check' AND status='open'", runtime.graphId)
 	runtime.kernel.ModuleTransaction(func(kernel *KernelStore) any {
+		runtime := runtime.scoped(kernel.Store)
 		for _, question := range humanQuestions {
 			var data map[string]any
 			if err := json.Unmarshal([]byte(kernelString(question["data"])), &data); err != nil {
@@ -48,9 +49,9 @@ func (runtime *GraphRuntime) SettleCompletion() string {
 				continue
 			}
 			var commit any = currentCommit
-			runtime.kernel.Store.ResolveOpenQuestion(kernelString(question["id"]), map[string]any{"type": "superseded", "reason": "Integration commit changed", "commitSha": commit})
+			kernel.Store.ResolveOpenQuestion(kernelString(question["id"]), map[string]any{"type": "superseded", "reason": "Integration commit changed", "commitSha": commit})
 			var previousCommitValue any = previousCommit
-			runtime.kernel.Store.Event(runtime.graphId, "graph.acceptance.superseded", map[string]any{"questionId": kernelString(question["id"]), "acceptanceId": acceptanceId, "previousCommit": previousCommitValue, "commit": commit})
+			kernel.Store.Event(runtime.graphId, "graph.acceptance.superseded", map[string]any{"questionId": kernelString(question["id"]), "acceptanceId": acceptanceId, "previousCommit": previousCommitValue, "commit": commit})
 		}
 
 		return nil
@@ -69,6 +70,7 @@ func (runtime *GraphRuntime) SettleCompletion() string {
 	task = runtime.kernel.Store.Task(runtime.graphId)
 	if !acceptance.Ready || !graphAcceptanceDeliveryMatches(task, acceptance) {
 		runtime.kernel.ModuleTransaction(func(kernel *KernelStore) any {
+			runtime := runtime.scoped(kernel.Store)
 			readyHuman := true
 			for _, item := range acceptance.Items {
 				if item.Status == "passed" || item.Status == "waived" {
@@ -80,15 +82,15 @@ func (runtime *GraphRuntime) SettleCompletion() string {
 			}
 			if readyHuman {
 				for _, criterion := range acceptance.Human {
-					InsertQuestion(runtime.kernel.Store, QuestionInput{TaskId: runtime.graphId, NodeId: "@acceptance/" + criterion.Id, Kind: "human_check", Data: map[string]any{"prompt": criterion.Description, "acceptanceId": criterion.Id, "commitSha": acceptance.Commit}})
+					InsertQuestion(kernel.Store, QuestionInput{TaskId: runtime.graphId, NodeId: "@acceptance/" + criterion.Id, Kind: "human_check", Data: map[string]any{"prompt": criterion.Description, "acceptanceId": criterion.Id, "commitSha": acceptance.Commit}})
 				}
 			}
 			if runtime.State().Phase != "blocked" {
 				var commit any = acceptance.Commit
 				data := map[string]any{"graphId": runtime.graphId, "commit": commit, "items": acceptance.Items, "deliveryPending": acceptance.Ready}
-				runtime.kernel.Store.Event(runtime.graphId, "graph.acceptance.blocked", data)
+				kernel.Store.Event(runtime.graphId, "graph.acceptance.blocked", data)
 				sum := sha256.Sum256([]byte(CanonicalJSON(data)))
-				WakeMaster(runtime.kernel.Store, WakeIntent{TaskID: runtime.graphId, Kind: "acceptance_blocked", DedupeKey: runtime.graphId + ":acceptance:" + hex.EncodeToString(sum[:]), Data: data, HasData: true})
+				WakeMaster(kernel.Store, WakeIntent{TaskID: runtime.graphId, Kind: "acceptance_blocked", DedupeKey: runtime.graphId + ":acceptance:" + hex.EncodeToString(sum[:]), Data: data, HasData: true})
 			}
 			runtime.setPhase("blocked")
 
@@ -97,14 +99,15 @@ func (runtime *GraphRuntime) SettleCompletion() string {
 		return "blocked"
 	}
 	runtime.kernel.ModuleTransaction(func(kernel *KernelStore) any {
+		runtime := runtime.scoped(kernel.Store)
 		runtime.setPhase("completed")
-		task := runtime.kernel.Store.Task(runtime.graphId)
+		task := kernel.Store.Task(runtime.graphId)
 		var sha any
 		if task.IntegrationSha != nil {
 			sha = *task.IntegrationSha
 		}
-		WakeForTaskCompleted(runtime.kernel.Store, runtime.graphId, map[string]any{"phase": "completed", "integrationSha": sha})
-		runtime.kernel.Store.Event(runtime.graphId, "graph.completed", map[string]any{"revision": runtime.State().Revision})
+		WakeForTaskCompleted(kernel.Store, runtime.graphId, map[string]any{"phase": "completed", "integrationSha": sha})
+		kernel.Store.Event(runtime.graphId, "graph.completed", map[string]any{"revision": runtime.State().Revision})
 
 		return nil
 	})
