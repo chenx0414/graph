@@ -114,9 +114,10 @@ func (runtime *TaskRuntime) ConfirmWorkGraph(workID string, input WorkConfirmInp
 		return reservation
 	})
 	reservation := workGraphReceipt(result)
-	runtime.store.txMu.Lock()
-	current := runtime.store.workGraphInTransaction(workID, input.GraphKey)
-	runtime.store.txMu.Unlock()
+	var current *WorkGraph
+	runtime.store.ReadSnapshot(func(store *TaskStore) {
+		current = store.workGraphInTransaction(workID, input.GraphKey)
+	})
 	if current == nil {
 		Raise("not_found", "Work graph reservation not found")
 	}
@@ -160,9 +161,9 @@ func (runtime *TaskRuntime) ConfirmWorkGraph(workID string, input WorkConfirmInp
 	if runtime.autoWake {
 		runtime.execution.Kick()
 	}
-	runtime.store.txMu.Lock()
-	current = runtime.store.workGraphInTransaction(workID, input.GraphKey)
-	runtime.store.txMu.Unlock()
+	runtime.store.ReadSnapshot(func(store *TaskStore) {
+		current = store.workGraphInTransaction(workID, input.GraphKey)
+	})
 	return *current
 }
 

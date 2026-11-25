@@ -50,9 +50,9 @@ func (s *TaskStore) transactionScoped(conn sqlh) *TaskStore {
 	return scoped
 }
 
-// transactionConn takes a connection the transaction owns, so another goroutine's statement waits instead of joining it.
+// transactionConn takes a connection only this transaction uses.
 //
-// The end function commits or rolls back on that handle and gives the connection back.
+// The end function commits or rolls back on that handle.
 func (s *TaskStore) transactionConn() (sqlh, func(committed bool) error) {
 	if s.pool == nil {
 		panic("the store has no pool to open a transaction on")
@@ -75,11 +75,25 @@ func (s *TaskStore) transactionConn() (sqlh, func(committed bool) error) {
 	}
 }
 
-// runTransactionStatementOn issues a control statement; transactionExec lets a test drive commit failures.
 func (s *TaskStore) runTransactionStatementOn(conn sqlh, statement string) error {
 	if s.transactionExec != nil {
 		return s.transactionExec(statement)
 	}
 	_, err := conn.Exec(statement)
 	return err
+}
+
+// ReadSnapshot reads without waiting on a transaction's connection: it joins an open transaction, else reads on the read pool.
+func (s *TaskStore) ReadSnapshot(body func(store *TaskStore)) {
+	if s.inTx {
+		body(s)
+		return
+	}
+	if s.reads != nil {
+		body(s.scoped(s.reads))
+		return
+	}
+	s.txMu.Lock()
+	defer s.txMu.Unlock()
+	body(s)
 }

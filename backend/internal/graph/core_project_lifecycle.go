@@ -32,9 +32,11 @@ func (runtime *TaskRuntime) projectLifecycleInTransaction(projectID string) Proj
 
 func (runtime *TaskRuntime) ProjectLifecycle(projectID string) ProjectLifecycle {
 	runtime.ensureOpen()
-	runtime.store.txMu.Lock()
-	defer runtime.store.txMu.Unlock()
-	return runtime.projectLifecycleInTransaction(projectID)
+	var lifecycle ProjectLifecycle
+	runtime.store.ReadSnapshot(func(store *TaskStore) {
+		lifecycle = runtime.scoped(store).projectLifecycleInTransaction(projectID)
+	})
+	return lifecycle
 }
 
 func (runtime *TaskRuntime) ArchiveProject(projectID, requestID string) ProjectLifecycle {

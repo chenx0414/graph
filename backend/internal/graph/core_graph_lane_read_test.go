@@ -1,0 +1,55 @@
+// graph:table-writes-exempt: the test seeds the queue rows the lane reads
+package graph
+
+import (
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+// A read of the queue must not hold the store's transaction lock: a transaction that starts while
+// the read is in flight then waits for a lock the reader already owns, and the console request that
+// started it never returns.
+//
+// The shape is exactly the production one: the lane reads the runnable graphs, and a conversation
+// create opens a transaction. Reading the queue used to hold the lock across the whole read, so the
+// create blocked forever whenever the two overlapped.
+func TestReadingTheQueueDoesNotBlockATransaction(t *testing.T) {
+	store := openTaskStore(t, filepath.Join(t.TempDir(), "lane-read.sqlite"))
+	defer store.Close()
+	store.RegisterProject("p", t.TempDir(), "[]")
+	kernelExec(store.DB, "INSERT INTO tasks(id,project_id,request,created_seq,phase) VALUES('t1','p','probe',1,'working')")
+	store.Transaction(func(tx *TaskStore) any {
+		tx.Event("t1", "seed", map[string]any{"n": 1})
+		return nil
+	})
+
+	lane := &GraphLane{options: GraphLaneOptions{Kernel: NewKernelStore(store)}}
+
+	// The production stack is a transaction body that reads the queue: the transaction holds the
+	// lock, and the read reached for the same lock again on the same goroutine.
+	done := make(chan error, 1)
+	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				done <- nil
+			}
+		}()
+		store.Transaction(func(tx *TaskStore) any {
+			tx.Event("t1", "while-reading", map[string]any{"n": 2})
+			lane.Runnable()
+			return nil
+		})
+		done <- nil
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatalf("reading the queue inside a transaction deadlocked on the transaction's own lock")
+	}
+
+	if got := kernelInt(kernelRow(store.DB, "SELECT COUNT(*) AS c FROM events WHERE type='while-reading'")["c"]); got != 1 {
+		t.Fatalf("the transaction's row did not survive: %d", got)
+	}
+}

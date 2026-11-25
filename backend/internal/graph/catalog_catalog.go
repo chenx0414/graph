@@ -209,17 +209,18 @@ func (catalog *Catalog) ListDefinitions() []struct {
 	Id      string
 	Version int64
 } {
-	rows := kernelRows(catalog.store.DB, "SELECT id,MAX(version) AS version FROM definitions GROUP BY id")
-	out := make([]struct {
+	out := []struct {
 		Id      string
 		Version int64
-	}, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, struct {
-			Id      string
-			Version int64
-		}{Id: kernelString(row["id"]), Version: kernelInt(row["version"])})
-	}
+	}{}
+	catalog.store.ReadSnapshot(func(store *TaskStore) {
+		for _, row := range kernelRows(store.DB, "SELECT id,MAX(version) AS version FROM definitions GROUP BY id") {
+			out = append(out, struct {
+				Id      string
+				Version int64
+			}{Id: kernelString(row["id"]), Version: kernelInt(row["version"])})
+		}
+	})
 	return out
 }
 

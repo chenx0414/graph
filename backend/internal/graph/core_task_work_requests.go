@@ -44,9 +44,11 @@ func (s *TaskStore) ReviseWork(id string, expected int64, brief string, projectI
 }
 
 func (s *TaskStore) Work(id string) WorkRecord {
-	s.txMu.Lock()
-	defer s.txMu.Unlock()
-	return s.workInTransaction(id)
+	var record WorkRecord
+	s.ReadSnapshot(func(store *TaskStore) {
+		record = store.workInTransaction(id)
+	})
+	return record
 }
 
 func (s *TaskStore) workInTransaction(id string) WorkRecord {
@@ -71,12 +73,12 @@ func (s *TaskStore) workInTransaction(id string) WorkRecord {
 }
 
 func (s *TaskStore) ProjectWork(projectID string) []WorkRecord {
-	s.txMu.Lock()
-	defer s.txMu.Unlock()
-	out := []WorkRecord{}
-	for _, row := range kernelRows(s.Db, "SELECT id FROM work_requests WHERE project_id=? ORDER BY created_at,id", projectID) {
-		out = append(out, s.workInTransaction(kernelString(row["id"])))
-	}
+	var out []WorkRecord
+	s.ReadSnapshot(func(store *TaskStore) {
+		for _, row := range kernelRows(store.Db, "SELECT id FROM work_requests WHERE project_id=? ORDER BY created_at,id", projectID) {
+			out = append(out, store.workInTransaction(kernelString(row["id"])))
+		}
+	})
 	return out
 }
 

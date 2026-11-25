@@ -40,26 +40,26 @@ func (s *TaskStore) workGraphInTransaction(workID, key string) *WorkGraph {
 }
 
 func (s *TaskStore) WorkGraphs(workID string) []WorkGraph {
-	s.txMu.Lock()
-	defer s.txMu.Unlock()
-	s.workInTransaction(workID)
-	items := []WorkGraph{}
-	for _, row := range kernelRows(s.Db, "SELECT graph_key FROM work_graphs WHERE work_id=? ORDER BY created_at,graph_key", workID) {
-		items = append(items, *s.workGraphInTransaction(workID, kernelString(row["graph_key"])))
-	}
+	var items []WorkGraph
+	s.ReadSnapshot(func(store *TaskStore) {
+		store.workInTransaction(workID)
+		for _, row := range kernelRows(store.Db, "SELECT graph_key FROM work_graphs WHERE work_id=? ORDER BY created_at,graph_key", workID) {
+			items = append(items, *store.workGraphInTransaction(workID, kernelString(row["graph_key"])))
+		}
+	})
 	return items
 }
 
 func (s *TaskStore) PreparingWorkGraphs() []WorkGraph {
-	s.txMu.Lock()
-	defer s.txMu.Unlock()
-	out := []WorkGraph{}
-	for _, row := range kernelRows(s.Db, `SELECT g.work_id,g.graph_key FROM work_graphs g JOIN work_requests w ON w.id=g.work_id
+	var out []WorkGraph
+	s.ReadSnapshot(func(store *TaskStore) {
+		for _, row := range kernelRows(store.Db, `SELECT g.work_id,g.graph_key FROM work_graphs g JOIN work_requests w ON w.id=g.work_id
  WHERE g.state='preparing' AND w.execution_paused=0 ORDER BY g.created_at,g.work_id,g.graph_key`) {
-		item := s.workGraphInTransaction(kernelString(row["work_id"]), kernelString(row["graph_key"]))
-		if item != nil {
-			out = append(out, *item)
+			item := store.workGraphInTransaction(kernelString(row["work_id"]), kernelString(row["graph_key"]))
+			if item != nil {
+				out = append(out, *item)
+			}
 		}
-	}
+	})
 	return out
 }

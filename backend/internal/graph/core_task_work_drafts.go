@@ -92,22 +92,24 @@ func (s *TaskStore) workDraftInTransaction(workID string, version int64, anyStat
 }
 
 func (s *TaskStore) WorkDraft(workID string, version int64) WorkDraft {
-	s.txMu.Lock()
-	defer s.txMu.Unlock()
-	return s.workDraftInTransaction(workID, version, draftCurrent)
+	var draft WorkDraft
+	s.ReadSnapshot(func(store *TaskStore) {
+		draft = store.workDraftInTransaction(workID, version, draftCurrent)
+	})
+	return draft
 }
 
 func (s *TaskStore) WorkDrafts(workID string, archived bool) []WorkDraft {
-	s.txMu.Lock()
-	defer s.txMu.Unlock()
-	s.workInTransaction(workID)
-	filter := "IS NULL"
-	if archived {
-		filter = "IS NOT NULL"
-	}
-	out := []WorkDraft{}
-	for _, row := range kernelRows(s.Db, "SELECT version FROM work_drafts WHERE work_id=? AND deleted_at IS NULL AND archived_at "+filter+" ORDER BY version", workID) {
-		out = append(out, s.workDraftInTransaction(workID, kernelInt(row["version"]), draftAnyState))
-	}
-	return out
+	var drafts []WorkDraft
+	s.ReadSnapshot(func(store *TaskStore) {
+		store.workInTransaction(workID)
+		filter := "IS NULL"
+		if archived {
+			filter = "IS NOT NULL"
+		}
+		for _, row := range kernelRows(store.Db, "SELECT version FROM work_drafts WHERE work_id=? AND deleted_at IS NULL AND archived_at "+filter+" ORDER BY version", workID) {
+			drafts = append(drafts, store.workDraftInTransaction(workID, kernelInt(row["version"]), draftAnyState))
+		}
+	})
+	return drafts
 }

@@ -45,9 +45,16 @@ func (lane *GraphLane) Runnable() []RunnableGraph {
 		return nil
 	}
 	kernel := lane.options.Kernel
-	kernel.Store.txMu.Lock()
-	defer kernel.Store.txMu.Unlock()
-	db := kernel.Store.Db
+	var runnable []RunnableGraph
+	kernel.Store.ReadSnapshot(func(store *TaskStore) {
+		runnable = lane.runnableOn(store)
+	})
+	return runnable
+}
+
+func (lane *GraphLane) runnableOn(store *TaskStore) []RunnableGraph {
+	kernel := lane.options.Kernel.scoped(store)
+	db := store.Db
 	rows := graphDBAll(db, `SELECT q.task_id FROM kernel_queue q LEFT JOIN kernel_node_state s ON s.task_id=q.task_id AND s.node_id=q.node_id
         WHERE q.state='queued' AND COALESCE(s.paused,0)=0 AND NOT EXISTS(SELECT 1 FROM kernel_nodes n WHERE n.task_id=q.task_id AND n.node_id=q.node_id AND n.status='blocked')
       UNION SELECT i.task_id FROM kernel_module_inbox i LEFT JOIN kernel_node_state s ON s.task_id=i.task_id AND s.node_id=i.module_id

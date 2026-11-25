@@ -10,6 +10,12 @@ func (k *KernelStore) scoped(tx *TaskStore) *KernelStore {
 	return &scoped
 }
 
+func (c *Catalog) scoped(tx *TaskStore) *Catalog {
+	scoped := *c
+	scoped.store = tx
+	return &scoped
+}
+
 func (w *ArtifactWorkspace) scoped(tx *TaskStore) *ArtifactWorkspace {
 	scoped := *w
 	scoped.store = tx
@@ -50,7 +56,6 @@ func (r *TaskRuntime) scoped(tx *TaskStore) *TaskRuntime {
 	scoped := &TaskRuntime{
 		options:         r.options,
 		store:           tx,
-		catalog:         r.catalog,
 		execution:       r.execution,
 		scheduler:       r.scheduler,
 		closed:          r.closed,
@@ -70,6 +75,9 @@ func (r *TaskRuntime) scoped(tx *TaskStore) *TaskRuntime {
 		Host:            r.Host,
 		graphLane:       r.graphLane,
 		laneTokenBudget: r.laneTokenBudget,
+	}
+	if r.catalog != nil {
+		scoped.catalog = r.catalog.scoped(tx)
 	}
 	if r.kernel != nil {
 		scoped.kernel = r.kernel.scoped(tx)

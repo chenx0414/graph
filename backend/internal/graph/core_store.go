@@ -36,7 +36,8 @@ type TaskStore struct {
 	Db   sqlh
 	Path string
 	pool *sql.DB
-	inTx bool
+	reads *sql.DB
+	inTx  bool
 }
 
 type storeState struct {
@@ -55,7 +56,7 @@ func NewTaskStore(db *sql.DB, path string) *TaskStore {
 	}
 	MigrateTaskSchema(db)
 	kernelExec(db, taskInvocationTotalsDDL)
-	store := &TaskStore{storeState: &storeState{}, DB: db, Db: db, Path: path, pool: db}
+	store := &TaskStore{storeState: &storeState{}, DB: db, Db: db, Path: path, pool: db, reads: openReadPool(path)}
 	store.agentExecutions = newExecutionSlotPool(DefaultAgentExecutions)
 	store.programExecutions = newExecutionSlotPool(DefaultProgramExecutions)
 	return store
@@ -70,4 +71,21 @@ func (s *TaskStore) Close() {
 		panic(err)
 	}
 	s.emitChange()
+}
+
+func openReadPool(path string) *sql.DB {
+	if path == "" || path == ":memory:" {
+		return nil
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil
+	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	if _, err := db.Exec("PRAGMA busy_timeout=5000; PRAGMA query_only=ON;"); err != nil {
+		_ = db.Close()
+		return nil
+	}
+	return db
 }
