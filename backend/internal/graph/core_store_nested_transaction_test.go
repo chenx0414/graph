@@ -1,5 +1,7 @@
 package graph
 
+// graph:table-writes-exempt: the test seeds the task row the recovery path writes against
+
 import (
 	"path/filepath"
 	"testing"

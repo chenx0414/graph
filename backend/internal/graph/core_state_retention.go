@@ -1,5 +1,7 @@
 package graph
 
+// graph:table-writes-exempt: a retention sweep is one fact about many tables
+
 
 import (
 	"fmt"

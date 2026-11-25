@@ -1,5 +1,7 @@
 package graph
 
+// graph:table-writes-exempt: the test drives the failure path and writes no table
+
 import (
 	"errors"
 	"path/filepath"

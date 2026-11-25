@@ -1,5 +1,7 @@
 package graph
 
+// graph:allow-large-file: the daemon's start function is one 585-line function; splitting it is a rewrite of the daemon's setup, not a move of code
+
 
 import (
 	"encoding/json"

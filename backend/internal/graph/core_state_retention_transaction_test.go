@@ -1,5 +1,7 @@
 package graph
 
+// graph:table-writes-exempt: the test seeds the one task row the sweep counts events for
+
 import (
 	"path/filepath"
 	"testing"

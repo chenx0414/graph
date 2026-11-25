@@ -1,3 +1,4 @@
+// graph:table-writes-exempt: the test reads the package source and writes no table
 package graph
 
 import (

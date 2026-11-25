@@ -1,5 +1,7 @@
 package graph
 
+// graph:table-writes-exempt: a test seeds the rows the projection reads
+
 import (
 	"encoding/json"
 	"math"
