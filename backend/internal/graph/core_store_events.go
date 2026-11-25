@@ -74,12 +74,12 @@ func (s *TaskStore) setTx(active bool) {
 
 func (s *TaskStore) Transaction(action any) any {
 	if s.InTransaction() {
-		return storeTransactionAction(action)
+		return storeTransactionAction(s, action)
 	}
 	s.txMu.Lock()
 	defer s.txMu.Unlock()
 	if s.InTransaction() {
-		return storeTransactionAction(action)
+		return storeTransactionAction(s, action)
 	}
 	if err := s.runTransactionStatement("BEGIN IMMEDIATE"); err != nil {
 		panic(err)
@@ -98,7 +98,7 @@ func (s *TaskStore) Transaction(action any) any {
 			panic(rec)
 		}
 	}()
-	result = storeTransactionAction(action)
+	result = storeTransactionAction(s, action)
 	if err := s.runTransactionStatement("COMMIT"); err != nil {
 		settled = true
 		panic(err)
@@ -116,27 +116,35 @@ func (s *TaskStore) runTransactionStatement(statement string) error {
 	return err
 }
 
-func storeTransactionAction(action any) any {
+// storeTransactionAction runs a transaction body, handing it the store the transaction owns. A
+// body that asks for that store by parameter gets it; a body that ignores it keeps working while
+// the call sites are migrated one batch at a time.
+func storeTransactionAction(tx *TaskStore, action any) any {
 	switch fn := action.(type) {
 	case func():
 		fn()
 		return nil
 	case func() any:
 		return fn()
+	case func(*TaskStore):
+		fn(tx)
+		return nil
+	case func(*TaskStore) any:
+		return fn(tx)
 	default:
 		Raise("invalid_input", "Unsupported transaction callback")
 	}
 	return nil
 }
 
-func (s *TaskStore) Command(scope, requestID string, payload any, apply func() any) any {
+func (s *TaskStore) Command(scope, requestID string, payload any, apply any) any {
 	if requestID == "" || len(requestID) > 200 {
 		Raise("invalid_input", "A bounded requestId is required")
 	}
 	encoded := CanonicalJSON(payload)
-	return s.Transaction(func() any {
+	return s.Transaction(func(tx *TaskStore) any {
 		var previousPayload, receipt string
-		err := s.DB.QueryRow("SELECT payload,receipt FROM commands WHERE scope=? AND request_id=?", scope, requestID).Scan(&previousPayload, &receipt)
+		err := tx.DB.QueryRow("SELECT payload,receipt FROM commands WHERE scope=? AND request_id=?", scope, requestID).Scan(&previousPayload, &receipt)
 		if err == nil {
 			if previousPayload != encoded {
 				Raise("idempotency_conflict", "requestId was already used with different content")
@@ -146,8 +154,8 @@ func (s *TaskStore) Command(scope, requestID string, payload any, apply func() a
 		if err != sql.ErrNoRows {
 			panic(err)
 		}
-		result := apply()
-		s.RecordCommand(scope, requestID, encoded, CanonicalJSON(result))
+		result := storeTransactionAction(tx, apply)
+		tx.RecordCommand(scope, requestID, encoded, CanonicalJSON(result))
 		return result
 	})
 }
