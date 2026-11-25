@@ -55,8 +55,11 @@ func (k *KernelStore) LatestRevision(taskID string) *RevisionRow {
 	return k.Revision(taskID, int(g5Int(row["version"])))
 }
 
+// ModuleTransaction runs a module transition in a transaction of its own, or joins the one the
+// caller is already in. The test is the handle's own flag: a store-wide depth counter would send
+// this transaction to the pool while another goroutine's transaction owns the connection.
 func (k *KernelStore) ModuleTransaction(action func(*KernelStore) any) any {
-	if k.moduleTransactionActive {
+	if k.Store.InTransaction() {
 		return action(k)
 	}
 	return k.Store.Transaction(func(tx *TaskStore) any {

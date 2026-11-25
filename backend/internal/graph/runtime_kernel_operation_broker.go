@@ -165,6 +165,7 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 	}
 	created := NowMillis()
 	kernel.Store.Transaction(func(tx *TaskStore) any {
+		kernel := kernel.scoped(tx)
 		request := kernel.Content.Encode(map[string]any{
 			"operation": operation, "inputs": options.Inputs, "workspace": options.Workspace,
 		})
@@ -399,6 +400,7 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 		evaluated.VerificationTarget = verificationTarget
 	}
 	kernel.Store.Transaction(func(tx *TaskStore) any {
+		kernel := kernel.scoped(tx)
 		kernel.SettleModuleOperation(id, kernel.Content.Encode(evaluated), recordDigest, NowMillis())
 		return nil
 	})

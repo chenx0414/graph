@@ -31,6 +31,16 @@ type ModuleRuntime struct {
 	compiled        *compiledModule
 }
 
+// scoped rebinds the runtime onto a transaction's store, so a module transition recorded inside a
+// transaction joins it instead of opening a second one on the pool.
+func (runtime *ModuleRuntime) scoped(tx *TaskStore) *ModuleRuntime {
+	scoped := *runtime
+	if runtime.kernel != nil {
+		scoped.kernel = runtime.kernel.scoped(tx)
+	}
+	return &scoped
+}
+
 type compiledModule struct {
 	trigger        string
 	requiredInputs []string

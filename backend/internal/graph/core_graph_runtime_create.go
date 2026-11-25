@@ -27,7 +27,8 @@ func (runtime *GraphRuntime) Create(definition any, request, projectId string) C
 		request = parsed.Name
 	}
 	created := runtime.kernel.Store.Transaction(func(tx *TaskStore) any {
-		kernel := runtime.kernel.scoped(tx)
+		runtime := runtime.scoped(tx)
+		kernel := runtime.kernel
 		if runtime.taskRow() != nil {
 			Raise("invalid_graph", "Graph "+runtime.graphId+" already exists")
 		}
