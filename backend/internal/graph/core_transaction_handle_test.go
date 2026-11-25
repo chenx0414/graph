@@ -227,7 +227,7 @@ func (gate handleGate) check(text string) []callbackComplaint {
 				complaints = append(complaints, handleComplaints(cb, kind, line, rebound)...)
 			}
 			for name, kindOf := range captured {
-				if !regexp.MustCompile(`\b`+regexp.QuoteMeta(name)+`\b`).MatchString(cb) {
+				if !regexp.MustCompile(`\b`+regexp.QuoteMeta(name)+`\b`).MatchString(usesOnly(cb, name)) {
 					continue
 				}
 				if !gate.rebindable[kindOf] && !blocked[kindOf] {
@@ -325,6 +325,20 @@ func callArguments(body string, afterOpen int) string {
 		}
 	}
 	return ""
+}
+
+// usesOnly returns the body with every rebinding statement removed, so that naming an enclosing
+// holder inside "lifecycle := e.lifecycle.scoped(tx)" is not itself a capture: the capture is a
+// use that happens anywhere else.
+func usesOnly(body, name string) string {
+	kept := []string{}
+	for _, line := range strings.Split(body, "\n") {
+		if strings.Contains(line, ".scoped(tx)") || regexp.MustCompile(`:=\s*tx\b`).MatchString(line) {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
 }
 
 // reboundNames lists the identifiers a body rebound onto the transaction, so that "k.Db" is
