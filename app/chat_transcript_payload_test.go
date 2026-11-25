@@ -105,3 +105,19 @@ func TestLoadOlderTakesAHistoryPageWithStringErrors(t *testing.T) {
 		t.Fatalf("the chat reports no JSON complaint, status %q", state.status)
 	}
 }
+
+func TestAnEmptyReplyNoticeReachesTheTranscript(t *testing.T) {
+	messages, err := parseConversationMessages([]byte(`{"messages":[
+	 {"id":"m1","seq":1,"role":"user","kind":"chat","text":"做这条","state":"delivered"},
+	 {"id":"m2","seq":2,"role":"system","kind":"notice","text":"本轮模型没有返回任何内容。","state":"done","data":{"source":{"form":"notice","summary":"本轮没有回复"}}}
+	]}`))
+	if err != nil {
+		t.Fatalf("the transcript parses: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("the notice must reach the transcript, messages %+v", messages)
+	}
+	if messages[1].Text != "本轮模型没有返回任何内容。" {
+		t.Fatalf("the notice text must survive, got %+v", messages[1])
+	}
+}

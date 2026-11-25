@@ -100,7 +100,8 @@ func parseConversationMessages(payload []byte) ([]transcriptMessage, error) {
 				continue
 			}
 		}
-		if message.Role != "user" && message.Role != "assistant" && message.Role != "tool" && message.Kind != "verification_draft" {
+		if message.Role != "user" && message.Role != "assistant" && message.Role != "tool" &&
+			message.Kind != "verification_draft" && message.Kind != "notice" {
 			continue
 		}
 		spoken = append(spoken, message)
