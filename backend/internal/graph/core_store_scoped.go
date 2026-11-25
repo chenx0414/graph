@@ -39,6 +39,12 @@ func (g *TaskSendGate) scoped(tx *TaskStore) *TaskSendGate {
 	return &scoped
 }
 
+// GitIntegration keeps a mutex and two caches, so it is never copied: a scoped view carries only
+// the store, and the code that needs the caches goes on using the original.
+func (g *GitIntegration) scoped(tx *TaskStore) *GitIntegration {
+	return &GitIntegration{store: tx, stateDir: g.stateDir}
+}
+
 func (l *OperationLifecycle) scoped(tx *TaskStore) *OperationLifecycle {
 	scoped := *l
 	scoped.store = tx
@@ -79,6 +85,8 @@ func (r *TaskRuntime) scoped(tx *TaskStore) *TaskRuntime {
 	if r.artifacts != nil {
 		scoped.artifacts = r.artifacts.scoped(tx)
 	}
-	scoped.git = r.git
+	if r.git != nil {
+		scoped.git = r.git.scoped(tx)
+	}
 	return scoped
 }
