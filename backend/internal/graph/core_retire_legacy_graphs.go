@@ -1,6 +1,5 @@
 package graph
 
-// graph:table-writes-exempt: retiring a graph and everything of it is one fact about many tables
 
 func RetireLegacyGraphs(store *TaskStore) {
 	candidates := kernelRows(store.DB, `SELECT t.id FROM tasks t

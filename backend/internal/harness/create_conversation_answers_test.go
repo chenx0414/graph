@@ -6,13 +6,6 @@ import (
 	"time"
 )
 
-// The console must answer POST /api/conversations while the dispatch loop is reading. The lane used
-// to hold the store's transaction lock while it read the queue, so the first conversation the gate
-// created waited on it and the request never returned: every behaviour-gate case from a worktree
-// failed with "context deadline exceeded" instead of a verdict.
-//
-// This runs a real daemon and keeps a writer busy, then requires the create to answer inside a
-// bounded window. It reproduces the hang, not a shortcut around it.
 func TestCreatingAConversationAnswersWhileDispatchReads(t *testing.T) {
 	root := t.TempDir()
 	session, err := StartCLISession(CLISessionOptions{Repository: repositoryForTest(t), Root: root})
@@ -30,7 +23,6 @@ func TestCreatingAConversationAnswersWhileDispatchReads(t *testing.T) {
 	busy.Add(1)
 	go func() {
 		defer busy.Done()
-		// Reads that share the store with the create keep the dispatch loop turning over.
 		for i := 0; i < 60; i++ {
 			select {
 			case <-done:

@@ -1,4 +1,3 @@
-// graph:allow-large-file: the ownership table and routing predate the budget; this change adds one row and no logic
 package graph
 
 import (

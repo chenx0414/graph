@@ -1,4 +1,3 @@
-// graph:table-writes-exempt: a test seeds the rows the projection reads
 package graph
 
 import (

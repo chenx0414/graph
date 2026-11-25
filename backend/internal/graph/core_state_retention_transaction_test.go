@@ -1,4 +1,3 @@
-// graph:table-writes-exempt: the test seeds the one task row the sweep counts events for
 package graph
 
 import (
@@ -22,16 +21,12 @@ func TestRetentionJoinsTheTransactionItIsCalledFrom(t *testing.T) {
 	completed := false
 	store.Transaction(func(tx *TaskStore) any {
 		tx.ApplyRetention(RetentionOptions{Now: NowMillis()})
-		// Reaching this line at all is the assertion: the pre-fix sweep blocked forever on
-		// txMu, so the test failed by timing out instead of reporting a message.
 		completed = true
 		return nil
 	})
 	if !completed {
 		t.Fatal("the sweep must return inside the caller's transaction")
 	}
-	// A sweep inside a transaction must not have committed it: the store is idle again, so the
-	// next transaction starts from a clean depth rather than a half-open one.
 	store.Transaction(func(tx *TaskStore) any {
 		tx.Event("t1", "after", map[string]any{"n": 1})
 		return nil

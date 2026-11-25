@@ -1,4 +1,3 @@
-// graph:table-writes-exempt: the test seeds the task row the recovery path writes against
 package graph
 
 import (
@@ -6,7 +5,6 @@ import (
 	"testing"
 )
 
-// Drain recovers a panicking node while its own transaction is open.
 func TestRecoveryInsideATransactionDoesNotDeadlock(t *testing.T) {
 	store := openTaskStore(t, filepath.Join(t.TempDir(), "graph.sqlite"))
 	t.Cleanup(store.Close)

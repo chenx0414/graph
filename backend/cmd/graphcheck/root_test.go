@@ -6,10 +6,6 @@ import (
 	"testing"
 )
 
-// repoRoot finds the checkout from a subdirectory. A git worktree keeps ".git" as a file that
-// points at the main checkout, so a test for a directory named .git sent the root back to the
-// caller's own directory: the behaviour gate then looked for the daemon at backend/dist and every
-// activation from a worktree failed with "could not be built".
 func TestRepoRootFindsBothACheckoutAndAWorktree(t *testing.T) {
 	for _, tc := range []struct {
 		name string

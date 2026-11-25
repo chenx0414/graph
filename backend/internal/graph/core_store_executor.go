@@ -35,7 +35,6 @@ type sqlh interface {
 	QueryRow(query string, args ...any) *sql.Row
 }
 
-// scoped is the store as a transaction sees it: same state, statements on that transaction's connection.
 func (s *TaskStore) scoped(conn sqlh) *TaskStore {
 	scoped := *s
 	scoped.DB = conn
@@ -43,16 +42,12 @@ func (s *TaskStore) scoped(conn sqlh) *TaskStore {
 	return &scoped
 }
 
-// transactionScoped is the handle whose bodies are inside a transaction; membership is per handle, not per store.
 func (s *TaskStore) transactionScoped(conn sqlh) *TaskStore {
 	scoped := s.scoped(conn)
 	scoped.inTx = true
 	return scoped
 }
 
-// transactionConn takes a connection only this transaction uses.
-//
-// The end function commits or rolls back on that handle.
 func (s *TaskStore) transactionConn() (sqlh, func(committed bool) error) {
 	if s.pool == nil {
 		panic("the store has no pool to open a transaction on")
@@ -83,7 +78,6 @@ func (s *TaskStore) runTransactionStatementOn(conn sqlh, statement string) error
 	return err
 }
 
-// ReadSnapshot reads without waiting on a transaction's connection: it joins an open transaction, else reads on the read pool.
 func (s *TaskStore) ReadSnapshot(body func(store *TaskStore)) {
 	if s.inTx {
 		body(s)

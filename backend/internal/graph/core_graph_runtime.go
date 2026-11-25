@@ -28,8 +28,6 @@ type GraphRuntime struct {
 	artifacts *ArtifactWorkspace
 }
 
-// scoped rebinds the runtime onto a transaction's store, so a body that has the transaction's
-// handle reaches the database through it instead of waiting on the pool.
 func (runtime *GraphRuntime) scoped(tx *TaskStore) *GraphRuntime {
 	scoped := *runtime
 	if runtime.kernel != nil {

@@ -1,4 +1,3 @@
-// graph:table-writes-exempt: the test reads the package source and writes no table
 package graph
 
 import (
@@ -10,19 +9,8 @@ import (
 	"testing"
 )
 
-// A transaction owns one connection, and that connection is the only thing its body may write
-// through. A statement on the store's pool either waits behind the open transaction or, worse,
-// runs inside it from another goroutine and is rolled back with work it never joined.
-//
-// Three rules keep that invariant checkable at build time instead of as a hang at run time:
-//  1. every transaction and command callback receives the transaction's own store,
-//  2. its body reaches a store handle only through that store (rebind with ".scoped(tx)"),
-//  3. its body never captures a store or holder from the enclosing function.
-//
-// Rule 3 is what carries the call graph: a helper that opens statements on a holder it received
-// is safe once the body rebound that holder, and unsafe the moment the body hands it the outer
-// one, so the capture check covers every function the body can reach. A holder it cannot rebind
-// is reported as its own defect, because rebinding is the only way to fix the capture.
+// A transaction owns one connection, so its body may write only through the handle it was given.
+// The gates check that at build time, and the capture rule is what carries the call graph.
 var transactionCallbackPattern = regexp.MustCompile(`\.(Transaction|Command)\(`)
 
 var functionPattern = regexp.MustCompile(`(?m)^func (?:\(([A-Za-z_][A-Za-z0-9_]*) (\*?)([A-Za-z_][A-Za-z0-9_]*)\) )?([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\)[^{]*\{`)
@@ -65,8 +53,6 @@ func TestEveryTransactionCallbackWritesThroughItsOwnHandle(t *testing.T) {
 	}
 }
 
-// A capture is only fixable by rebinding the holder onto the transaction, so a holder without a
-// scoped method turns one violation into two: the capture and the missing way out of it.
 func TestEveryHolderCapturedByATransactionCanBeRebound(t *testing.T) {
 	gate := newHandleGate(packageSources(t))
 	offenders := []string{}
@@ -84,8 +70,6 @@ func TestEveryHolderCapturedByATransactionCanBeRebound(t *testing.T) {
 	}
 }
 
-// The gates above are only worth their lines if each rule actually fires. These fixtures are the
-// rules' own specification: every one of them is a shape the checker must reject or accept.
 func TestTransactionHandleGateRejectsEachBypass(t *testing.T) {
 	cases := []struct {
 		name, source, want string
@@ -248,8 +232,6 @@ func (gate handleGate) check(text string) []callbackComplaint {
 			} else {
 				complaints = append(complaints, handleComplaints(code, kind, line, rebound)...)
 			}
-			// A holder reached as a field of a captured value (service.kernel, runtime.store) is
-			// the same defect wearing one more selector: the body still writes on the pool.
 			for _, reach := range holderFieldReach.FindAllStringSubmatch(code, -1) {
 				root := reach[1]
 				if _, held := captured[root]; root == "tx" || rebound[root] || !held {
@@ -314,8 +296,6 @@ func handleComplaints(cb, kind string, line int, rebound map[string]bool) []call
 	return complaints
 }
 
-// capturedHolders lists the identifiers in a function's scope that carry a store, mapped to their
-// type: parameters, receiver, and local variables of a holder type.
 func (gate handleGate) capturedHolders(fn []int, text, body string) map[string]string {
 	names := map[string]string{}
 	if fn[2] >= 0 && gate.holders[text[fn[6]:fn[7]]] {
@@ -340,8 +320,6 @@ func (gate handleGate) capturedHolders(fn []int, text, body string) map[string]s
 	return names
 }
 
-// functionParams returns the parameter list of the function whose signature starts at fn[0],
-// scanning to its matching parenthesis: a regexp stops at the ")" inside "func(*TaskStore) any".
 func functionParams(text string, fn []int) string {
 	open := fn[9]
 	if open < 0 || open >= len(text) || text[open] != '(' {
@@ -362,8 +340,6 @@ func functionParams(text string, fn []int) string {
 	return ""
 }
 
-// callArgsOnly returns the argument list of the call that opened at afterOpen-1 without requiring an
-// inline func literal, so a forwarded callback can still be recognised by its declared type.
 func callArgsOnly(body string, afterOpen int) string {
 	depth := 1
 	for i := afterOpen; i < len(body); i++ {
@@ -380,9 +356,6 @@ func callArgsOnly(body string, afterOpen int) string {
 	return ""
 }
 
-// passedThrough reports whether the callback handed to a transaction is a parameter of the
-// enclosing function declared func(*TaskStore) any: the wrapper forwards the store it was given, so
-// its own body receives the transaction's handle and there is nothing to rebind.
 func passedThrough(args, params string) bool {
 	declared := map[string]bool{}
 	for _, param := range strings.Split(params, ",") {
@@ -399,8 +372,6 @@ func passedThrough(args, params string) bool {
 	return false
 }
 
-// callArguments returns the argument list of the call that opened at afterOpen-1, or "" when the
-// call carries no inline func literal (exec.Command's arguments, for example).
 func callArguments(body string, afterOpen int) string {
 	depth := 1
 	for i := afterOpen; i < len(body); i++ {
@@ -421,8 +392,6 @@ func callArguments(body string, afterOpen int) string {
 	return ""
 }
 
-// codeOnly blanks string literals and comments, keeping every byte offset and newline in place, so
-// that a table name inside a SQL string is not mistaken for a reference to a variable of that name.
 func codeOnly(body string) string {
 	cleaned := []byte(body)
 	for i := 0; i < len(cleaned); i++ {
@@ -462,9 +431,6 @@ func codeOnly(body string) string {
 	return string(cleaned)
 }
 
-// usesOnly returns the body with every rebinding statement removed, so that naming an enclosing
-// holder inside "lifecycle := e.lifecycle.scoped(tx)" is not itself a capture: the capture is a
-// use that happens anywhere else.
 func usesOnly(body, name string) string {
 	kept := []string{}
 	for _, line := range strings.Split(body, "\n") {
@@ -476,8 +442,6 @@ func usesOnly(body, name string) string {
 	return strings.Join(kept, "\n")
 }
 
-// reboundNames lists the identifiers a body rebound onto the transaction, so that "k.Db" is
-// accepted once the body declared "k := k.scoped(tx)".
 func reboundNames(body string) map[string]bool {
 	names := map[string]bool{}
 	for _, match := range rebindPattern.FindAllStringSubmatch(body, -1) {

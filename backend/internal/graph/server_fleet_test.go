@@ -1,4 +1,3 @@
-// graph:table-writes-exempt: a test seeds the rows the projection reads
 package graph
 
 import (
@@ -18,8 +17,6 @@ type fleetFixture struct {
 	app    *GraphApp
 }
 
-// exec runs a seed statement. Inside a transaction it must use the transaction's handle, or it
-// waits for the connection that transaction is holding.
 func (fixture *fleetFixture) exec(t *testing.T, query string, args ...any) {
 	t.Helper()
 	if _, err := fixture.store.DB.Exec(query, args...); err != nil {
@@ -27,7 +24,6 @@ func (fixture *fleetFixture) exec(t *testing.T, query string, args ...any) {
 	}
 }
 
-// execInTransaction is exec on the handle a transaction body was given.
 func execInTransaction(t *testing.T, tx *TaskStore, query string, args ...any) {
 	t.Helper()
 	if _, err := tx.DB.Exec(query, args...); err != nil {

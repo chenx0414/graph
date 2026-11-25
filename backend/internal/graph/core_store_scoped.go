@@ -1,7 +1,5 @@
 package graph
 
-// A holder that only forwards statements is rebound onto the transaction's store; one that keeps live state is not copied.
-
 func (k *KernelStore) scoped(tx *TaskStore) *KernelStore {
 	scoped := *k
 	scoped.Store = tx
@@ -40,7 +38,6 @@ func (g *TaskSendGate) scoped(tx *TaskStore) *TaskSendGate {
 	return &scoped
 }
 
-// GitIntegration keeps a mutex and caches, so its scoped view carries the store only.
 func (g *GitIntegration) scoped(tx *TaskStore) *GitIntegration {
 	return &GitIntegration{store: tx, stateDir: g.stateDir}
 }
@@ -51,7 +48,6 @@ func (l *OperationLifecycle) scoped(tx *TaskStore) *OperationLifecycle {
 	return &scoped
 }
 
-// TaskRuntime is rebuilt field by field: statements move onto the transaction, live state stays shared.
 func (r *TaskRuntime) scoped(tx *TaskStore) *TaskRuntime {
 	scoped := &TaskRuntime{
 		options:         r.options,

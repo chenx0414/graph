@@ -87,8 +87,6 @@ type graphManagementService struct {
 	artifacts   *ArtifactWorkspace
 }
 
-// scoped rebinds the service onto a transaction's store, so its bodies reach the database through
-// the connection the transaction owns instead of waiting on the pool.
 func (service *graphManagementService) scoped(tx *TaskStore) *graphManagementService {
 	scoped := *service
 	if service.kernel != nil {

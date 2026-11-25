@@ -7,10 +7,7 @@ import (
 	"testing"
 )
 
-// A transaction owns its connection. A statement from another goroutine must wait for it rather
-// than run on it: with BEGIN issued as a plain statement on the shared pool, the next goroutine to
-// borrow that connection ran inside the open transaction, so a write from a goroutine that never
-// joined a transaction was rolled back with it.
+// Another goroutine's write must wait for the transaction rather than run inside it and be rolled back with it.
 func TestAnotherGoroutinesWriteIsNotSwallowedByAnOpenTransaction(t *testing.T) {
 	store := openTaskStore(t, filepath.Join(t.TempDir(), "isolation.sqlite"))
 	defer store.Close()
@@ -52,8 +49,7 @@ func TestAnotherGoroutinesWriteIsNotSwallowedByAnOpenTransaction(t *testing.T) {
 	}
 }
 
-// The transaction's own statements must land on the connection it owns, so a body that writes
-// through the handle it was given sees its own uncommitted rows while another goroutine does not.
+// A body sees its own uncommitted rows through the handle it was given.
 func TestATransactionBodySeesItsOwnUncommittedRows(t *testing.T) {
 	store := openTaskStore(t, filepath.Join(t.TempDir(), "isolation-own.sqlite"))
 	defer store.Close()
@@ -72,8 +68,7 @@ func TestATransactionBodySeesItsOwnUncommittedRows(t *testing.T) {
 	}
 }
 
-// Two goroutines that never join each other's transaction must both keep their writes: each
-// transaction owns its own connection, and a plain write outside any transaction joins neither.
+// Two transactions and a plain writer must each keep every row.
 func TestConcurrentTransactionsAndPlainWritesKeepEveryRow(t *testing.T) {
 	store := openTaskStore(t, filepath.Join(t.TempDir(), "isolation-concurrent.sqlite"))
 	defer store.Close()
@@ -117,9 +112,7 @@ func TestConcurrentTransactionsAndPlainWritesKeepEveryRow(t *testing.T) {
 	}
 }
 
-// Nested transactions must join the one already open instead of waiting for the connection it
-// holds, and a helper built outside the transaction must write where the transaction is. Both
-// shapes deadlocked while an open transaction could hand its body the store's pool.
+// A nested transaction and a kernel rebuilt from the handle join the open transaction instead of waiting on it.
 func TestNestedTransactionsJoinInsteadOfWaiting(t *testing.T) {
 	store := openTaskStore(t, filepath.Join(t.TempDir(), "isolation-nested.sqlite"))
 	defer store.Close()

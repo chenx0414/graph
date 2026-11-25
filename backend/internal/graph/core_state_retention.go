@@ -1,6 +1,5 @@
 package graph
 
-// graph:table-writes-exempt: a retention sweep is one fact about many tables
 
 import (
 	"fmt"
@@ -85,8 +84,6 @@ func PlanRetention(db *sql.DB, options RetentionOptions) RetentionPlan {
 	return RetentionPlan{Events: events, Capabilities: capabilities, Handoffs: handoffs, Bytes: bytes}
 }
 
-// ApplyRetention sweeps a database this process does not otherwise transact on; the graph
-// store uses TaskStore.ApplyRetention, which joins the store's own transaction discipline.
 func ApplyRetention(db *sql.DB, options RetentionOptions) RetentionApplied {
 	if _, err := db.Exec("BEGIN IMMEDIATE"); err != nil {
 		panic(err)
@@ -104,8 +101,6 @@ func ApplyRetention(db *sql.DB, options RetentionOptions) RetentionApplied {
 }
 
 func (s *TaskStore) ApplyRetention(options RetentionOptions) RetentionApplied {
-	// Transaction locks txMu before it checks for an open transaction, so the sweep joins the
-	// caller's transaction when there is one and opens its own only when the store is idle.
 	applied := RetentionApplied{}
 	run := func(store *TaskStore) {
 		won, err := applyRetentionLocked(store.DB, doomed(options))

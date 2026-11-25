@@ -7,13 +7,7 @@ import (
 	"time"
 )
 
-// A read of the queue must not hold the store's transaction lock: a transaction that starts while
-// the read is in flight then waits for a lock the reader already owns, and the console request that
-// started it never returns.
-//
-// The shape is exactly the production one: the lane reads the runnable graphs, and a conversation
-// create opens a transaction. Reading the queue used to hold the lock across the whole read, so the
-// create blocked forever whenever the two overlapped.
+// A queue read must not hold the transaction lock: a transaction body that reads the queue then waits on its own lock.
 func TestReadingTheQueueDoesNotBlockATransaction(t *testing.T) {
 	store := openTaskStore(t, filepath.Join(t.TempDir(), "lane-read.sqlite"))
 	defer store.Close()
