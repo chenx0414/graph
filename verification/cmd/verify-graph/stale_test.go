@@ -10,12 +10,6 @@ import (
 )
 
 // A witness says "this control was really driven". It stops being true the
-// moment its page is rebuilt: the button keeps the same name, so every other
-// check passes, while the recorded run describes code that no longer exists.
-//
-// This is the shape that hid the deleted insights page: its `covered` verdict
-// rested on a 2026-11-17 run, the page was deleted on 11-19, and the audit —
-// which re-read the journey and the evidence and found both present — passed.
 func TestAWitnessOlderThanItsPageIsStale(t *testing.T) {
 	root := t.TempDir()
 	page := writeStalenessPage(t, root, "rail.go")
@@ -30,7 +24,6 @@ func TestAWitnessOlderThanItsPageIsStale(t *testing.T) {
 	}
 
 	// The page is edited; the recorded run does not move. The claim is now
-	// about code that no longer exists.
 	touch(t, page, mustTime(t, "2026-11-19T02:20:13Z"))
 	stale := staleWitnessPages(root, filepath.Join(root, "ledger.json"), filepath.Join(root, "app"))
 	if len(stale) != 1 {
@@ -44,8 +37,6 @@ func TestAWitnessOlderThanItsPageIsStale(t *testing.T) {
 }
 
 // The comparison must not read file mtimes of the evidence: a git checkout
-// rewrites them to "now", which would make every witness look fresh exactly
-// where this check is needed. Only the run's own recorded time counts.
 func TestEvidenceFreshnessComesFromTheRunNotFromTheCheckout(t *testing.T) {
 	root := t.TempDir()
 	page := writeStalenessPage(t, root, "rail.go")
@@ -64,8 +55,6 @@ func TestEvidenceFreshnessComesFromTheRunNotFromTheCheckout(t *testing.T) {
 }
 
 // Without a declared page→source mapping there is no honest answer, so the
-// audit has to say that instead of guessing from control names: 「刷新」 and
-// 「断开」 appear in a dozen files, and guessing marks unrelated pages stale.
 func TestAPageWithNoDeclaredSourcesCannotBeJudged(t *testing.T) {
 	root := t.TempDir()
 	writeStalenessPage(t, root, "composer.go")
@@ -80,7 +69,6 @@ func TestAPageWithNoDeclaredSourcesCannotBeJudged(t *testing.T) {
 }
 
 // A declaration pointing at a file that no longer exists is worse than none:
-// the audit would silently judge the page against nothing.
 func TestADeclaredSourceThatIsGoneIsReported(t *testing.T) {
 	root := t.TempDir()
 	writeStalenessPage(t, root, "rail.go")

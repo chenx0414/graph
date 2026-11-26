@@ -27,6 +27,7 @@ func ScanProse(root string) ([]string, error) {
 		"node_modules": true, "dist": true, "build": true, "out": true,
 		"vendor": true, "coverage": true, "target": true, ".git": true,
 		".emergence": true, "coordination": true, "state": true,
+		".run": true, // a verification run's generated prompt library is not repository prose
 	}
 	found := []string{}
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {

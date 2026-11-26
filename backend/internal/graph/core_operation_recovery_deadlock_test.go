@@ -1,3 +1,4 @@
+// graph:table-writes-exempt: a test seeds the interrupted turn and the rows its recovery walks
 package graph
 
 import (

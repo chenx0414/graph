@@ -124,13 +124,7 @@ type CredentialRecoveryRequest struct {
 }
 
 type OperationLifecycleHooks struct {
-	// CanReplayBeforeSend answers whether a turn can be replayed before it was
-	// ever sent. store is the handle the question must be asked through: during
-	// recovery that handle is the transaction already holding the pool's only
-	// connection, and asking the pool instead waits for a second connection
-	// that the same transaction is holding — the daemon then never finishes
-	// starting. Any caller that ignores store and queries the pool directly
-	// reintroduces that hang.
+	// graph:ask-through-store: recovery's store IS the transaction holding the pool's only connection; querying the pool from here deadlocks the daemon's start
 	CanReplayBeforeSend  func(store *TaskStore, operation Operation) bool
 	OnCredentialRejected func(CredentialRecoveryRequest) bool
 }

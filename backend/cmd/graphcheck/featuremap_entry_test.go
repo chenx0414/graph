@@ -8,13 +8,6 @@ import (
 )
 
 // A feature's entry point is the sentence a reader uses to find the thing on
-// screen: 侧栏「洞察」 means the rail really offers 洞察. When a feature is
-// deleted the entry keeps pointing at a control that no longer exists, and this
-// map — the repository's list of what a user can reach — quietly lies.
-//
-// F-09 was exactly that: commit 76327dbf deleted the insights page, its UI and
-// its tests, while the feature index still said 侧栏「洞察」 and every gate stayed
-// green, because the map only ever compared routes.
 func TestEveryEntryLabelInTheAppSourcesExistsInTheWindow(t *testing.T) {
 	root := t.TempDir()
 	writeEntryFixture(t, root, `{"schema":1,"features":[
@@ -48,7 +41,6 @@ var railItems = []railItem{
 }
 
 // The rail is the real case this gate was added for: the six labels the index
-// claims must all be present, and a seventh entry may not survive in the map.
 func TestTheRailLabelsTheIndexClaimsAreTheOnesTheAppHas(t *testing.T) {
 	root := t.TempDir()
 	writeEntryFixture(t, root, `{"schema":1,"features":[

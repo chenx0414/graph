@@ -94,3 +94,24 @@ func TestDocumentationAllowanceIsNarrow(t *testing.T) {
 		}
 	}
 }
+
+// A verification run writes its own prompt library inside verification/.run/.
+// That tree is git-ignored and generated, so counting it makes the prose budget
+// depend on whether this machine has driven the interface.
+func TestAGeneratedRunTreeIsNotProse(t *testing.T) {
+	root := t.TempDir()
+	generated := filepath.Join(root, "verification", ".run", "abc123", "graph-home", "prompts")
+	if err := os.MkdirAll(generated, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(generated, "main.md"), []byte("# rules\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	found, err := gate.ScanProse(root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(found) != 0 {
+		t.Fatalf("a generated run tree is not repository prose, got %v", found)
+	}
+}

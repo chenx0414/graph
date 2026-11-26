@@ -8,14 +8,6 @@ import (
 )
 
 // A turn waiting for an execution slot can be abandoned: the operation was
-// interrupted, its task closed, or its lane cancelled. That is a normal way for
-// a request to end, and the daemon writes it as an error on the turn.
-//
-// It used to end the process instead. `ControlledGatedProviderFetch` acquired
-// the slot outside the recover scope that turns a panic into a failed request,
-// and the slot reports "aborted" by panicking, so the panic walked out of the
-// provider fetch and killed the daemon (daemon.log: "panic: Execution slot wait
-// aborted [recovered, repanicked]", twice).
 func TestASlotAbortDoesNotTakeTheDaemonDown(t *testing.T) {
 	asked := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -58,8 +50,6 @@ func TestASlotAbortDoesNotTakeTheDaemonDown(t *testing.T) {
 }
 
 // The same abandonment inside the send gate: acquiring the slot panics rather
-// than returning an error, which is what the kernel lane does. The boundary has
-// to hold for both shapes.
 func TestASlotAbortThatPanicsIsStillOnlyATurnFailure(t *testing.T) {
 	entry := ModelEntry{Id: "m", Provider: "p", Api: "openai-completions",
 		BaseUrl: "http://127.0.0.1:1/v1", ContextWindow: 8000, MaxTokens: 256}

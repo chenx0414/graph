@@ -71,9 +71,6 @@ func CreatePiAdapter(options PiAdapterOptions) ActionAdapter {
 		ReserveTokens: &reserve,
 	}
 	adapter.CanReplayBeforeSend = func(store *TaskStore, operation Operation) bool {
-		// store is the handle the caller is already inside. Recovery hands over
-		// the transaction, which owns the pool's only connection; asking
-		// options.Store.Db here would wait for a second one forever.
 		db := options.Store.Db
 		if store != nil {
 			db = store.Db
