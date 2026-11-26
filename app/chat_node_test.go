@@ -102,7 +102,7 @@ func nodeChatShell(t *testing.T, mock *nodeChatMock) (*shellState, *ui.Tester) {
 	state := fleetServerShell(t, fleetSampleServer)
 	state.api = newAPIClient(server.URL, "")
 	state.fleet = fleetState{conversationID: "g1", data: mock.fleet}
-	tester := ui.NewTester(state.view, 1440, 900)
+	tester := newTester(state.view, 1440, 900)
 	return state, tester
 }
 

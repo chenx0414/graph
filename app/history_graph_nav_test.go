@@ -39,7 +39,9 @@ func TestOpenHistoryGraphSessionOpensNodeSession(t *testing.T) {
 		run:   `{"entries":[{"seq":1,"id":"e1","role":"assistant","kind":"message","text":"节点的收尾记录","createdAt":1}]}`,
 	}
 	state, tester := nodeChatShell(t, mock)
-	opened := openHistoryGraphSession(state, "c-supervisor", "tA", "n2", "fleet-ui")
+	var opened bool
+	stepUI(func() { opened = openHistoryGraphSession(state, "c-supervisor", "tA", "n2", "fleet-ui") })
+	stepUI(func() {})
 	if !opened {
 		t.Fatal("a graph row with a node must open a session")
 	}

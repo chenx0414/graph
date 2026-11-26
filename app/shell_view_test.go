@@ -471,3 +471,13 @@ func TestTheFunctionRailCentersOnTheRedLightAndHasEvenGaps(t *testing.T) {
 		t.Fatalf("the rail leaves %v left and %v right", left, right)
 	}
 }
+
+// newTester builds a render tester on the shell executor. The tester records
+// labels while it renders, so it has to be built and driven on the goroutine that
+// owns shell state — building it elsewhere left the label index empty for text
+// painted from the executor.
+func newTester(view func(*ui.Context), width, height int) *ui.Tester {
+	var tester *ui.Tester
+	stepUI(func() { tester = ui.NewTester(view, width, height) })
+	return tester
+}
