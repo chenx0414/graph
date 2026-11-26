@@ -156,13 +156,9 @@ func (e *uiExecutor) isOwner() bool {
 	id := currentGoroutine()
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.owner == 0 {
-		// Nobody owns the shell yet: the first caller does, and it writes inline.
-		// This is the same rule mygo applies to its own main thread.
-		e.owner = id
-		return true
-	}
-	return e.owner == id
+	// Ownership is claimed explicitly, never by whoever calls first: a background
+	// load that arrived before the shell was built must not become the writer.
+	return e.owner != 0 && e.owner == id
 }
 
 // onUI runs apply where shell state is owned and waits for it to return. With a
