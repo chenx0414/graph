@@ -41,6 +41,7 @@ func TestTrajectoryModuleQuantifiesTheLatestConversation(t *testing.T) {
 	shell.ensureTrajectory()
 	deadline := time.Now().Add(2 * time.Second)
 	for shell.trajectory.data == nil && time.Now().Before(deadline) {
+		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
 	if shell.trajectory.data == nil {

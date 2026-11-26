@@ -50,7 +50,9 @@ func (s *assemblyState) listView(ctx *ui.Context, t gwtheme.Tokens) {
 				s.openFile()
 			}
 			if kit.Button(ctx, "刷新", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm, Icon: iconRefresh}).Clicked() {
-				go s.load()
+				// load writes the rows the page is reading, so it runs where the
+				// renderer owns them instead of on a bare goroutine.
+				onUI(s.window, s.load)
 			}
 		})
 		kit.Text(ctx, "把资源库里的技能、指令、MCP 与 Pi 扩展装配成 Agent 角色；编译后得到可被节点引用的 definition。",

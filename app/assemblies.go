@@ -97,6 +97,7 @@ type assemblyState struct {
 }
 
 func newAssemblyState(address, token string) *assemblyState {
+	claimShellOwner()
 	return &assemblyState{api: newAPIClient(address, token), status: "正在读取能力装配…", openPath: mygo.Shell.OpenPath}
 }
 
@@ -123,7 +124,13 @@ func (s *assemblyState) selectedRow() *assemblyRow {
 }
 
 func (s *assemblyState) load() {
+	// The request runs here; everything it produces is written where the renderer
+	// owns it, so a background refresh cannot rewrite the rows a frame is reading.
 	payload, err := s.api.get("/api/catalog")
+	onUI(s.window, func() { s.applyCatalog(payload, err) })
+}
+
+func (s *assemblyState) applyCatalog(payload []byte, err error) {
 	if err != nil {
 		s.status = readFailureText(err, "能力装配")
 		return
