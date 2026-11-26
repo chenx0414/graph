@@ -252,6 +252,7 @@ type chatState struct {
 }
 
 func newChatState(address, token string) *chatState {
+	claimShellOwner()
 	state := &chatState{api: newAPIClient(address, token), status: "正在读取会话…", expanded: map[string]bool{}, runBoundaries: map[string]bool{}, listFirst: -1, listLast: -1, pendingCaret: -1}
 	state.list.FollowEnd = true
 	state.list.FollowAnimation = &ui.Smooth

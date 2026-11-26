@@ -44,14 +44,66 @@ func (updates *uiUpdates) drain() {
 // caller resumes only once the write happened. A test drives the same executor
 // explicitly through drain; it never has to sleep or serialise the suite.
 type uiExecutor struct {
-	once  sync.Once
-	work  chan func()
-	owner uint64
-	// injectable lets a test run the executor on its own goroutine.
-	threaded bool
+	mu      sync.Mutex
+	once    sync.Once
+	work    chan func()
+	owner   uint64
+	queued  []func()
+	adopted bool
 }
 
 var shellExecutor = &uiExecutor{}
+
+// claimShellOwner records the calling goroutine as the shell owner if nobody has
+// claimed it. A shell is built on the goroutine that will drive it, so its first
+// background load must not adopt ownership ahead of the renderer.
+func claimShellOwner() {
+	e := shellExecutor
+	e.mu.Lock()
+	e.owner = currentGoroutine()
+	e.queued = nil
+	e.mu.Unlock()
+}
+
+// adoptTestOwner makes the calling goroutine the shell owner for a test, so the
+// test's renders and assertions run where the state is written. Posted callbacks
+// from background loads wait until drainPosted runs.
+func adoptTestOwner() {
+	e := shellExecutor
+	e.mu.Lock()
+	e.owner = currentGoroutine()
+	e.adopted = true
+	e.mu.Unlock()
+}
+
+// releaseTestOwner hands ownership back so the next test goroutine can adopt it.
+// Tests run on different goroutines, and an owner left behind would leave the
+// next test's callbacks queued instead of run.
+func releaseTestOwner() {
+	e := shellExecutor
+	e.mu.Lock()
+	e.owner = 0
+	e.adopted = false
+	e.queued = nil
+	e.mu.Unlock()
+}
+
+// drainPosted runs everything background goroutines posted.
+func drainPosted() {
+	e := shellExecutor
+	for {
+		e.mu.Lock()
+		pending := e.queued
+		e.queued = nil
+		e.mu.Unlock()
+		if len(pending) == 0 {
+			return
+		}
+		for _, apply := range pending {
+			apply()
+		}
+	}
+}
 
 func currentGoroutine() uint64 {
 	var buf [64]byte
@@ -81,7 +133,16 @@ func (e *uiExecutor) start() {
 }
 
 func (e *uiExecutor) isOwner() bool {
-	return e.owner != 0 && e.owner == currentGoroutine()
+	id := currentGoroutine()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.owner == 0 {
+		// Nobody owns the shell yet: the first caller does, and it writes inline.
+		// This is the same rule mygo applies to its own main thread.
+		e.owner = id
+		return true
+	}
+	return e.owner == id
 }
 
 // onUI runs apply where shell state is owned and waits for it to return. With a
@@ -96,10 +157,22 @@ func onUI(window *mygo.Window, apply func()) {
 		apply()
 		return
 	}
+	if e.isAdopted() {
+		e.mu.Lock()
+		e.queued = append(e.queued, apply)
+		e.mu.Unlock()
+		return
+	}
 	e.start()
 	done := make(chan struct{})
 	e.work <- func() { defer close(done); apply() }
 	<-done
+}
+
+func (e *uiExecutor) isAdopted() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.adopted
 }
 
 // readShell returns a value read on the owner. onUI cannot do this: its callback
@@ -115,6 +188,10 @@ func readShell[T any](window *mygo.Window, read func() T) T {
 	if e.isOwner() {
 		return read()
 	}
+	drainPosted()
+	if e.isOwner() {
+		return read()
+	}
 	e.start()
 	done := make(chan struct{})
 	var value T
@@ -127,10 +204,23 @@ func readShell[T any](window *mygo.Window, read func() T) T {
 // drive the shell from the goroutine that owns it, which is what makes a render
 // see writes that a load posted.
 func stepUI(apply func()) {
-	onUI(nil, apply)
+	if !shellExecutor.isOwner() {
+		adoptTestOwner()
+	}
+	drainPosted()
+	apply()
 }
 
 // drainUI is stepUI for the common case of "let queued work settle". onUI blocks
 // its caller, so a test that only used onUI has nothing left to drain; this stays
 // as the name a harness calls so the intent is readable.
 func drainUI() { stepUI(func() {}) }
+
+// waitForUI lets a test settle the callbacks background loads posted. The test
+// goroutine owns the shell, so draining is all it takes; no sleep is involved.
+func waitForUI() {
+	if !shellExecutor.isOwner() {
+		adoptTestOwner()
+	}
+	drainPosted()
+}

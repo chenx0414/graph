@@ -477,6 +477,11 @@ func TestTheFunctionRailCentersOnTheRedLightAndHasEvenGaps(t *testing.T) {
 // owns shell state — building it elsewhere left the label index empty for text
 // painted from the executor.
 func newTester(view func(*ui.Context), width, height int) *ui.Tester {
+	// Each test owns the shell on its own goroutine; a tester left over from the
+	// previous test must not keep ownership.
+	releaseTestOwner()
+	adoptTestOwner()
+	drainPosted()
 	var tester *ui.Tester
 	stepUI(func() { tester = ui.NewTester(view, width, height) })
 	return tester

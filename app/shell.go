@@ -67,6 +67,7 @@ func newShellState(address, token string) *shellState {
 		board:  boardState{pages: defaultBoardPages()},
 	}
 	state.dataReady.Store(true)
+	claimShellOwner()
 	return state
 }
 
