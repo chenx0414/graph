@@ -161,6 +161,7 @@ Read from the workflow files themselves, so a documented job cannot outlive the 
 
 | workflow | job | label |
 | --- | --- | --- |
+| `.github/workflows/ci.yml` | `app-race` | app race detector |
 | `.github/workflows/ci.yml` | `build` | build (${{ matrix.name }}) |
 | `.github/workflows/ci.yml` | `changes` | changes |
 | `.github/workflows/ci.yml` | `ci-required` | ci-required |
