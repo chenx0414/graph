@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -150,7 +151,7 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 	master := parseRoundMaster(payload)
 	body, bodyErr := parseConversationBody(payload)
 	tasks, tasksErr := parseGraphTasks(payload)
-	changed := false
+	var changed atomic.Bool
 	onUI(c.window, func() {
 		if c.source != source {
 			return
@@ -169,14 +170,16 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 			next = applyLiveStreams(mergeMessages(c.messages, messages), payload)
 		}
 		fingerprint := transcriptFingerprint(next)
-		changed = fingerprint != c.fingerprint
+		changed.Store(fingerprint != c.fingerprint)
 		c.fingerprint = fingerprint
 		c.messages = next
 		// A message that arrived with a picture has only its metadata until the bytes are read.
-		if changed {
+		if changed.Load() {
 			c.loadAttachmentPictures()
 		}
-		changed = changed || master != c.roundMaster
+		if master != c.roundMaster {
+			changed.Store(true)
+		}
 		c.roundMaster = master
 		c.projectID, c.projectRoot = parseConversationScope(payload)
 		c.syncModelTelemetry(payload)
@@ -187,16 +190,22 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 					questions = append(questions, question)
 				}
 			}
-			changed = changed || body.Paused != c.paused || !reflect.DeepEqual(questions, c.questions)
+			if body.Paused != c.paused || !reflect.DeepEqual(questions, c.questions) {
+				changed.Store(true)
+			}
 			c.paused = body.Paused
 			c.questions = questions
 		}
 		if tasksErr == nil {
-			changed = changed || !reflect.DeepEqual(tasks, c.tasks)
+			if !reflect.DeepEqual(tasks, c.tasks) {
+				changed.Store(true)
+			}
 			c.tasks = tasks
 		}
 	})
-	return changed, nil
+	// The callback may run on the goroutine that owns the shell, so the verdict
+	// travels back atomically instead of as a shared local.
+	return changed.Load(), nil
 }
 
 func (source *conversationChatSource) currentVersion() (string, error) {

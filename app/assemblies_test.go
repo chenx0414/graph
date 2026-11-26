@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -30,17 +31,45 @@ var assemblyFixtures = map[string]string{
 	}`,
 }
 
-func assemblyServer(t *testing.T, actions map[string]int, bodies *[]string) *httptest.Server {
+// assemblyLog counts what the test server saw. The server answers on its own
+// goroutine while the test reads, so every access goes through the lock.
+type assemblyLog struct {
+	mu        sync.Mutex
+	actions   map[string]int
+	logBodies []string
+}
+
+func newAssemblyLog() *assemblyLog { return &assemblyLog{actions: map[string]int{}} }
+
+func (l *assemblyLog) count(key string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.actions[key]
+}
+
+func (l *assemblyLog) record(key, body string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.actions[key]++
+	if body != "" {
+		l.logBodies = append(l.logBodies, body)
+	}
+}
+
+func (l *assemblyLog) bodiesCopy() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.logBodies...)
+}
+
+func assemblyServer(t *testing.T, log *assemblyLog, unused any) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost || r.Method == http.MethodDelete {
 			payload := make([]byte, 8192)
 			read, _ := r.Body.Read(payload)
-			if bodies != nil {
-				*bodies = append(*bodies, r.Method+" "+r.URL.Path+" "+string(payload[:read]))
-			}
-			if actions != nil {
-				actions[r.Method+" "+r.URL.Path]++
+			if log != nil {
+				log.record(r.Method+" "+r.URL.Path, r.Method+" "+r.URL.Path+" "+string(payload[:read]))
 			}
 			switch {
 			case strings.HasSuffix(r.URL.Path, "/compile"):
@@ -103,8 +132,8 @@ func TestTheAssemblyDetailShowsResourcesIssuesAndDefinition(t *testing.T) {
 }
 
 func TestCompilingAnAssemblyShowsTheNewDefinitionVersion(t *testing.T) {
-	actions := map[string]int{}
-	server := assemblyServer(t, actions, nil)
+	log := newAssemblyLog()
+	server := assemblyServer(t, log, nil)
 	defer server.Close()
 
 	state := newAssemblyState(server.URL, "tok")
@@ -115,12 +144,12 @@ func TestCompilingAnAssemblyShowsTheNewDefinitionVersion(t *testing.T) {
 		t.Fatalf("click compile: %v", err)
 	}
 	deadline := 0
-	for actions["POST /api/catalog/combinations/coder/compile"] == 0 && deadline < 500 {
+	for log.count("POST /api/catalog/combinations/coder/compile") == 0 && deadline < 500 {
 		render(tester)
 		deadline++
 	}
-	if actions["POST /api/catalog/combinations/coder/compile"] != 1 {
-		t.Fatalf("编译打一次 compile 接口，actions %v (%q)", actions, state.status)
+	if log.count("POST /api/catalog/combinations/coder/compile") != 1 {
+		t.Fatalf("编译打一次 compile 接口，actions %v (%q)", log.bodiesCopy(), state.status)
 	}
 	// The compiled version is written where the page is rendered, so the frame
 	// that shows it runs after that write.
@@ -136,8 +165,8 @@ func TestCompilingAnAssemblyShowsTheNewDefinitionVersion(t *testing.T) {
 }
 
 func TestSavingADescriptionUpdatesTheRecipe(t *testing.T) {
-	bodies := []string{}
-	server := assemblyServer(t, nil, &bodies)
+	log := newAssemblyLog()
+	server := assemblyServer(t, log, nil)
 	defer server.Close()
 
 	state := newAssemblyState(server.URL, "tok")
@@ -146,11 +175,12 @@ func TestSavingADescriptionUpdatesTheRecipe(t *testing.T) {
 	state.draftDescription = "新的描述"
 	state.saveDescription()
 
-	if len(bodies) != 1 || !strings.Contains(bodies[0], "POST /api/catalog/combinations/coder/description") {
-		t.Fatalf("改描述打 description 接口，bodies %v (%q)", bodies, state.status)
+	sent := log.bodiesCopy()
+	if len(sent) != 1 || !strings.Contains(sent[0], "POST /api/catalog/combinations/coder/description") {
+		t.Fatalf("改描述打 description 接口，bodies %v (%q)", sent, state.status)
 	}
-	if !strings.Contains(bodies[0], `"description":"新的描述"`) {
-		t.Fatalf("提交体带新描述，body %q", bodies[0])
+	if !strings.Contains(sent[0], `"description":"新的描述"`) {
+		t.Fatalf("提交体带新描述，body %q", sent[0])
 	}
 	if state.status != "" {
 		t.Fatalf("成功后清空状态，got %q", state.status)
@@ -158,8 +188,8 @@ func TestSavingADescriptionUpdatesTheRecipe(t *testing.T) {
 }
 
 func TestAnEmptyDescriptionIsRefusedBeforeAnyWrite(t *testing.T) {
-	bodies := []string{}
-	server := assemblyServer(t, nil, &bodies)
+	log := newAssemblyLog()
+	server := assemblyServer(t, log, nil)
 	defer server.Close()
 
 	state := newAssemblyState(server.URL, "tok")
@@ -167,8 +197,8 @@ func TestAnEmptyDescriptionIsRefusedBeforeAnyWrite(t *testing.T) {
 	state.selectAssembly("coder")
 	state.draftDescription = "   "
 	state.saveDescription()
-	if len(bodies) != 0 {
-		t.Fatalf("空描述不发请求，bodies %v", bodies)
+	if sent := log.bodiesCopy(); len(sent) != 0 {
+		t.Fatalf("空描述不发请求，bodies %v", sent)
 	}
 	if state.status == "" {
 		t.Fatal("空描述要说清为什么没保存")
@@ -176,8 +206,8 @@ func TestAnEmptyDescriptionIsRefusedBeforeAnyWrite(t *testing.T) {
 }
 
 func TestDeletingAnAssemblyAsksThenRemovesIt(t *testing.T) {
-	actions := map[string]int{}
-	server := assemblyServer(t, actions, nil)
+	log := newAssemblyLog()
+	server := assemblyServer(t, log, nil)
 	defer server.Close()
 
 	state := newAssemblyState(server.URL, "tok")
@@ -189,11 +219,11 @@ func TestDeletingAnAssemblyAsksThenRemovesIt(t *testing.T) {
 	}
 	state.deleteAssembly("coder")
 	deadline := 0
-	for actions["DELETE /api/catalog/combinations/coder"] == 0 && deadline < 500 {
+	for log.count("DELETE /api/catalog/combinations/coder") == 0 && deadline < 500 {
 		deadline++
 	}
-	if actions["DELETE /api/catalog/combinations/coder"] != 1 {
-		t.Fatalf("第二次删除打 DELETE，actions %v (%q)", actions, state.status)
+	if log.count("DELETE /api/catalog/combinations/coder") != 1 {
+		t.Fatalf("第二次删除打 DELETE，actions %v (%q)", log.bodiesCopy(), state.status)
 	}
 	if state.selected != "" {
 		t.Fatalf("删除后退出详情，selected %q", state.selected)
@@ -214,8 +244,8 @@ func TestTheMainRecipeCannotBeDeleted(t *testing.T) {
 }
 
 func TestDuplicatingAnAssemblyPrefillsTheEditorWithItsResources(t *testing.T) {
-	bodies := []string{}
-	server := assemblyServer(t, nil, &bodies)
+	log := newAssemblyLog()
+	server := assemblyServer(t, log, nil)
 	defer server.Close()
 
 	state := newAssemblyState(server.URL, "tok")
@@ -228,12 +258,13 @@ func TestDuplicatingAnAssemblyPrefillsTheEditorWithItsResources(t *testing.T) {
 		t.Fatalf("编辑器预填 id/name，id %q name %q", state.editorID, state.editorName)
 	}
 	state.createAssembly()
-	if len(bodies) != 1 || !strings.Contains(bodies[0], "POST /api/catalog/combinations ") {
-		t.Fatalf("新建打 combinations 接口，bodies %v (%q)", bodies, state.status)
+	sent := log.bodiesCopy()
+	if len(sent) != 1 || !strings.Contains(sent[0], "POST /api/catalog/combinations ") {
+		t.Fatalf("新建打 combinations 接口，bodies %v (%q)", sent, state.status)
 	}
 	for _, want := range []string{`"id":"coder-copy"`, `"resourceId":"gan"`, `"resourceId":"missing-skill"`} {
-		if !strings.Contains(bodies[0], want) {
-			t.Fatalf("新建带上 %q，body %q", want, bodies[0])
+		if !strings.Contains(sent[0], want) {
+			t.Fatalf("新建带上 %q，body %q", want, sent[0])
 		}
 	}
 }
@@ -292,9 +323,8 @@ func TestTheDescriptionIsReadOnlyUntilItIsEdited(t *testing.T) {
 }
 
 func TestAddingAResourceSavesTheWholeRecipe(t *testing.T) {
-	actions := map[string]int{}
-	bodies := []string{}
-	server := assemblyServer(t, actions, &bodies)
+	log := newAssemblyLog()
+	server := assemblyServer(t, log, nil)
 	defer server.Close()
 
 	state := newAssemblyState(server.URL, "tok")
@@ -308,13 +338,13 @@ func TestAddingAResourceSavesTheWholeRecipe(t *testing.T) {
 	if err := tester.Click("添加 skill-helper"); err != nil {
 		t.Fatalf("pick a capability: %v", err)
 	}
-	for frame := 0; frame < 50 && actions["POST /api/catalog/combinations"] == 0; frame++ {
+	for frame := 0; frame < 50 && log.count("POST /api/catalog/combinations") == 0; frame++ {
 		render(tester)
 	}
-	if actions["POST /api/catalog/combinations"] != 1 {
-		t.Fatalf("adding a resource saves the recipe, actions %v (%q)", actions, state.status)
+	if log.count("POST /api/catalog/combinations") != 1 {
+		t.Fatalf("adding a resource saves the recipe, actions %v (%q)", log.bodiesCopy(), state.status)
 	}
-	body := bodies[0]
+	body := log.bodiesCopy()[0]
 	for _, want := range []string{`"id":"coder"`, `"name":"Bob_coder"`, `"resourceId":"gan"`, `"resourceId":"skill-helper"`, `"role":"skill"`, `"version":"abc123"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("the saved recipe carries %s, body %s", want, body)
@@ -323,9 +353,8 @@ func TestAddingAResourceSavesTheWholeRecipe(t *testing.T) {
 }
 
 func TestRemovingAResourceSavesTheWholeRecipeWithoutIt(t *testing.T) {
-	actions := map[string]int{}
-	bodies := []string{}
-	server := assemblyServer(t, actions, &bodies)
+	log := newAssemblyLog()
+	server := assemblyServer(t, log, nil)
 	defer server.Close()
 
 	state := newAssemblyState(server.URL, "tok")
@@ -335,13 +364,13 @@ func TestRemovingAResourceSavesTheWholeRecipeWithoutIt(t *testing.T) {
 	if err := tester.Click("移除 gan"); err != nil {
 		t.Fatalf("remove a resource: %v", err)
 	}
-	for frame := 0; frame < 50 && actions["POST /api/catalog/combinations"] == 0; frame++ {
+	for frame := 0; frame < 50 && log.count("POST /api/catalog/combinations") == 0; frame++ {
 		render(tester)
 	}
-	if actions["POST /api/catalog/combinations"] != 1 {
-		t.Fatalf("removing a resource saves the recipe, actions %v (%q)", actions, state.status)
+	if log.count("POST /api/catalog/combinations") != 1 {
+		t.Fatalf("removing a resource saves the recipe, actions %v (%q)", log.bodiesCopy(), state.status)
 	}
-	body := bodies[0]
+	body := log.bodiesCopy()[0]
 	if strings.Contains(body, `"resourceId":"gan"`) {
 		t.Fatalf("the saved recipe drops the removed resource, body %s", body)
 	}
