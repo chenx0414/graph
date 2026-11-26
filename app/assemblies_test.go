@@ -122,6 +122,13 @@ func TestCompilingAnAssemblyShowsTheNewDefinitionVersion(t *testing.T) {
 	if actions["POST /api/catalog/combinations/coder/compile"] != 1 {
 		t.Fatalf("编译打一次 compile 接口，actions %v (%q)", actions, state.status)
 	}
+	// The compiled version is written where the page is rendered, so the frame
+	// that shows it runs after that write.
+	deadline = 0
+	for state.compiledVersion == "" && deadline < 200 {
+		waitForUI()
+		deadline++
+	}
 	tester = assemblyTester(state)
 	if !tester.HasText("coder@12") {
 		t.Fatalf("编译后显示新的 definitionVersion，texts %q", tester.Texts())

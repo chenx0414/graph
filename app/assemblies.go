@@ -173,27 +173,32 @@ func (s *assemblyState) selectAssembly(id string) {
 }
 
 func (s *assemblyState) compile() {
-	if s.selected == "" {
+	// This runs from a click handler on a bare goroutine, so the request stays
+	// there and every field it settles is written where the page reads it.
+	selected := readShell(s.window, func() string { return s.selected })
+	if selected == "" {
 		return
 	}
-	payload, err := s.api.post("/api/catalog/combinations/"+s.selected+"/compile", nil)
-	if err != nil {
-		s.status = "编译失败：" + err.Error()
-		s.frame()
-		return
-	}
+	payload, err := s.api.post("/api/catalog/combinations/"+selected+"/compile", nil)
+	var version string
 	var body struct {
 		DefinitionVersion string `json:"definitionVersion"`
 	}
-	if err := json.Unmarshal(payload, &body); err != nil {
-		s.status = "编译结果不是预期的 JSON：" + err.Error()
-		s.frame()
-		return
+	if err == nil {
+		err = json.Unmarshal(payload, &body)
+		version = body.DefinitionVersion
 	}
-	s.status = ""
-	s.load()
-	s.compiledVersion = body.DefinitionVersion
-	s.frame()
+	onUI(s.window, func() {
+		if err != nil {
+			s.status = "编译失败：" + err.Error()
+			s.frame()
+			return
+		}
+		s.status = ""
+		s.load()
+		s.compiledVersion = version
+		s.frame()
+	})
 }
 
 func (s *assemblyState) saveDescription() {
