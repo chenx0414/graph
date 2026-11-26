@@ -106,6 +106,7 @@ func TestShellSwitchesBetweenChatsAndSettings(t *testing.T) {
 		if !time.Now().Before(deadline) {
 			t.Fatalf("settings did not load")
 		}
+		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
 	for frame := 0; frame < 3; frame++ {

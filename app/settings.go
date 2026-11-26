@@ -108,18 +108,25 @@ type settingsState struct {
 }
 
 func newSettingsState(address, token string) *settingsState {
+	claimShellOwner()
 	return &settingsState{api: newAPIClient(address, token), status: "正在读取设置…"}
 }
 
 func (s *settingsState) load() {
-	startup, err := s.api.get("/api/startup")
-	if err != nil {
-		s.status = readFailureText(err, "运行信息")
+	// The reads happen here, the writes happen where the renderer owns them.
+	startup, startupErr := s.api.get("/api/startup")
+	settings, settingsErr := s.api.get("/api/settings")
+	config, configErr := s.api.get("/api/config")
+	onUI(s.window, func() { s.applySettings(startup, startupErr, settings, settingsErr, config, configErr) })
+}
+
+func (s *settingsState) applySettings(startup []byte, startupErr error, settings []byte, settingsErr error, config []byte, configErr error) {
+	if startupErr != nil {
+		s.status = readFailureText(startupErr, "运行信息")
 		return
 	}
-	settings, err := s.api.get("/api/settings")
-	if err != nil {
-		s.status = readFailureText(err, "设置")
+	if settingsErr != nil {
+		s.status = readFailureText(settingsErr, "设置")
 		return
 	}
 	snapshot, err := parseSettings(startup, settings)
@@ -128,7 +135,7 @@ func (s *settingsState) load() {
 		return
 	}
 	s.rows = snapshot
-	if payload, err := s.api.get("/api/config"); err == nil {
+	if payload, err := config, configErr; err == nil {
 		var envelope configEnvelope
 		if json.Unmarshal(payload, &envelope) == nil && len(envelope.Config) > 0 {
 			var shaped map[string]any
@@ -249,7 +256,7 @@ func (s *settingsState) view(ctx *ui.Context) {
 								action = "恢复 " + project.id
 							}
 							if kit.Button(ctx, action, kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
-								go s.toggleProject(project)
+								onUI(s.window, func() { s.toggleProject(project) })
 							}
 						})
 					})
@@ -323,7 +330,7 @@ func (s *settingsState) autoUpdateSwitch(ctx *ui.Context) {
 	} else {
 		track.Background(t.Hover)
 	}
-	track.OnClick(func() { go s.toggleAutoUpdate() })
+	track.OnClick(func() { onUI(s.window, s.toggleAutoUpdate) })
 	track.Children(func() {
 		color := t.Foreground
 		if s.autoUpdate {
