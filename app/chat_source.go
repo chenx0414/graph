@@ -115,11 +115,15 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 	still := false
 	if source.version != "" {
 		if version, err := source.currentVersion(); err == nil {
-			still = version == source.version
-			if err == nil {
-				c.clearReadFailure()
-			}
-			if still && !c.transcriptInFlight() {
+			// Reading the shell is a read; clearing a complaint is a write, so the
+			// verdict is taken here and applied where the state is written.
+			inFlight := false
+			still = readShell(c.window, func() bool {
+				inFlight = c.transcriptInFlight()
+				return version == source.version
+			})
+			if still && !inFlight {
+				onUI(c.window, func() { c.clearReadFailure() })
 				return false, nil
 			}
 			source.version = version
@@ -139,8 +143,6 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 		return false, err
 	}
 	source.version = parseConversationVersion(payload)
-	// The daemon answered, so a transport complaint is stale even if nothing else changed.
-	c.clearReadFailure()
 	messages, err := parseConversationMessages(payload)
 	if err != nil {
 		return false, err
@@ -153,6 +155,9 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 		if c.source != source {
 			return
 		}
+		// The daemon answered, so a transport complaint is stale even if nothing
+		// else changed.
+		c.clearReadFailure()
 		next := applyLiveStreams(messages, payload)
 		if incremental {
 			if len(messages) > 0 {

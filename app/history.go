@@ -58,9 +58,11 @@ func (c *chatState) ensureHistory() {
 			return
 		}
 		if err != nil {
-			c.failRead("读不到更早的对话，正在重试")
-			c.historyLoading = false
-			c.frame()
+			onUI(c.window, func() {
+				c.failRead("读不到更早的对话，正在重试")
+				c.historyLoading = false
+				c.frame()
+			})
 			return
 		}
 		onUI(c.window, func() {

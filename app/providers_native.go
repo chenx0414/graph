@@ -120,16 +120,27 @@ func (s *shellState) ensureProviders() {
 }
 
 func (s *shellState) loadProviders() {
-	if s.providers.loading {
+	// The flag, the token paths and the fetch all belong to the shell's writer:
+	// this runs from a render as often as from a click, and a render must not
+	// write the state it is reading.
+	var start bool
+	var api apiClient
+	onUI(s.window, func() {
+		if s.providers.loading {
+			return
+		}
+		s.providers.loading = true
+		if s.providers.appToken == "" {
+			s.providers.appToken = appToken(s.stateDir)
+		}
+		if s.providers.secretsFile == "" {
+			s.providers.secretsFile = secretsPath(s.stateDir)
+		}
+		api = s.api
+		start = true
+	})
+	if !start {
 		return
-	}
-	s.providers.loading = true
-	api := s.api
-	if s.providers.appToken == "" {
-		s.providers.appToken = appToken(s.stateDir)
-	}
-	if s.providers.secretsFile == "" {
-		s.providers.secretsFile = secretsPath(s.stateDir)
 	}
 	go func() {
 		nativeRows, document, revision, nativeErr := s.fetchNativeProviders(api)

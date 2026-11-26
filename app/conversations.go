@@ -176,14 +176,19 @@ func (c *chatState) follow() {
 }
 
 func (c *chatState) refresh() {
-	if c.source == nil && c.active != "" {
-		c.source = newConversationChatSource(c.api, c.active)
-	}
-	if c.source == nil {
+	// This runs on the polling goroutine, so the source it picks is read where
+	// the renderer owns it, and the complaint it records is written there too.
+	source := readShell(c.window, func() agentChatSource {
+		if c.source == nil && c.active != "" {
+			c.source = newConversationChatSource(c.api, c.active)
+		}
+		return c.source
+	})
+	if source == nil {
 		return
 	}
-	if _, err := c.source.Refresh(c); err != nil {
-		c.failRead("连接中断，正在重连")
+	if _, err := source.Refresh(c); err != nil {
+		onUI(c.window, func() { c.failRead("连接中断，正在重连") })
 	}
 }
 

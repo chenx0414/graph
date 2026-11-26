@@ -50,25 +50,36 @@ func (s *shellState) promptScopeKey() string {
 }
 
 func (s *shellState) ensurePromptRecord() {
-	task, node := s.promptTarget()
-	if task == "" || node == "" {
+	// This is reached from a render, so the decision and the flag it sets belong
+	// to the shell's writer rather than to whichever goroutine is painting.
+	var task, node string
+	var api apiClient
+	var start bool
+	onUI(s.window, func() {
+		task, node = s.promptTarget()
+		if task == "" || node == "" {
+			return
+		}
+		key := s.promptScopeKey()
+		if key != s.promptScope {
+			s.promptScope = key
+			s.promptRecord = nil
+			s.promptError = ""
+			s.contextTab = contextTabContext
+		}
+		if s.promptLoading {
+			return
+		}
+		if s.promptRecord != nil && time.Since(s.promptFetchedAt) < 3*time.Second {
+			return
+		}
+		s.promptLoading = true
+		api = s.api
+		start = true
+	})
+	if !start {
 		return
 	}
-	key := s.promptScopeKey()
-	if key != s.promptScope {
-		s.promptScope = key
-		s.promptRecord = nil
-		s.promptError = ""
-		s.contextTab = contextTabContext
-	}
-	if s.promptLoading {
-		return
-	}
-	if s.promptRecord != nil && time.Since(s.promptFetchedAt) < 3*time.Second {
-		return
-	}
-	s.promptLoading = true
-	api := s.api
 	go func() {
 		payload, err := api.get("/api/tasks/" + url.PathEscape(task) + "/nodes/" + url.PathEscape(node) + "/prompt")
 		var record promptRecord
