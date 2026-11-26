@@ -149,4 +149,13 @@ func routes() {
 	if err := os.WriteFile(filepath.Join(dir, "index.json"), []byte(index), 0o644); err != nil {
 		t.Fatalf("write index: %v", err)
 	}
+	// The feature entries name no 「」 control, so the window side of this fixture
+	// only has to exist: a tree without app/ cannot be asked what it renders.
+	app := filepath.Join(root, "app")
+	if err := os.MkdirAll(app, 0o755); err != nil {
+		t.Fatalf("mkdir app: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("write app source: %v", err)
+	}
 }
