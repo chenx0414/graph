@@ -70,13 +70,13 @@
     },
     {
       "id": "F-02",
-      "title": "模块导航（侧栏 7 项）",
+      "title": "模块导航（侧栏 6 项）",
       "priority": "P1",
       "mode": "window+api",
       "surface": [
         "window"
       ],
-      "entry": "左侧 rail 七个图标",
+      "entry": "左侧 rail 六个图标",
       "drive": [
         "verification/verify-graph verify --journey F-02-nav",
         "verification/verify-graph verify --journey F-02-nav --lane window",
@@ -109,7 +109,7 @@
       ],
       "scenario": "scenarios/F-02-nav.json",
       "command": "verification/verify-graph verify --journey F-02-nav",
-      "measured": "32 步：七个 rail 文字 + 每页自己的页签/面板窗口；无 API 检查",
+      "measured": "46 步：六个 rail 文字 + 每页自己的页签/面板窗口；无 API 检查",
       "provenInJourney": true,
       "windowCommand": "verification/verify-graph verify --journey F-02-nav --lane window",
       "coverage": "headless+window"
@@ -335,45 +335,6 @@
       "provenInJourney": true,
       "coverage": "headless+window",
       "measured": "6 步 + 1 个 API 检查：`标签页 轨迹量化` + 量化面板；/api/trajectory/insights 200"
-    },
-    {
-      "id": "F-09",
-      "title": "洞察页",
-      "priority": "P1",
-      "mode": "window+api",
-      "surface": [
-        "window",
-        "api"
-      ],
-      "entry": "侧栏「洞察」",
-      "drive": [
-        "verification/verify-graph verify --journey F-09",
-        "verification/verify-graph verify --journey F-09 --lane window",
-        "verification/verify-graph evidence verify --run <run>"
-      ],
-      "evidence": [
-        "evidence/<run>/F-09/usage.json",
-        "evidence/<run>/F-09/insights.png"
-      ],
-      "panels": [
-        "insights-kpi",
-        "insights-days",
-        "insights-sessions"
-      ],
-      "api": [
-        "/api/usage",
-        "/api/insights",
-        "/api/trajectory/insights"
-      ],
-      "existingTests": [
-        "app/usage_test.go"
-      ],
-      "scenario": "scenarios/F-09.json",
-      "command": "verification/verify-graph verify --journey F-09",
-      "windowCommand": "verification/verify-graph verify --journey F-09 --lane window",
-      "provenInJourney": true,
-      "coverage": "headless+window",
-      "measured": "6 步 + 2 个 API 检查：`洞察概览窗口` + 用量趋势 + 会话排行；/api/insights、/api/tool-stats 200"
     },
     {
       "id": "F-10",

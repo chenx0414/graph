@@ -71,7 +71,18 @@ func runFeatureMap(root string, args []string) int {
 		return 1
 	}
 	if string(payload) == rendered {
-		fmt.Printf("feature map: %d feature(s), every entry point and handler matches the code\n", countFeatures(rendered))
+		if missing := missingEntryLabels(root); len(missing) > 0 {
+			fmt.Fprintln(os.Stderr, "The feature map names entry points the app no longer has:")
+			for _, line := range missing {
+				fmt.Fprintln(os.Stderr, "  - "+line)
+			}
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, "The 「」 label in an entry point is a control on screen. Delete the feature from the index,")
+			fmt.Fprintln(os.Stderr, "or point the entry at the control that replaced it — then regenerate the map:")
+			fmt.Fprintln(os.Stderr, "  go -C backend run ./cmd/graphcheck featuremap --write")
+			return 1
+		}
+		fmt.Printf("feature map: %d feature(s), every entry point, label and handler matches the code\n", countFeatures(rendered))
 		return 0
 	}
 	fmt.Fprintln(os.Stderr, "The feature map no longer matches the code:")
