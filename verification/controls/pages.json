@@ -1,0 +1,27 @@
+{
+  "_graph": "graph:allow-large-file: one page → source file map for the control audit; every consumer looks a page up by name and splits would break that contract. Every entry is checked against the disk by stale_test.go.",
+  "schema": 1,
+  "note": "页面 → 源码文件。控件审计用它回答『这条 witness 是不是比它描述的页面还老』。文件必须真实存在；名字猜不出对应关系，所以这里显式声明，不靠匹配控件名。",
+  "pages": {
+    "rail": ["board.go", "shell_view.go"],
+    "rail-fleet": ["board.go", "fleet_page.go"],
+    "rail-settings": ["board.go", "settings.go"],
+    "tabbar": ["board.go"],
+    "board": ["board.go", "board_layout.go", "board_panels.go", "board_tree.go", "board_width.go"],
+    "panel": ["board.go", "board_panels.go", "board_drop.go"],
+    "composer": ["conversations.go", "composer_menu.go", "composer_attachments.go", "chat_tick.go"],
+    "context": ["prompt_record.go", "node_context_panel.go", "node_context_card.go"],
+    "shell": ["shell.go", "shell_view.go"],
+    "shell-workspace": ["shell_view.go", "board.go"],
+    "tray": ["main.go", "tasks.go"],
+    "window": ["shell_view.go", "window_floor.go"],
+    "F-07": ["board.go", "board_layout.go", "board_panels.go"],
+    "F-08": ["trajectory.go", "trajectory_cards_activity.go", "trajectory_cards_summary.go", "trajectory_context_overview.go"],
+    "F-10": ["fleet.go", "fleet_page.go", "fleet_cards.go", "fleet_graph.go"],
+    "F-11": ["providers_page.go", "providers_state.go", "providers_editor.go", "providers_native.go"],
+    "F-12": ["resources.go", "resources_page.go", "resources_detail.go"],
+    "F-13": ["assemblies.go", "assemblies_page.go", "assemblies_detail.go", "assemblies_resources.go"],
+    "F-14": ["settings.go"],
+    "F-16": ["skeleton_pages.go", "load_state.go"]
+  }
+}

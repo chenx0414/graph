@@ -61,6 +61,29 @@ func coverAudit(p paths, flags flags) int {
 			"write "+ledgerPath+" with witnesses/notApplicable/blocked entries, or pass --ledger <path>").print()
 	}
 	report := controls.Audit(inventoryPath, ledgerPath, scenarioDir(p), p.EvidenceRoot, inventory, ledger)
+	warnings := []string{}
+	// A witness re-read from the journey and the recorded run still passes when
+	// the page it drives has since been rebuilt or deleted: same button name,
+	// older run. Judge that separately, and say plainly which pages cannot be
+	// judged at all instead of guessing their sources from control names.
+	appDir := filepath.Join(p.Verification, "..", "app")
+	_, mapErr := os.Stat(filepath.Join(p.Verification, pageMapPath))
+	switch {
+	case mapErr == nil:
+		for _, problem := range checkDeclaredSources(p.Verification, appDir) {
+			report.Problems = append(report.Problems, controls.Problem{Code: "undeclared-source", Detail: problem})
+		}
+		for _, problem := range undeclaredPages(p.Verification, ledgerPath) {
+			report.Problems = append(report.Problems, controls.Problem{Code: "undeclared-page", Detail: problem})
+		}
+		for _, problem := range staleWitnessPages(p.Verification, ledgerPath, appDir) {
+			report.Problems = append(report.Problems, controls.Problem{Code: "stale-evidence", Detail: problem})
+		}
+	case os.IsNotExist(mapErr):
+		// A tree without the page map keeps the older, narrower audit. Saying so
+		// out loud is the difference between "not applicable here" and "checked".
+		warnings = append(warnings, "no "+pageMapPath+" in this tree: witness evidence is not judged against page changes")
+	}
 	jsonPath, markdownPath, err := controls.WriteAudit(outDir, report)
 	if err != nil {
 		return failEnvelope("cover.audit", "", codeUsage, "cannot write the coverage report: "+err.Error(),
@@ -91,6 +114,9 @@ func coverAudit(p paths, flags flags) int {
 			Hint:    "drive the blocked controls in a journey, or record why they cannot be reached"}
 		return result.print()
 	}
+	for _, warning := range warnings {
+		result.warn("%s", warning)
+	}
 	if report.Blocked > 0 {
 		result.warn("%d control(s) are blocked; see %s", report.Blocked, markdownPath)
 	}
@@ -108,6 +134,12 @@ func controlsHint(report controls.Report) string {
 			return "fix the ledger entry; each control has exactly one conclusion with a reason"
 		case "stale-witness", "stale-exclusion":
 			return "the ledger promises controls the inventory does not have; refresh the inventory, then delete the stale entry"
+		case "stale-evidence":
+			return "a witness is older than the page it describes; rerun the journey that covers that page, then cover audit again"
+		case "undeclared-page":
+			return "declare the page's sources in controls/pages.json, or the audit cannot tell whether its evidence is stale"
+		case "undeclared-source":
+			return "a page declares a source file that no longer exists; fix " + pageMapPath
 		}
 	}
 	return "read controls/COVERAGE.generated.md, then rerun verify-graph cover audit"
@@ -435,7 +467,7 @@ func coverDerive(p paths, flags flags) int {
 	result := okEnvelope("cover.derive", "", map[string]any{
 		"inventory": inventoryPath, "ledger": ledgerPath,
 		"controls": len(inventory.Controls), "derived": added, "keptManual": skipped,
-		"refreshed": flags.has("refresh"),
+		"refreshed":  flags.has("refresh"),
 		"unresolved": len(unresolved), "unresolvedSample": sample,
 	})
 	result.add(fileArtifact("json", ledgerPath, "witness ledger"))
