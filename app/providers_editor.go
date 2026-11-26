@@ -97,7 +97,9 @@ func (s *shellState) providerEditorForm(ctx *ui.Context, pal magpiePalette) {
 				}
 				if kit.Button(ctx, label, kit.ButtonOpts{Variant: kit.DestructiveOutline, Size: kit.SizeSm}).Clicked() {
 					if s.providers.removeArmed {
-						go s.removeProvider(s.providers.editing)
+						// The document it rewrites belongs to the shell's writer, and
+						// the request it sends leaves that writer afterwards.
+						onUI(s.window, func() { s.removeProvider(s.providers.editing) })
 					} else {
 						s.providers.removeArmed = true
 						s.frame()
@@ -108,7 +110,7 @@ func (s *shellState) providerEditorForm(ctx *ui.Context, pal magpiePalette) {
 				s.closeProviderEditor()
 			}
 			if kit.Button(ctx, "保存供应商", kit.ButtonOpts{Variant: kit.Default, Size: kit.SizeSm}).Clicked() {
-				go s.saveProvider()
+				onUI(s.window, s.saveProvider)
 			}
 		})
 		if !editing {
