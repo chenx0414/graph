@@ -98,7 +98,7 @@ func TestTheThinkingStepSendsTheModelAndClosesThePicker(t *testing.T) {
 		t.Fatalf("the thinking step closes the picker, texts %q", tester.Texts())
 	}
 	for frame := 0; frame < 200 && len(postedModels(mock)) == 0; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	posted := postedModels(mock)
 	if len(posted) != 1 {

@@ -37,7 +37,7 @@ func mainAgentWindow(tester *ui.Tester, state *chatState, now time.Time) {
 func TestTheMainAgentWindowCountsKeepsAgentTalkAsideAndFoldsTheSteps(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
 	tester := newTester(state.view, 760, 620)
-	tester.Frame()
+	render(tester)
 	now := tester.Now()
 	mainAgentWindow(tester, state, now)
 	tester = frames(tester)
@@ -53,7 +53,7 @@ func TestTheMainAgentWindowCountsKeepsAgentTalkAsideAndFoldsTheSteps(t *testing.
 	if !tester.HasText("用时 3s") {
 		t.Fatalf("the running tool run counts, texts %q", tester.Texts())
 	}
-	tester.Advance(2 * time.Second)
+	advance(tester, 2*time.Second)
 	tester = frames(tester)
 	if !tester.HasText("正在回复 · 用时 4s") {
 		t.Fatalf("the answer stopwatch ticks on its own, texts %q", tester.Texts())
@@ -80,7 +80,7 @@ func TestTheMainAgentWindowCountsKeepsAgentTalkAsideAndFoldsTheSteps(t *testing.
 	if !tester.HasText("侦察已经完成。") || !tester.HasText("帮我看一下进度") {
 		t.Fatalf("the conversation keeps what the user and the agent said, texts %q", tester.Texts())
 	}
-	tester.Advance(10 * time.Second)
+	advance(tester, 10*time.Second)
 	tester = frames(tester)
 	if tester.HasText("已用时 14s") || tester.HasText("正在回复") {
 		t.Fatalf("the answered round stops counting, texts %q", tester.Texts())

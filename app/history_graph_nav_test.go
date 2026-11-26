@@ -72,7 +72,7 @@ func TestOpenHistoryGraphSessionOpensConversation(t *testing.T) {
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for !tester.HasText("历史图的主会话") && time.Now().Before(deadline) {
-		tester.Frame()
+		render(tester)
 		time.Sleep(time.Millisecond)
 	}
 	tester = frames(tester)

@@ -67,7 +67,7 @@ func TestAToolPanelShowsTheStringErrorText(t *testing.T) {
 		state.view(ctx)
 	}, 900, 700)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if err := tester.Click("1 次工具调用"); err != nil {
 		t.Fatalf("open the tool run: %v", err)

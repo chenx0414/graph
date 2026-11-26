@@ -91,14 +91,14 @@ func TestScrollingUpLoadsOlderHistory(t *testing.T) {
 	state.open("c1")
 	tester := newTester(state.view, 700, 500)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if len(state.messages) != 200 {
 		t.Fatalf("opened %d messages", len(state.messages))
 	}
 	state.list.ScrollTo(0, ui.Start)
 	for frame := 0; frame < 4; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for len(state.messages) < 260 && time.Now().Before(deadline) {
@@ -177,18 +177,18 @@ func TestLoadingOlderHistoryKeepsTheReaderInPlace(t *testing.T) {
 	state.open("c1")
 	tester := newTester(state.view, 700, 500)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	state.list.ScrollTo(0, ui.Start)
 	for frame := 0; frame < 4; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for len(state.messages) < 400 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
 	for frame := 0; frame < 4; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if len(state.messages) != 400 {
 		t.Fatalf("the older page must load, got %d messages", len(state.messages))
@@ -200,7 +200,7 @@ func TestLoadingOlderHistoryKeepsTheReaderInPlace(t *testing.T) {
 		t.Fatalf("the reader stays on the message they were reading, texts %q", tester.Texts())
 	}
 	for frame := 0; frame < 6; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	state.ensureHistory()
 	if requests.Load() != 1 {
@@ -208,7 +208,7 @@ func TestLoadingOlderHistoryKeepsTheReaderInPlace(t *testing.T) {
 	}
 	state.list.ScrollTo(0, ui.Start)
 	for frame := 0; frame < 6; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	deadline = time.Now().Add(2 * time.Second)
 	for requests.Load() < 2 && time.Now().Before(deadline) {
@@ -218,7 +218,7 @@ func TestLoadingOlderHistoryKeepsTheReaderInPlace(t *testing.T) {
 		t.Fatalf("a new reach of the top asks once more, got %d requests", requests.Load())
 	}
 	for frame := 0; frame < 6; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if requests.Load() != 2 {
 		t.Fatalf("the empty page ends the history, got %d requests", requests.Load())

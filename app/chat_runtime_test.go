@@ -13,7 +13,7 @@ func TestTheRunClockKeepsTickingWhileToolsRun(t *testing.T) {
 	first.Data.ToolCallID = "call-first"
 	state.messages = []transcriptMessage{first, running}
 	tester := newTester(state.view, 760, 620)
-	tester.Frame()
+	render(tester)
 	start := tester.Now()
 	state.messages[0].CreatedAt = start.Add(-time.Second).UnixMilli()
 	state.messages[1].CreatedAt = start.Add(-time.Second).UnixMilli()
@@ -21,11 +21,11 @@ func TestTheRunClockKeepsTickingWhileToolsRun(t *testing.T) {
 	if !tester.HasText("用时 1s") {
 		t.Fatalf("the running tools show a clock, texts %q", tester.Texts())
 	}
-	tester.Advance(3 * time.Second)
+	advance(tester, 3*time.Second)
 	if !tester.HasText("用时 4s") {
 		t.Fatalf("the clock grows without a new message, texts %q", tester.Texts())
 	}
-	tester.Advance(2 * time.Second)
+	advance(tester, 2*time.Second)
 	if !tester.HasText("用时 6s") {
 		t.Fatalf("the clock keeps growing while the tools run, texts %q", tester.Texts())
 	}
@@ -37,7 +37,7 @@ func TestTheRunClockKeepsTickingWhileToolsRun(t *testing.T) {
 	if !tester.HasText("用时 4s") {
 		t.Fatalf("the settled run keeps its final duration, texts %q", tester.Texts())
 	}
-	tester.Advance(10 * time.Second)
+	advance(tester, 10*time.Second)
 	if !tester.HasText("用时 4s") {
 		t.Fatalf("a settled run does not keep counting, texts %q", tester.Texts())
 	}

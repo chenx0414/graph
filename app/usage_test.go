@@ -88,7 +88,7 @@ func TestShellOpensTheUsagePane(t *testing.T) {
 	}
 	tester := newTester(state.view, 1000, 640)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	for _, wanted := range []string{"用量", "$119.23", "缓存命中", "96.0%", "资源库", "3/4", "tokens", "1.29B"} {
 		if !tester.HasText(wanted) {

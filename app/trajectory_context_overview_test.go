@@ -47,7 +47,7 @@ func contextOverviewShell(t *testing.T, settings string) *shellState {
 	tester := frames(newTester(shell.view, 1440, 900))
 	deadline := time.Now().Add(2 * time.Second)
 	for (shell.trajectory.data == nil || shell.modelMeta == nil) && time.Now().Before(deadline) {
-		tester.Frame()
+		render(tester)
 	}
 	if shell.trajectory.data == nil || shell.modelMeta == nil {
 		t.Fatalf("the trajectory or the model meta never loaded: %q", shell.trajectory.failed)
@@ -164,7 +164,7 @@ func TestTheContextOverviewPrefersTheLatestRequestComposition(t *testing.T) {
 	tester := frames(newTester(shell.view, 1440, 900))
 	deadline := time.Now().Add(2 * time.Second)
 	for (shell.trajectory.data == nil || shell.modelMeta == nil) && time.Now().Before(deadline) {
-		tester.Frame()
+		render(tester)
 	}
 	shell.openModule("trajectory")
 	tester = frames(newTester(shell.view, 1440, 900))

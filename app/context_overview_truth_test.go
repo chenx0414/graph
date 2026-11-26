@@ -92,7 +92,7 @@ func TestContextOverviewStaysStableWhenOnlyThePeakChanges(t *testing.T) {
 	before := textsJoined(tester)
 	data.Totals.Context.PeakTokens = 980_000
 	data.Composition.AssistantReply = 41_000
-	tester.Frame()
+	render(tester)
 	after := textsJoined(tester)
 	if strings.Contains(after, "980.0k") {
 		t.Fatalf("the card followed the peak, texts %q", after)

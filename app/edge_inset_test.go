@@ -163,7 +163,7 @@ func TestACardRestingAtItsEndKeepsOneSteadyPlace(t *testing.T) {
 	tester = frames(tester)
 	settled := scroll.MaxY
 	for frame := 0; frame < 6; frame++ {
-		tester.Frame()
+		render(tester)
 		if scroll.MaxY != settled {
 			t.Fatalf("a card resting at its end reflows on frame %d: maxY %.2f against %.2f", frame, scroll.MaxY, settled)
 		}
@@ -184,7 +184,7 @@ func TestTheConversationListRestingAtItsTopKeepsOneSteadyPlace(t *testing.T) {
 	tester := frames(newTester(state.view, 1440, 900))
 	settled := state.listScroll.MaxY
 	for frame := 0; frame < 6; frame++ {
-		tester.Frame()
+		render(tester)
 		if state.listScroll.MaxY != settled {
 			t.Fatalf("a list resting at its top reflows on frame %d: maxY %.2f against %.2f", frame, state.listScroll.MaxY, settled)
 		}
@@ -197,7 +197,7 @@ func TestTheChatTranscriptRestingAtItsEndKeepsOneSteadyPlace(t *testing.T) {
 	chat := state.chat
 	settled := chat.track.MaxY
 	for frame := 0; frame < 6; frame++ {
-		tester.Frame()
+		render(tester)
 		if chat.track.MaxY != settled {
 			t.Fatalf("a transcript following its end reflows on frame %d: maxY %.2f against %.2f", frame, chat.track.MaxY, settled)
 		}
@@ -213,7 +213,7 @@ func TestANearEdgeScrollSettlesInsteadOfFlappingEveryFrame(t *testing.T) {
 		scroll.Y = scroll.MaxY - offset
 		seen := map[[2]float32]int{}
 		for frame := 0; frame < 8; frame++ {
-			tester.Frame()
+			render(tester)
 			top, bottom := scroll.insets()
 			seen[[2]float32{top, bottom}]++
 			if len(seen) > 1 {
@@ -341,7 +341,7 @@ func TestContentJustUnderOnePageSettlesInsteadOfPopingAScrollbar(t *testing.T) {
 		settled := chat.track.MaxY
 		top, bottom := chat.track.insets()
 		for frame := 0; frame < 8; frame++ {
-			tester.Frame()
+			render(tester)
 			if chat.track.MaxY != settled {
 				t.Fatalf("%d messages: the transcript reflows on frame %d, maxY %.1f against %.1f", messages, frame, chat.track.MaxY, settled)
 			}
@@ -366,7 +366,7 @@ func TestContentThatFillsThePageKeepsTheClearanceThatFits(t *testing.T) {
 		chat.status = ""
 		chat.loading = false
 		tester := frames(newTester(state.view, 1440, 900))
-		tester.Frame()
+		render(tester)
 		top, bottom := chat.track.insets()
 		if chat.track.MaxY == 0 && (top != fadeEdgeClearance || bottom != fadeEdgeClearance) {
 			t.Fatalf("%d messages fit the page: both edges keep their clearance, got (%0.1f, %0.1f)", messages, top, bottom)

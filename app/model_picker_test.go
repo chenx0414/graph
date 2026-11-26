@@ -64,7 +64,7 @@ func TestTheModelPickerShowsTheModelsAndTheReasoning(t *testing.T) {
 	state, _ := pickerChat(t)
 	tester := frames(newTester(state.view, 900, 700))
 	for !tester.HasText("Reasoning") {
-		tester.Frame()
+		render(tester)
 		if len(tester.Texts()) == 0 {
 			break
 		}
@@ -96,7 +96,7 @@ func TestPickingAReasoningLevelChangesTheModel(t *testing.T) {
 		return len(mock.selected)
 	}
 	for frame := 0; frame < 200 && sent() == 0; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	mock.mu.Lock()
 	defer mock.mu.Unlock()

@@ -25,9 +25,9 @@ func providersFrameUntil(t *testing.T, tester *ui.Tester, done func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for !done() && time.Now().Before(deadline) {
-		tester.Frame()
+		render(tester)
 	}
-	tester.Frame()
+	render(tester)
 }
 
 func TestTheProvidersPageReadsConfiguredStateFromMagpie(t *testing.T) {
@@ -87,7 +87,7 @@ func TestTheProvidersPageKeepsAReadFailureUntilRetry(t *testing.T) {
 	}
 	settled := atomic.LoadInt32(&hits)
 	for frame := 0; frame < 20; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if got := atomic.LoadInt32(&hits); got != settled {
 		t.Fatalf("a failed read must wait for the user, requests %d -> %d", settled, got)

@@ -49,7 +49,7 @@ func TestComposerIsVisibleWhateverTheTranscriptLength(t *testing.T) {
 			state := chatForLayoutTest(t, test.messages, test.questions)
 			tester := newTester(state.view, test.width, test.height)
 			for frame := 0; frame < 3; frame++ {
-				tester.Frame()
+				render(tester)
 			}
 			for _, label := range []string{"消息", "发送"} {
 				rect, ok := tester.Find(label)

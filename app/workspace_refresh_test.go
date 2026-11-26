@@ -100,7 +100,7 @@ func awaitWorkspaceText(t *testing.T, tester *ui.Tester, text string) {
 	t.Helper()
 	deadline := time.After(5 * time.Second)
 	for {
-		tester.Frame()
+		render(tester)
 		if tester.HasText(text) {
 			return
 		}

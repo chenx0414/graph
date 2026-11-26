@@ -52,7 +52,7 @@ func TestTheResourceDetailListsItsFieldsAndPath(t *testing.T) {
 	state.selectResource("browser-use")
 	tester := newTester(state.view, 1200, 820)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	for _, want := range []string{"Browser Use", "MCP 服务器", "v2026.9.17", "/Users/macmini/.graph/capabilities/mcp/browser-use",
 		"Browser automation server.", "example/browser-use",
@@ -198,7 +198,7 @@ func TestAFieldTheDaemonReportsConfiguredShowsFilled(t *testing.T) {
 	state.selectResource("browser-use")
 	tester := newTester(state.view, 900, 700)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if !tester.HasText("已填写") {
 		t.Fatalf("a configured field reads as filled, texts %q", tester.Texts())
@@ -217,7 +217,7 @@ func TestClosingTheDetailReturnsToTheLibrary(t *testing.T) {
 	state.selectResource("browser-use")
 	tester := newTester(state.view, 1200, 820)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if err := tester.Click("关闭资源详情"); err != nil {
 		t.Fatalf("close the detail: %v", err)
@@ -239,7 +239,7 @@ func TestClickingARowOpensItsDetail(t *testing.T) {
 	state.load()
 	tester := newTester(state.view, 1200, 820)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if err := tester.Click("资源 Browser Use"); err != nil {
 		t.Fatalf("open a library card: %v", err)

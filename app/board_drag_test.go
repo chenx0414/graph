@@ -33,7 +33,7 @@ func TestTheDropPreviewFillsTheExactHalfOfTheTarget(t *testing.T) {
 	tester := frames(newTester(state.view, 1440, 900))
 	state.board.drag = &boardDrag{panelID: "context-overview", target: "agent-network", edge: "left"}
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	target := state.board.rects["agent-network"]
 	if target.W <= 0 {
@@ -50,7 +50,7 @@ func TestTheDropPreviewFillsTheExactHalfOfTheTarget(t *testing.T) {
 	}
 	state.board.drag = &boardDrag{panelID: "context-overview", target: "agent-network", edge: "center"}
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	leftSide = countColorIn(tester.Image(), blendTint(gwtheme.Light().Background, accent, 0.18), leftEdge)
 	rightSide = countColorIn(tester.Image(), blendTint(gwtheme.Light().Background, accent, 0.18), rightEdge)

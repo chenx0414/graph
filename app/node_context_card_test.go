@@ -88,7 +88,7 @@ func TestNodeContextCardStaysStableWhenOnlyThePeakChanges(t *testing.T) {
 	tester := nodeContextTruthCard(data, "deepseek/deepseek-v4.1-flash", "研究员", 1_000_000)
 	before := textsJoined(tester)
 	data.Totals.Context.PeakTokens = 980_000
-	tester.Frame()
+	render(tester)
 	after := textsJoined(tester)
 	if strings.Contains(after, "980.0k") {
 		t.Fatalf("the node card followed the peak, texts %q", after)

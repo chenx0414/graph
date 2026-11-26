@@ -70,7 +70,7 @@ func TestTheContextCardKeepsItsNumbersWhileTheChatScrolls(t *testing.T) {
 	first := textsJoined(tester)
 	for step := 0; step < 6; step++ {
 		tester.Wheel(200, 250, 0, -120)
-		tester.Frame()
+		render(tester)
 		if got := textsJoined(tester); got != first {
 			t.Fatalf("scroll step %d changed the context card\nbefore: %q\nafter:  %q", step, first, got)
 		}

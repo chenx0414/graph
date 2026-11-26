@@ -78,7 +78,7 @@ func TestTheResourcePageLooksLikeTheMagpieLibrary(t *testing.T) {
 	}
 	tester := newTester(state.view, 1200, 820)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	for _, wanted := range []string{"使用", "资源库", "AGENT 中已有", "不在资源库中", "发现", "文章写作", "article-writing",
 		"pstack", "a11y-architect", "affaan-m/ECC", "Accessibility Architect specializing in WCAG 2.2 compliance.",
@@ -98,7 +98,7 @@ func TestSearchFiltersBothSections(t *testing.T) {
 	state.search = "web-search"
 	tester := newTester(state.view, 1200, 820)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if !tester.HasText("web-search") {
 		t.Fatalf("the match stays, texts %q", tester.Texts())
@@ -128,7 +128,7 @@ func TestOpeningAResourceAndRefreshingTheCatalog(t *testing.T) {
 	}
 	tester := newTester(state.view, 1200, 820)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if err := tester.Click("打开资源库文件夹"); err != nil {
 		t.Fatalf("click the folder action: %v", err)
@@ -156,7 +156,7 @@ func TestTheAgentSectionShowsFiveThenExpands(t *testing.T) {
 	}
 	tester := newTester(state.view, 900, 700)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if !tester.HasText("显示全部 8 个") {
 		t.Fatalf("a long agent list folds behind its count, texts %q", tester.Texts())
@@ -185,7 +185,7 @@ func TestTheResourceSearchFieldHasAStableAccessibleName(t *testing.T) {
 	state.load()
 	tester := newTester(state.view, 1200, 820)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if _, ok := tester.AccessByRole(ui.RoleTextField, "查找资源"); !ok {
 		t.Fatalf("assistive tech cannot name the resource search field; texts %q", tester.Texts())
@@ -194,7 +194,7 @@ func TestTheResourceSearchFieldHasAStableAccessibleName(t *testing.T) {
 		t.Fatalf("the search field cannot be focused by its accessible name: %v", err)
 	}
 	tester.Type("web-search")
-	tester.Frame()
+	render(tester)
 	if info, ok := tester.Access("查找资源"); !ok || info.Value != "web-search" {
 		t.Fatalf("typing does not land in the named field: %+v ok=%v", info, ok)
 	}

@@ -37,13 +37,13 @@ func TestHoveringAProjectConversationArchivesIt(t *testing.T) {
 		theme.Apply(c, theme.Dark())
 		ui.Column(c).Width(300).Children(func() { state.conversationList(c) })
 	}, 320, 400)
-	tester.Frame()
+	render(tester)
 	row, ok := tester.Find("13-Graph")
 	if !ok {
 		t.Fatalf("the conversation row is drawn, texts %q", tester.Texts())
 	}
 	tester.Move(row.X+row.W/2, row.Y+row.H/2)
-	tester.Frame()
+	render(tester)
 	if _, ok := tester.Find("归档项目 13-Graph"); !ok {
 		t.Fatalf("hovering reveals the archive action, texts %q", tester.Texts())
 	}
@@ -112,13 +112,13 @@ func TestALongProjectNameKeepsTheArchiveActionAtTheRight(t *testing.T) {
 		theme.Apply(c, theme.Dark())
 		ui.Column(c).Width(300).Children(func() { state.conversationList(c) })
 	}, 320, 400)
-	tester.Frame()
+	render(tester)
 	row, ok := tester.Find(long)
 	if !ok {
 		t.Fatalf("the long project row is drawn, texts %q", tester.Texts())
 	}
 	tester.Move(row.X+10, row.Y+row.H/2)
-	tester.Frame()
+	render(tester)
 	button, ok := tester.Find("归档项目 " + long)
 	if !ok {
 		t.Fatalf("a long title must not push the archive action away, texts %q", tester.Texts())
@@ -165,7 +165,7 @@ func TestArchivingAProjectWithRunningWorkAsksFirst(t *testing.T) {
 	if err := tester.Click("取消"); err != nil {
 		t.Fatal(err)
 	}
-	tester.Frame()
+	render(tester)
 	if state.archiveConfirm != nil {
 		t.Fatal("cancelling keeps the project")
 	}
@@ -196,13 +196,13 @@ func TestAnArchivedProjectHasNoArchiveAction(t *testing.T) {
 		theme.Apply(c, theme.Dark())
 		ui.Column(c).Width(300).Children(func() { state.conversationList(c) })
 	}, 320, 400)
-	tester.Frame()
+	render(tester)
 	row, ok := tester.Find("p1")
 	if !ok {
 		t.Fatalf("the archived project row is drawn, texts %q", tester.Texts())
 	}
 	tester.Move(row.X+10, row.Y+row.H/2)
-	tester.Frame()
+	render(tester)
 	if _, ok := tester.Find("归档项目 p1"); ok {
 		t.Fatalf("an archived project offers no archive action, texts %q", tester.Texts())
 	}

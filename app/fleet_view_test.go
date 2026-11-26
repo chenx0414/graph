@@ -106,7 +106,7 @@ func TestTheFleetPageSaysItIsLoadingAndThenLands(t *testing.T) {
 		if !time.Now().Before(deadline) {
 			t.Fatalf("the fleet data never landed, texts %q", tester.Texts())
 		}
-		tester.Frame()
+		render(tester)
 	}
 	tester = frames(tester)
 	if !tester.HasText("主控") {
@@ -128,7 +128,7 @@ func TestTheFleetPageExplainsAFailedRead(t *testing.T) {
 		if !time.Now().Before(deadline) {
 			t.Fatalf("the fleet failure never landed, texts %q", tester.Texts())
 		}
-		tester.Frame()
+		render(tester)
 	}
 	tester = frames(tester)
 	if !tester.HasText("读不到编队数据") {
@@ -221,7 +221,7 @@ func TestTheFleetPageUsesTheFreeformBoardLayout(t *testing.T) {
 	tester.Press(startX, startY)
 	for step := 1; step <= 12; step++ {
 		tester.Move(startX+(endX-startX)*float32(step)/12, startY+(endY-startY)*float32(step)/12)
-		tester.Frame()
+		render(tester)
 	}
 	tester.Release(endX, endY)
 	frames(tester)

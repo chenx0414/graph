@@ -134,7 +134,7 @@ func TestTheCollaborationCardOpensTheMessageBehindAMark(t *testing.T) {
 		if !time.Now().Before(deadline) {
 			t.Fatalf("the fleet data never landed, texts %q", tester.Texts())
 		}
-		tester.Frame()
+		render(tester)
 	}
 	tester = frames(tester)
 	if tester.HasText("委派 实现四栏页面 落在第五十句") {
@@ -247,7 +247,7 @@ func TestTheCollaborationCardReachesAMessageOlderThanTheFirstPage(t *testing.T) 
 		if !time.Now().Before(deadline) {
 			t.Fatalf("the fleet data never landed, texts %q", tester.Texts())
 		}
-		tester.Frame()
+		render(tester)
 	}
 	tester = frames(tester)
 	if err := tester.Click("协作事件 1"); err != nil {

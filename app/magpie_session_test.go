@@ -100,7 +100,7 @@ func TestAProviderRowLeadsToItsModelInTheSession(t *testing.T) {
 		if selected > 0 && chat.currentModel != "" {
 			break
 		}
-		picker.Frame()
+		render(picker)
 	}
 
 	if chat.currentModel != "codex:codex/gpt-6.1-sol" || chat.currentThinking != "medium" {
@@ -155,7 +155,7 @@ func TestRefreshingProvidersLoadsTheNewMagpieModelList(t *testing.T) {
 	picker := frames(newTester(chat.view, 900, 700))
 	deadline := time.Now().Add(5 * time.Second)
 	for !picker.HasText("gpt-6.1-terra") && time.Now().Before(deadline) {
-		picker.Frame()
+		render(picker)
 	}
 	if !picker.HasText("gpt-6.1-terra") {
 		t.Fatalf("a provider refresh reloads the model list, texts %q", picker.Texts())

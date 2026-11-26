@@ -29,7 +29,7 @@ func TestTheAgentPageLoadsConversationHistory(t *testing.T) {
 		if !time.Now().Before(deadline) {
 			t.Fatalf("the agent history never landed, texts %q", tester.Texts())
 		}
-		tester.Frame()
+		render(tester)
 	}
 	tester = frames(tester)
 	if asked != "40" {
@@ -62,7 +62,7 @@ func TestTheAgentPageLoadsNodeRunEntries(t *testing.T) {
 		if !time.Now().Before(deadline) {
 			t.Fatalf("the node run never landed, texts %q", tester.Texts())
 		}
-		tester.Frame()
+		render(tester)
 	}
 	tester = frames(tester)
 	if asked != "40" {
@@ -102,7 +102,7 @@ func TestTheAgentPageFallsBackToTheGlobalFleet(t *testing.T) {
 		if !time.Now().Before(deadline) {
 			t.Fatalf("the page never fell back to the global fleet, texts %q", tester.Texts())
 		}
-		tester.Frame()
+		render(tester)
 		tester = frames(tester)
 	}
 	if !globalAsked {
@@ -156,7 +156,7 @@ func TestTheAgentPageSurvivesARestart(t *testing.T) {
 		if !time.Now().Before(deadline) {
 			t.Fatalf("the restored agent page never loaded, texts %q", tester.Texts())
 		}
-		tester.Frame()
+		render(tester)
 	}
 	tester = frames(tester)
 	if !tester.HasText("重启后的记录") {

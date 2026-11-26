@@ -37,7 +37,7 @@ func TestALongFlowCardKeepsABasicWidthAndScrolls(t *testing.T) {
 	state.openModule("fleet")
 	tester := frames(newTester(state.view, 1440, 900))
 	for attempt := 0; attempt < 40 && state.fleet.data == nil && state.fleet.failed == ""; attempt++ {
-		tester.Frame()
+		render(tester)
 	}
 	frames(tester)
 	collaboration, ok := state.board.rects["fleet-collaboration"]
@@ -128,7 +128,7 @@ func TestEveryModuleCardKeepsItsHeaderTuckedAwayUntilHover(t *testing.T) {
 		t.Fatalf("the summary card never rendered, texts %q", tester.Texts())
 	}
 	tester.Move(card.X+card.W/2, card.Y+card.H/2)
-	tester.Advance(300 * 1e6)
+	advance(tester, 300*1e6)
 	tester = frames(tester)
 	if !shown() {
 		t.Fatalf("hovering a module card reveals its header, texts %q", tester.Texts())
@@ -185,7 +185,7 @@ func TestTheFleetPageScrollsInsteadOfSqueezingCardsBelowTheirMinimum(t *testing.
 	state.openModule("fleet")
 	tester := frames(newTester(state.view, 1024, 640))
 	for attempt := 0; attempt < 40 && state.fleet.data == nil && state.fleet.failed == ""; attempt++ {
-		tester.Frame()
+		render(tester)
 	}
 	frames(tester)
 	for _, kind := range []string{"fleet-kpi", "fleet-network", "fleet-collaboration", "fleet-events", "fleet-artifacts"} {

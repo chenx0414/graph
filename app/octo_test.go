@@ -131,8 +131,8 @@ func TestTheMainAgentOctopusAnimates(t *testing.T) {
 	if ink := countColor(first, gwtheme.Light().Foreground); ink < 100 {
 		t.Fatalf("the octopus must be drawn in theme ink, %d ink pixels", ink)
 	}
-	tester.Advance(150 * time.Millisecond)
-	tester.Frame()
+	advance(tester, 150*time.Millisecond)
+	render(tester)
 	second := tester.Image()
 	if bytes.Equal(first.Pix, second.Pix) {
 		t.Fatal("the octopus must move between frames")

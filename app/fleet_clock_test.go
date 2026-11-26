@@ -16,7 +16,7 @@ func TestTheAgentCardClockKeepsCountingWhileTheAgentRuns(t *testing.T) {
 	tester := newTester(func(ctx *ui.Context) {
 		shell.fleetAgentCard(ctx, shown, 220, 120)
 	}, 280, 160)
-	tester.Frame()
+	render(tester)
 	now := tester.Now()
 	shown.CreatedAt = now.Add(-3 * time.Second).UnixMilli()
 	shown.UpdatedAt = shown.CreatedAt
@@ -24,11 +24,11 @@ func TestTheAgentCardClockKeepsCountingWhileTheAgentRuns(t *testing.T) {
 	if !tester.HasText("3.0s") {
 		t.Fatalf("the running agent shows its elapsed time, texts %q", tester.Texts())
 	}
-	tester.Advance(2 * time.Second)
+	advance(tester, 2*time.Second)
 	if !tester.HasText("5.0s") {
 		t.Fatalf("the agent card counts on its own, texts %q", tester.Texts())
 	}
-	tester.Advance(4 * time.Second)
+	advance(tester, 4*time.Second)
 	if !tester.HasText("9.0s") {
 		t.Fatalf("the agent card keeps counting, texts %q", tester.Texts())
 	}
@@ -38,7 +38,7 @@ func TestTheAgentCardClockKeepsCountingWhileTheAgentRuns(t *testing.T) {
 	if !tester.HasText("7.0s") {
 		t.Fatalf("the settled agent freezes at its span, texts %q", tester.Texts())
 	}
-	tester.Advance(10 * time.Second)
+	advance(tester, 10*time.Second)
 	if !tester.HasText("7.0s") || tester.HasText("17.0s") {
 		t.Fatalf("a settled agent does not keep counting, texts %q", tester.Texts())
 	}

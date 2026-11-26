@@ -50,7 +50,7 @@ func fourPaneShell(t *testing.T) *shellState {
 func frames(tester *ui.Tester) *ui.Tester {
 	stepUI(func() {
 		for frame := 0; frame < 3; frame++ {
-			tester.Frame()
+			render(tester)
 		}
 	})
 	return tester
@@ -353,8 +353,8 @@ func TestTheRailTooltipSitsToTheRight(t *testing.T) {
 	}
 	before := darkIn(tester.Image())
 	tester.Move(icon.X+icon.W/2, icon.Y+icon.H/2)
-	tester.Advance(700 * time.Millisecond)
-	tester.Frame()
+	advance(tester, 700*time.Millisecond)
+	render(tester)
 	after := darkIn(tester.Image())
 	if after < before+40 {
 		t.Fatalf("no tip appears right of the icon: dark %d before, %d after", before, after)
@@ -480,4 +480,15 @@ func newTester(view func(*ui.Context), width, height int) *ui.Tester {
 	var tester *ui.Tester
 	stepUI(func() { tester = ui.NewTester(view, width, height) })
 	return tester
+}
+
+// render advances one frame on the shell executor. A tester reads the same
+// fields a load writes, so every frame has to run where those writes happen.
+func render(tester *ui.Tester) {
+	stepUI(func() { tester.Frame() })
+}
+
+// advance moves a tester's clock on the executor, for the same reason.
+func advance(tester *ui.Tester, d time.Duration) {
+	stepUI(func() { tester.Advance(d) })
 }

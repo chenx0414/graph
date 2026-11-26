@@ -72,7 +72,7 @@ func TestChatStateReadsTheDaemonAndRenders(t *testing.T) {
 	}
 	tester := newTester(state.view, 720, 620)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if !tester.HasText("你好") {
 		t.Fatalf("the user message is missing, texts %q", tester.Texts())
@@ -271,7 +271,7 @@ func TestToolRunsExpandAndCollapse(t *testing.T) {
 	state.status = ""
 	tester := newTester(state.view, 700, 500)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if tester.HasText("已运行 ls") {
 		t.Fatalf("a folded run must not show its commands, texts %q", tester.Texts())
@@ -280,7 +280,7 @@ func TestToolRunsExpandAndCollapse(t *testing.T) {
 		t.Fatalf("open the run: %v", err)
 	}
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if !tester.HasText("已运行 ls") {
 		t.Fatalf("an open run shows its commands, texts %q", tester.Texts())
@@ -289,7 +289,7 @@ func TestToolRunsExpandAndCollapse(t *testing.T) {
 		t.Fatalf("fold the run: %v", err)
 	}
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if tester.HasText("已运行 ls") {
 		t.Fatalf("a folded run hides its commands again, texts %q", tester.Texts())

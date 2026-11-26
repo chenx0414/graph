@@ -50,7 +50,7 @@ func TestArtifactsModuleListsAndPreviews(t *testing.T) {
 	shell := artifactsShell(t, state)
 	tester := newTester(shell.view, 1100, 760)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	for _, wanted := range []string{"共享产物", "plans/shape · v46 · 35.9 KB", "reviews/pass · v2 · 900 B"} {
 		if !tester.HasText(wanted) {
@@ -65,7 +65,7 @@ func TestArtifactsModuleListsAndPreviews(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if !tester.HasText("预览 · plans/shape · v46 · 35.9 KB") || !tester.HasText(`{"shape":"parallel"}`) {
 		t.Fatalf("the preview must show the content, texts %q", tester.Texts())
@@ -91,7 +91,7 @@ func TestArtifactListStopsAtTheLimit(t *testing.T) {
 	shell := artifactsShell(t, state)
 	tester := newTester(shell.view, 1100, 760)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if !tester.HasText("还有 4 件未列出") {
 		t.Fatalf("the list must stop at %d and count the rest, texts %q", artifactListLimit, tester.Texts())
@@ -156,7 +156,7 @@ func TestExportWritesTheWholeArtifactNotThePreview(t *testing.T) {
 	shell := artifactsShell(t, state)
 	tester := newTester(shell.view, 1100, 760)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if !tester.HasText("导出") || !tester.HasText("预览 · plans/shape · v46 · 4.5 KB") {
 		t.Fatalf("the preview must offer the export button, texts %q", tester.Texts())

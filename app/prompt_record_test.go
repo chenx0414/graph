@@ -43,7 +43,7 @@ func promptRecordShell(t *testing.T, promptPayload string) *shellState {
 	shell.openModule("trajectory")
 	tester := frames(newTester(shell.view, 1440, 900))
 	for shell.promptRecord == nil && time.Now().Before(deadline) {
-		tester.Frame()
+		render(tester)
 	}
 	if shell.promptRecord == nil {
 		t.Fatalf("the recorded prompt never loaded: %q", shell.promptError)
@@ -132,7 +132,7 @@ func TestANodeChatReadsThatNodesOwnPrompt(t *testing.T) {
 	state.ensurePromptRecord()
 	deadline := time.Now().Add(2 * time.Second)
 	for state.promptRecord == nil && time.Now().Before(deadline) {
-		tester.Frame()
+		render(tester)
 	}
 	if state.promptRecord == nil || state.promptRecord.Recorded == nil || state.promptRecord.Recorded.Text != "NODE-OWN-PROMPT" {
 		t.Fatalf("the node chat reads the node's own prompt, got %+v (%q)", state.promptRecord, state.promptError)

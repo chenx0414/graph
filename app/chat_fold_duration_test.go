@@ -22,7 +22,7 @@ func foldFinalAnswer(at time.Time) transcriptMessage {
 func TestTheFoldedStepsShowTheirTotalDurationWhenCollapsed(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
 	tester := newTester(state.view, 760, 620)
-	tester.Frame()
+	render(tester)
 	now := tester.Now()
 	start := now.Add(-14 * time.Second)
 	state.messages = []transcriptMessage{
@@ -87,7 +87,7 @@ func TestFoldedStepsWithNoTimestampsShowNoDuration(t *testing.T) {
 func TestFoldDurationFormatsMinutesAndSeconds(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
 	tester := newTester(state.view, 760, 620)
-	tester.Frame()
+	render(tester)
 	now := tester.Now()
 	start := now.Add(-3 * time.Minute)
 	state.messages = []transcriptMessage{

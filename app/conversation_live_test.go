@@ -28,8 +28,8 @@ func waitForChatText(t *testing.T, tester *ui.Tester, text string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		tester.Advance(600 * time.Millisecond)
-		tester.Frame()
+		advance(tester, 600*time.Millisecond)
+		render(tester)
 		if tester.HasText(text) {
 			return
 		}
@@ -225,7 +225,7 @@ func TestSwitchingBackToTheMainAgentShowsItsContentAtOnce(t *testing.T) {
 	// for a frame or two while the chat already shows its cached content. What must
 	// not happen is the window staying on placeholders.
 	for frame := 0; frame < 120 && tester.HasText("加载占位"); frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if tester.HasText("加载占位") {
 		t.Fatalf("the side panels stayed on placeholders, texts %q", tester.Texts())

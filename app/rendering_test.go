@@ -10,7 +10,7 @@ import (
 
 func settle(tester *ui.Tester) *ui.Tester {
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	return tester
 }
@@ -74,7 +74,7 @@ func TestStreamingMarkdownWaitsForTheRevealClock(t *testing.T) {
 
 	tester := newTester(view, 600, 300)
 	immediately := tester.Texts()
-	tester.Advance(2 * time.Second)
+	advance(tester, 2*time.Second)
 	revealed := tester.Texts()
 	joined := ""
 	for _, text := range revealed {

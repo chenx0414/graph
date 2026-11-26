@@ -39,7 +39,7 @@ func TestTheHoverHeaderKeepsItsExpandAndRemoveActions(t *testing.T) {
 		t.Fatalf("the tasks card never rendered, texts %q", tester.Texts())
 	}
 	tester.Move(card.X+card.W/2, card.Y+card.H/2)
-	tester.Advance(300 * 1e6)
+	advance(tester, 300*1e6)
 	tester = frames(tester)
 	for _, action := range []string{"在新标签页打开", "移除"} {
 		if !tester.HasText(action) {

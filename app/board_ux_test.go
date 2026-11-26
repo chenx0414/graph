@@ -137,14 +137,14 @@ func TestTheFleetCardsRevealTheirHeaderOnHover(t *testing.T) {
 			t.Fatalf("%s never laid out, rects %+v", kind, state.board.rects)
 		}
 		tester.Move(rect.X+rect.W/2, rect.Y+rect.H/2)
-		tester.Advance(300 * 1e6)
+		advance(tester, 300*1e6)
 		tester = frames(tester)
 		if shown := visible(tester); len(shown) != 1 {
 			t.Fatalf("hovering %s must reveal exactly its header, shown %q texts %q", kind, shown, tester.Texts())
 		}
 	}
 	tester.Move(10, 10)
-	tester.Advance(300 * 1e6)
+	advance(tester, 300*1e6)
 	tester = frames(tester)
 	if shown := visible(tester); len(shown) != 0 {
 		t.Fatalf("the headers tuck away when the pointer leaves, shown %q texts %q", shown, tester.Texts())
@@ -157,7 +157,7 @@ func TestTheDefaultFleetCardsKeepTheirInformationAtBothWindowSizes(t *testing.T)
 		state.openModule("fleet")
 		tester := frames(newTester(state.view, size[0], size[1]))
 		for attempt := 0; attempt < 20 && state.fleet.data == nil && state.fleet.failed == ""; attempt++ {
-			tester.Frame()
+			render(tester)
 		}
 		frames(tester)
 		kinds := []string{"fleet-kpi", "fleet-network", "fleet-collaboration", "fleet-events", "fleet-artifacts"}
@@ -222,7 +222,7 @@ func TestTheFleetCollaborationCardFitsItsLanesInsteadOfStretching(t *testing.T) 
 	state.openModule("fleet")
 	tester := frames(newTester(state.view, 1440, 900))
 	for attempt := 0; attempt < 20 && state.fleet.data == nil && state.fleet.failed == ""; attempt++ {
-		tester.Frame()
+		render(tester)
 	}
 	frames(tester)
 	collaboration, ok := state.board.rects["fleet-collaboration"]

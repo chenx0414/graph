@@ -12,7 +12,7 @@ import (
 func TestTheAnswerClockTicksWhileTheAssistantSpeaks(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
 	tester := newTester(state.view, 760, 620)
-	tester.Frame()
+	render(tester)
 	now := tester.Now()
 	state.messages = []transcriptMessage{
 		{ID: "u1", Role: "user", Kind: "chat", Text: "帮我跑一下测试", State: "delivered",
@@ -24,7 +24,7 @@ func TestTheAnswerClockTicksWhileTheAssistantSpeaks(t *testing.T) {
 	if !tester.HasText("正在回复 · 用时 3s") {
 		t.Fatalf("a speaking answer shows its stopwatch, texts %q", tester.Texts())
 	}
-	tester.Advance(2 * time.Second)
+	advance(tester, 2*time.Second)
 	tester = frames(tester)
 	if !tester.HasText("正在回复 · 用时 5s") {
 		t.Fatalf("the stopwatch keeps ticking without a new message, texts %q", tester.Texts())
@@ -37,7 +37,7 @@ func TestTheAnswerClockTicksWhileTheAssistantSpeaks(t *testing.T) {
 	if !tester.HasText("已用时 5s") {
 		t.Fatalf("a settled answer keeps its reading, texts %q", tester.Texts())
 	}
-	tester.Advance(10 * time.Second)
+	advance(tester, 10*time.Second)
 	tester = frames(tester)
 	if tester.HasText("已用时 15s") || tester.HasText("正在回复") {
 		t.Fatalf("a settled answer stops counting, texts %q", tester.Texts())
@@ -55,7 +55,7 @@ func TestTheAnswerClockTicksWhileTheAssistantSpeaks(t *testing.T) {
 func TestTheAnswerClockFreezesAcrossTheLiveToSettledSwap(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
 	tester := newTester(state.view, 760, 620)
-	tester.Frame()
+	render(tester)
 	now := tester.Now()
 	user := transcriptMessage{ID: "u1", Role: "user", Kind: "chat", Text: "帮我跑一下测试", State: "delivered",
 		CreatedAt: now.Add(-3 * time.Second).UnixMilli()}
@@ -68,7 +68,7 @@ func TestTheAnswerClockFreezesAcrossTheLiveToSettledSwap(t *testing.T) {
 	if !tester.HasText("正在回复 · 用时 3s") {
 		t.Fatalf("the live answer shows its stopwatch, texts %q", tester.Texts())
 	}
-	tester.Advance(2 * time.Second)
+	advance(tester, 2*time.Second)
 	tester = frames(tester)
 	state.messages = []transcriptMessage{
 		user,
@@ -102,7 +102,7 @@ func TestAnAnswerFromLongAgoShowsNoStopwatch(t *testing.T) {
 func TestTheAnswerClockKeepsTickingWhileTheRoundRuns(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
 	tester := newTester(state.view, 760, 620)
-	tester.Frame()
+	render(tester)
 	now := tester.Now()
 	state.roundMaster = "running"
 	state.messages = []transcriptMessage{
@@ -116,7 +116,7 @@ func TestTheAnswerClockKeepsTickingWhileTheRoundRuns(t *testing.T) {
 		t.Fatalf("an answer in a running round shows its stopwatch, texts %q", tester.Texts())
 	}
 	for _, want := range []string{"正在回复 · 用时 3s", "正在回复 · 用时 4s"} {
-		tester.Advance(time.Second)
+		advance(tester, time.Second)
 		tester = frames(tester)
 		if !tester.HasText(want) {
 			t.Fatalf("the stopwatch counts one second per second, want %q, texts %q", want, tester.Texts())
@@ -127,7 +127,7 @@ func TestTheAnswerClockKeepsTickingWhileTheRoundRuns(t *testing.T) {
 	if !tester.HasText("已用时 4s") {
 		t.Fatalf("a landed round freezes the reading, texts %q", tester.Texts())
 	}
-	tester.Advance(3 * time.Second)
+	advance(tester, 3*time.Second)
 	tester = frames(tester)
 	if tester.HasText("已用时 7s") || tester.HasText("正在回复") {
 		t.Fatalf("a landed answer stops counting, texts %q", tester.Texts())

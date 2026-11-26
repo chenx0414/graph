@@ -140,8 +140,8 @@ func TestTheWhiteboardFloorFitsEveryStandardPage(t *testing.T) {
 	for _, kind := range append(panePages(), "history", "overview", "conversation", "artifacts") {
 		if kind != "" {
 			state.openModule(kind)
-			tester.Frame()
-			tester.Frame()
+			render(tester)
+			render(tester)
 		}
 		if need > state.windowFloor {
 			t.Fatalf("%s needs %.1f but the window floor gives the whiteboard %.1f", paneName(kind), need, state.windowFloor)

@@ -63,7 +63,7 @@ func TestSettingsPaneRendersAndArchivesAProject(t *testing.T) {
 	}
 	tester := newTester(state.view, 820, 620)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	for _, wanted := range []string{"运行设置", "运行状态、源码版本与项目归档", "管理供应商", "运行",
 		"运行模式", "execute", "配置版本", "42", "源码", "main@79a38ef0", "可用模型", "7 个", "默认模型", "deepseek",
@@ -96,7 +96,7 @@ func TestShellSwitchesBetweenChatsAndSettings(t *testing.T) {
 	state := newShellState(server.URL, "tok")
 	tester := newTester(state.view, 1280, 800)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if err := tester.Click("设置"); err != nil {
 		t.Fatalf("click 设置: %v", err)
@@ -109,7 +109,7 @@ func TestShellSwitchesBetweenChatsAndSettings(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if state.activeBoardKind() != "settings" || !tester.HasText("凭据在「供应商」页管理 · 与 magpie 同一套") {
 		t.Fatalf("the settings panel must render, kind %q texts %q", state.activeBoardKind(), tester.Texts())
@@ -118,7 +118,7 @@ func TestShellSwitchesBetweenChatsAndSettings(t *testing.T) {
 		t.Fatalf("click 轨迹: %v", err)
 	}
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if state.activeBoardKind() != "trajectory" || tester.HasText("凭据在「供应商」页管理 · 与 magpie 同一套") {
 		t.Fatalf("the trajectory tab must come back, kind %q texts %q", state.activeBoardKind(), tester.Texts())
@@ -134,7 +134,7 @@ func TestTheSettingsPageFollowsTheGodwitLayout(t *testing.T) {
 	state.load()
 	tester := newTester(state.view, 1200, 800)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	rect, ok := tester.Find("运行设置")
 	if !ok {
@@ -178,7 +178,7 @@ func TestTheRunSettingsOwnTheExtensionAutoUpdate(t *testing.T) {
 	state.load()
 	tester := newTester(state.view, 900, 700)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if !tester.HasText("扩展自动更新") || !tester.HasText("关闭") {
 		t.Fatalf("the run settings own the switch, texts %q", tester.Texts())
@@ -188,7 +188,7 @@ func TestTheRunSettingsOwnTheExtensionAutoUpdate(t *testing.T) {
 	}
 	deadline := 0
 	for actions["config"] == 0 && deadline < 500 {
-		tester.Frame()
+		render(tester)
 		deadline++
 	}
 	if actions["config"] != 1 {

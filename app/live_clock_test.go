@@ -8,20 +8,20 @@ import (
 func TestTheToolRunStopwatchAdvancesWhileActive(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
 	tester := newTester(state.view, 760, 620)
-	tester.Frame()
+	render(tester)
 	now := tester.Now()
 	running := activityTool("bash", "bash: go test ./...", "running")
 	running.CreatedAt = now.Add(-3 * time.Second).UnixMilli()
 	state.messages = []transcriptMessage{running}
-	tester.Frame()
+	render(tester)
 	if !tester.HasText("用时 3s") {
 		t.Fatalf("the running tool shows its first second, texts %q", tester.Texts())
 	}
-	tester.Advance(time.Second)
+	advance(tester, time.Second)
 	if !tester.HasText("用时 4s") {
 		t.Fatalf("the running tool ticks a second later, texts %q", tester.Texts())
 	}
-	tester.Advance(2 * time.Second)
+	advance(tester, 2*time.Second)
 	if !tester.HasText("用时 6s") {
 		t.Fatalf("the running tool keeps ticking without a message, texts %q", tester.Texts())
 	}
@@ -30,19 +30,19 @@ func TestTheToolRunStopwatchAdvancesWhileActive(t *testing.T) {
 func TestTheToolRunStopwatchStopsWhenTheToolSettles(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
 	tester := newTester(state.view, 760, 620)
-	tester.Frame()
+	render(tester)
 	now := tester.Now()
 	first := activityTool("bash", "bash: go test ./...", "done")
 	first.CreatedAt = now.Add(-5 * time.Second).UnixMilli()
 	second := activityTool("bash", "bash: pwd", "done")
 	second.CreatedAt = now.Add(-2 * time.Second).UnixMilli()
 	state.messages = []transcriptMessage{first, second}
-	tester.Frame()
+	render(tester)
 	if !tester.HasText("用时 3s") {
 		t.Fatalf("the settled tool run freezes at its span, texts %q", tester.Texts())
 	}
-	tester.Advance(5 * time.Second)
-	tester.Frame()
+	advance(tester, 5*time.Second)
+	render(tester)
 	if !tester.HasText("用时 3s") {
 		t.Fatalf("the settled tool run does not keep counting, texts %q", tester.Texts())
 	}

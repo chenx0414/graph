@@ -58,7 +58,7 @@ func TestAFailedOlderReadReadsBesideTheChatNotInTheComposer(t *testing.T) {
 	state.noMoreHistory = false
 	state.ensureHistory()
 	for attempt := 0; attempt < 200 && state.historyLoading; attempt++ {
-		tester.Frame()
+		render(tester)
 	}
 	if state.status == "" {
 		t.Fatalf("a failed read still records what went wrong, got %q", state.status)

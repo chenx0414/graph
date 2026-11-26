@@ -49,7 +49,7 @@ func TestTheContextCardKeepsItsNumbersWhileScrolling(t *testing.T) {
 	}, 760, 320))
 	first := textsJoined(tester)
 	for frame := 0; frame < 8; frame++ {
-		tester.Frame()
+		render(tester)
 		if got := textsJoined(tester); got != first {
 			t.Fatalf("frame %d changed the context card\nbefore: %q\nafter:  %q", frame, first, got)
 		}

@@ -180,7 +180,7 @@ func openFleetTester(t *testing.T, state *shellState) *ui.Tester {
 		if !time.Now().Before(deadline) {
 			t.Fatalf("the fleet data never landed, texts %q", tester.Texts())
 		}
-		tester.Frame()
+		render(tester)
 	}
 	return frames(tester)
 }

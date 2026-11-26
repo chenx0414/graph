@@ -27,7 +27,7 @@ func TestDesktopConfirmsTheVerificationDraftItShows(t *testing.T) {
 	chat := newChatState(server.URL, "tok")
 	chat.open("c1")
 	tester := newTester(chat.view, 720, 650)
-	tester.Frame()
+	render(tester)
 	for _, label := range []string{"保留等号", "解析 X=a=b 时保留 a=b", "确认草稿 · main"} {
 		if !tester.HasText(label) {
 			t.Fatalf("draft must show %q, got %v", label, tester.Texts())

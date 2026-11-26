@@ -23,11 +23,11 @@ func TestTheRunningDurationGrowsLikeAStopwatchWhileTheRunIsActive(t *testing.T) 
 	if !tester.HasText("用时 2s") {
 		t.Fatalf("a running run shows its elapsed time, texts %q", tester.Texts())
 	}
-	tester.Advance(3 * time.Second)
+	advance(tester, 3*time.Second)
 	if !tester.HasText("用时 5s") {
 		t.Fatalf("the stopwatch moved on its own after three seconds, texts %q", tester.Texts())
 	}
-	tester.Advance(2 * time.Second)
+	advance(tester, 2*time.Second)
 	if !tester.HasText("用时 7s") {
 		t.Fatalf("the stopwatch keeps counting, texts %q", tester.Texts())
 	}
@@ -45,7 +45,7 @@ func TestTheRunningDurationStopsWhenTheRunSettles(t *testing.T) {
 	if !tester.HasText("用时 5s") {
 		t.Fatalf("a settled run shows how long it took, texts %q", tester.Texts())
 	}
-	tester.Advance(5 * time.Second)
+	advance(tester, 5*time.Second)
 	if !tester.HasText("用时 5s") {
 		t.Fatalf("a settled run stops counting, texts %q", tester.Texts())
 	}

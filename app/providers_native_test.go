@@ -81,7 +81,7 @@ func TestTheProvidersPageWorksWithoutMagpie(t *testing.T) {
 	shell.openModule("providers")
 	tester := frames(newTester(shell.view, 1440, 900))
 	for attempt := 0; attempt < 40 && len(shell.providers.native) == 0; attempt++ {
-		tester.Frame()
+		render(tester)
 	}
 	if len(shell.providers.native) != 1 {
 		t.Fatalf("the native provider list comes from the config, got %d (%q)", len(shell.providers.native), shell.providers.failed)
@@ -103,7 +103,7 @@ func TestAddingAProviderWritesTheConfigAndTheSecret(t *testing.T) {
 	shell.openModule("providers")
 	tester := frames(newTester(shell.view, 1440, 900))
 	for attempt := 0; attempt < 40 && len(shell.providers.native) == 0; attempt++ {
-		tester.Frame()
+		render(tester)
 	}
 	if err := tester.Click("添加供应商"); err != nil {
 		t.Fatalf("open the add form: %v", err)
@@ -138,7 +138,7 @@ func TestAddingAProviderWritesTheConfigAndTheSecret(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 	for attempt := 0; attempt < 80 && len(stub.posted) == 0; attempt++ {
-		tester.Frame()
+		render(tester)
 	}
 	if len(stub.posted) == 0 {
 		t.Fatalf("the save never wrote the config")
@@ -161,7 +161,7 @@ func TestMagpieStaysAnOptionalExtension(t *testing.T) {
 	shell.openModule("providers")
 	tester := frames(newTester(shell.view, 1440, 900))
 	for attempt := 0; attempt < 40 && (len(shell.providers.native) == 0 || len(shell.providers.entries) == 0); attempt++ {
-		tester.Frame()
+		render(tester)
 	}
 	if !tester.HasText("本机供应商") {
 		t.Fatalf("the page keeps its own providers, texts %q", tester.Texts())
@@ -181,7 +181,7 @@ func TestClickingANativeProviderOpensItsEditor(t *testing.T) {
 	shell.openModule("providers")
 	tester := frames(newTester(shell.view, 1440, 900))
 	for attempt := 0; attempt < 40 && len(shell.providers.native) == 0; attempt++ {
-		tester.Frame()
+		render(tester)
 	}
 	if err := tester.Click("编辑 opencode-go"); err != nil {
 		t.Fatalf("open the provider editor: %v", err)
@@ -202,7 +202,7 @@ func TestRemovingANativeProviderDropsItFromTheConfig(t *testing.T) {
 	shell.openModule("providers")
 	tester := frames(newTester(shell.view, 1440, 900))
 	for attempt := 0; attempt < 40 && len(shell.providers.native) == 0; attempt++ {
-		tester.Frame()
+		render(tester)
 	}
 	if err := tester.Click("编辑 opencode-go"); err != nil {
 		t.Fatalf("open the provider editor: %v", err)
@@ -216,7 +216,7 @@ func TestRemovingANativeProviderDropsItFromTheConfig(t *testing.T) {
 		t.Fatalf("confirm the removal: %v", err)
 	}
 	for attempt := 0; attempt < 80 && len(stub.posted) == 0; attempt++ {
-		tester.Frame()
+		render(tester)
 	}
 	if len(stub.posted) == 0 {
 		t.Fatalf("the removal never wrote the config")
@@ -237,7 +237,7 @@ func TestTheProviderRowOffersItsModelsWithoutOpeningTheEditor(t *testing.T) {
 	shell.openModule("providers")
 	tester := frames(newTester(shell.view, 1440, 900))
 	for attempt := 0; attempt < 40 && len(shell.providers.native) == 0; attempt++ {
-		tester.Frame()
+		render(tester)
 	}
 	if err := tester.Click("用 opencode-go 的模型"); err != nil {
 		t.Fatalf("open the provider's models: %v", err)

@@ -45,7 +45,7 @@ func composerShell(t *testing.T) (*chatState, *ui.Tester) {
 	tester := frames(newTester(state.view, 760, 620))
 	deadline := time.Now().Add(2 * time.Second)
 	for len(state.messages) == 0 && time.Now().Before(deadline) {
-		tester.Frame()
+		render(tester)
 	}
 	return state, tester
 }
@@ -56,17 +56,17 @@ func TestTypingAMentionOpensThePathMenu(t *testing.T) {
 		t.Fatalf("focus the composer: %v", err)
 	}
 	tester.Type("@")
-	tester.Frame()
-	tester.Frame()
+	render(tester)
+	render(tester)
 	deadline := time.Now().Add(2 * time.Second)
 	for !tester.HasText("app/graph.go") && time.Now().Before(deadline) {
-		tester.Frame()
+		render(tester)
 	}
 	if !tester.HasText("app/graph.go") {
 		t.Fatalf("the path menu lists the workspace files, texts %q", tester.Texts())
 	}
 	tester.Key(0, ui.KeyDown)
-	tester.Frame()
+	render(tester)
 	tester.Key(0, ui.KeyEnter)
 	frames(tester)
 	if !strings.Contains(state.draft, "[graph.go](app/graph.go)") {
@@ -80,11 +80,11 @@ func TestTypingADollarListsSkillsAndSkipsMoney(t *testing.T) {
 		t.Fatalf("focus the composer: %v", err)
 	}
 	tester.Type("$")
-	tester.Frame()
-	tester.Frame()
+	render(tester)
+	render(tester)
 	deadline := time.Now().Add(2 * time.Second)
 	for !tester.HasText("tdd-workflow") && time.Now().Before(deadline) {
-		tester.Frame()
+		render(tester)
 	}
 	if !tester.HasText("tdd-workflow") {
 		t.Fatalf("the skill menu lists the skills, texts %q", tester.Texts())
@@ -98,7 +98,7 @@ func TestTypingADollarListsSkillsAndSkipsMoney(t *testing.T) {
 	}
 	state.draft = ""
 	tester.Type("$5")
-	tester.Frame()
+	render(tester)
 	if state.menuTrigger != nil || tester.HasText("tdd-workflow") {
 		t.Fatalf("money is not a skill trigger, trigger %+v", state.menuTrigger)
 	}
@@ -110,7 +110,7 @@ func TestTypingASlashListsCommands(t *testing.T) {
 		t.Fatalf("focus the composer: %v", err)
 	}
 	tester.Type("/")
-	tester.Frame()
+	render(tester)
 	if !tester.HasText("/new") || !tester.HasText("/attach") {
 		t.Fatalf("the command menu lists the commands, texts %q", tester.Texts())
 	}
@@ -127,7 +127,7 @@ func TestTypingASlashListsCommands(t *testing.T) {
 func TestAttachmentsShowAsChipsAndRideTheMessage(t *testing.T) {
 	state, tester := composerShell(t)
 	state.attachments = []composerAttachment{{Name: "notes.md", Type: "text/markdown", Size: 2048, Text: "记一笔"}}
-	tester.Frame()
+	render(tester)
 	if !tester.HasText("notes.md") || !tester.HasText("2.0 KB") {
 		t.Fatalf("the attachment chip shows its name and size, texts %q", tester.Texts())
 	}
@@ -147,11 +147,11 @@ func TestSendingCarriesTheAttachments(t *testing.T) {
 	tester := frames(newTester(state.view, 760, 620))
 	deadline := time.Now().Add(2 * time.Second)
 	for len(state.messages) == 0 && time.Now().Before(deadline) {
-		tester.Frame()
+		render(tester)
 	}
 	state.draft = "看一下这个文件"
 	state.attachments = []composerAttachment{{Name: "notes.md", Type: "text/markdown", Size: 5, Text: "记一笔"}}
-	tester.Frame()
+	render(tester)
 	if err := tester.Click("发送"); err != nil {
 		t.Fatalf("send the message: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestSendingCarriesTheAttachments(t *testing.T) {
 	}
 	deadline = time.Now().Add(2 * time.Second)
 	for len(state.attachments) != 0 && time.Now().Before(deadline) {
-		tester.Frame()
+		render(tester)
 	}
 	if len(state.attachments) != 0 {
 		t.Fatalf("sending clears the attachments, left %d", len(state.attachments))
@@ -226,11 +226,11 @@ func TestSendingAnImageCarriesItsBase64Data(t *testing.T) {
 	tester := frames(newTester(state.view, 760, 620))
 	deadline := time.Now().Add(2 * time.Second)
 	for len(state.messages) == 0 && time.Now().Before(deadline) {
-		tester.Frame()
+		render(tester)
 	}
 	state.draft = "看这张图"
 	state.attachments = []composerAttachment{{Name: "photo.png", Type: "image/png", Size: 70, Data: composerTinyPNG}}
-	tester.Frame()
+	render(tester)
 	if err := tester.Click("发送"); err != nil {
 		t.Fatalf("send the message: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestSendingAnImageCarriesItsBase64Data(t *testing.T) {
 func TestAnImageAttachmentRendersItsThumbnail(t *testing.T) {
 	state, tester := composerShell(t)
 	state.attachments = []composerAttachment{{Name: "photo.png", Type: "image/png", Size: 70, Data: composerTinyPNG}}
-	tester.Frame()
+	render(tester)
 	if !tester.HasText("photo.png") || !tester.HasText("附件图片 photo.png") {
 		t.Fatalf("the image chip shows its thumbnail and name, texts %q", tester.Texts())
 	}
@@ -288,14 +288,14 @@ func TestSlashNewStartsAFreshAgentContext(t *testing.T) {
 		t.Fatalf("focus the composer: %v", err)
 	}
 	tester.Type("/new")
-	tester.Frame()
+	render(tester)
 	if !tester.HasText("/new") {
 		t.Fatalf("the menu offers /new, texts %q", tester.Texts())
 	}
 	tester.Key(0, ui.KeyEnter)
 	deadline := time.Now().Add(2 * time.Second)
 	for state.status != "已开启新的 Agent 上下文" && time.Now().Before(deadline) {
-		tester.Frame()
+		render(tester)
 	}
 	if state.status != "已开启新的 Agent 上下文" {
 		t.Fatalf("the command reports the fresh context, status %q", state.status)

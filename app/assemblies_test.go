@@ -66,7 +66,7 @@ func assemblyServer(t *testing.T, actions map[string]int, bodies *[]string) *htt
 func assemblyTester(state *assemblyState) *ui.Tester {
 	tester := newTester(state.view, 1100, 820)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	return tester
 }
@@ -116,7 +116,7 @@ func TestCompilingAnAssemblyShowsTheNewDefinitionVersion(t *testing.T) {
 	}
 	deadline := 0
 	for actions["POST /api/catalog/combinations/coder/compile"] == 0 && deadline < 500 {
-		tester.Frame()
+		render(tester)
 		deadline++
 	}
 	if actions["POST /api/catalog/combinations/coder/compile"] != 1 {
@@ -302,7 +302,7 @@ func TestAddingAResourceSavesTheWholeRecipe(t *testing.T) {
 		t.Fatalf("pick a capability: %v", err)
 	}
 	for frame := 0; frame < 50 && actions["POST /api/catalog/combinations"] == 0; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if actions["POST /api/catalog/combinations"] != 1 {
 		t.Fatalf("adding a resource saves the recipe, actions %v (%q)", actions, state.status)
@@ -329,7 +329,7 @@ func TestRemovingAResourceSavesTheWholeRecipeWithoutIt(t *testing.T) {
 		t.Fatalf("remove a resource: %v", err)
 	}
 	for frame := 0; frame < 50 && actions["POST /api/catalog/combinations"] == 0; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if actions["POST /api/catalog/combinations"] != 1 {
 		t.Fatalf("removing a resource saves the recipe, actions %v (%q)", actions, state.status)

@@ -72,7 +72,7 @@ func TestDraggingAPanelBodySwapsItsPartition(t *testing.T) {
 	tester.Press(startX, startY)
 	for step := 1; step <= 12; step++ {
 		tester.Move(startX+(endX-startX)*float32(step)/12, startY+(endY-startY)*float32(step)/12)
-		tester.Frame()
+		render(tester)
 	}
 	tester.Release(endX, endY)
 	frames(tester)
@@ -95,7 +95,7 @@ func TestDraggingToAPartitionEdgeSplitsIt(t *testing.T) {
 	tester.Press(startX, startY)
 	for step := 1; step <= 12; step++ {
 		tester.Move(startX+(endX-startX)*float32(step)/12, startY+(endY-startY)*float32(step)/12)
-		tester.Frame()
+		render(tester)
 	}
 	tester.Release(endX, endY)
 	frames(tester)
@@ -138,7 +138,7 @@ func TestADividerDragResizesBothPartitions(t *testing.T) {
 	tester.Press(x, y)
 	for step := 1; step <= 10; step++ {
 		tester.Move(x+float32(step)*8, y)
-		tester.Frame()
+		render(tester)
 	}
 	tester.Release(x+80, y)
 	frames(tester)
@@ -264,7 +264,7 @@ func TestTheWhiteboardHeaderSlidesOverItsContentWithoutMovingIt(t *testing.T) {
 		t.Fatalf("the card header starts tucked away, texts %q", tester.Texts())
 	}
 	tester.Move(card.X+card.W/2, card.Y+card.H/2)
-	tester.Advance(300 * time.Millisecond)
+	advance(tester, 300*time.Millisecond)
 	frames(tester)
 	if !hasTitle() {
 		t.Fatalf("hovering reveals the card header, texts %q", tester.Texts())
@@ -293,7 +293,7 @@ func TestTheWhiteboardKeepsTheCardScrollWhenThePointerLeaves(t *testing.T) {
 		t.Fatalf("the task row never rendered, texts %q", tester.Texts())
 	}
 	tester.Move(10, 10)
-	tester.Advance(400 * time.Millisecond)
+	advance(tester, 400*time.Millisecond)
 	frames(tester)
 	after, ok := tester.Find("实现四栏页面 · running · executing")
 	if !ok {

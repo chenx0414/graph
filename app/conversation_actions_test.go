@@ -46,7 +46,7 @@ func TestTheComposerButtonPausesARunningRound(t *testing.T) {
 	}
 	tester := newTester(state.view, 760, 620)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if !tester.HasText("暂停") {
 		t.Fatalf("a running round turns the send button into pause, texts %q", tester.Texts())
@@ -65,7 +65,7 @@ func TestTheComposerButtonPausesARunningRound(t *testing.T) {
 		t.Fatalf("暂停后状态必须是已暂停，paused %v status %q", state.paused, state.status)
 	}
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if !tester.HasText("继续") {
 		t.Fatalf("an empty composer resumes a paused round, texts %q", tester.Texts())
@@ -101,7 +101,7 @@ func TestTheComposerSendsWhilePausedWhenAPromptWaits(t *testing.T) {
 	state.draft = "继续做"
 	tester := newTester(state.view, 760, 620)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if !tester.HasText("发送") {
 		t.Fatalf("a prompt in the composer turns the button into send, texts %q", tester.Texts())
@@ -128,7 +128,7 @@ func TestTheComposerShowsTheReferencePlaceholders(t *testing.T) {
 	state.open("c1")
 	tester := newTester(state.view, 760, 620)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	for _, label := range []string{"附件", "语音", "模型"} {
 		if !tester.HasText(label) {
@@ -161,7 +161,7 @@ func TestQueuedMessagesCanBeCancelled(t *testing.T) {
 	}
 	tester := newTester(state.view, 760, 620)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if !tester.HasText("撤销这条排队消息") {
 		t.Fatalf("a queued message must offer the cancel, texts %q", tester.Texts())
@@ -201,7 +201,7 @@ func TestPausedStateComesFromTheConversation(t *testing.T) {
 	}
 	tester := newTester(state.view, 760, 620)
 	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+		render(tester)
 	}
 	if !tester.HasText("继续") || tester.HasText("暂停") {
 		t.Fatalf("a paused conversation must offer 继续 only, texts %q", tester.Texts())

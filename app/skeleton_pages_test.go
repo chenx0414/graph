@@ -14,7 +14,7 @@ func skeletonTester(t *testing.T, view func(*ui.Context)) *ui.Tester {
 		gwtheme.Apply(c, gwtheme.Dark())
 		view(c)
 	}, 1200, 800, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true}})
-	tester.Frame()
+	render(tester)
 	return tester
 }
 
