@@ -105,6 +105,11 @@ func releaseTestOwner() {
 // drainPosted runs everything background goroutines posted.
 func drainPosted() {
 	e := shellExecutor
+	if !e.isOwner() {
+		// Only the goroutine that owns the shell runs its queued work: running it
+		// here would make this goroutine a second writer.
+		return
+	}
 	for {
 		e.mu.Lock()
 		pending := e.queued
