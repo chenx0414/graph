@@ -18,6 +18,11 @@ var scriptFileExtensions = []string{".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"
 
 var scriptFileSkippedDirs = map[string]bool{
 	".git": true, "node_modules": true, "dist": true, "build": true,
+	// A verification run keeps a copy of the app and its assets here. It is
+	// git-ignored and generated, so it is not source the repository owns:
+	// scanning it made this gate fail on a machine that had driven the
+	// interface and pass on one that had not.
+	".run": true,
 }
 
 func isScriptFile(path string) bool {

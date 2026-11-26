@@ -65,7 +65,7 @@
     },
     {
       "verb": "waitText",
-      "text": "供应商"
+      "text": "标签页 供应商"
     },
     {
       "verb": "click",
@@ -73,7 +73,7 @@
     },
     {
       "verb": "waitText",
-      "text": "资源库"
+      "text": "标签页 资源库"
     },
     {
       "verb": "click",
@@ -81,7 +81,7 @@
     },
     {
       "verb": "waitText",
-      "text": "能力装配"
+      "text": "标签页 能力装配"
     },
     {
       "verb": "click",
@@ -89,7 +89,7 @@
     },
     {
       "verb": "waitText",
-      "text": "运行设置"
+      "text": "标签页 运行设置"
     },
     {
       "verb": "click",
@@ -133,7 +133,7 @@
     },
     {
       "verb": "waitText",
-      "text": "运行设置",
+      "text": "标签页 运行设置",
       "timeoutMs": 15000
     },
     {
@@ -160,7 +160,7 @@
     },
     {
       "verb": "waitText",
-      "text": "供应商",
+      "text": "标签页 供应商",
       "timeoutMs": 15000
     },
     {
@@ -169,7 +169,7 @@
     },
     {
       "verb": "waitText",
-      "text": "资源库",
+      "text": "标签页 资源库",
       "timeoutMs": 15000
     },
     {
@@ -178,7 +178,7 @@
     },
     {
       "verb": "waitText",
-      "text": "能力装配",
+      "text": "标签页 能力装配",
       "timeoutMs": 15000
     },
     {
@@ -187,7 +187,7 @@
     },
     {
       "verb": "waitText",
-      "text": "运行设置",
+      "text": "标签页 运行设置",
       "timeoutMs": 15000
     },
     {

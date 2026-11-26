@@ -75,3 +75,49 @@ func TestTheSandboxHostExistsInExactlyOnePlace(t *testing.T) {
 		}
 	}
 }
+
+// A verification run keeps its own copy of the app inside verification/.run/,
+// assets included. That tree is git-ignored and generated, so it is not source
+// the repository owns: scanning it made the gate fail on a machine that had
+// driven the interface, and pass on one that had not.
+func TestAGeneratedRunTreeIsNotSourceCode(t *testing.T) {
+	root := t.TempDir()
+	generated := filepath.Join(root, "verification", ".run", "7cd8575b", "graph-home", "assets", "runtime")
+	if err := os.MkdirAll(generated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"check-resolver.cjs", "module-worker.mjs"} {
+		if err := os.WriteFile(filepath.Join(generated, name), []byte("export {}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	offenders, err := scanScriptFiles(root, nil)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(offenders) != 0 {
+		t.Fatalf("a generated run tree is not repository source, got %v", offenders)
+	}
+}
+
+// The scan still has to read a .gitignore'd path that is not a run tree: only the
+// generated run root is exempt, not everything a project refuses to commit.
+func TestAnIgnoredSourceFileIsStillReported(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "scratch"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("scratch/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "scratch", "accidental.ts"), []byte("export {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	offenders, err := scanScriptFiles(root, nil)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(offenders) != 1 {
+		t.Fatalf("only the generated run tree is exempt, got %v", offenders)
+	}
+}
