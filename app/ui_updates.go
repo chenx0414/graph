@@ -53,8 +53,6 @@ type uiExecutor struct {
 	gen     uint64
 }
 
-// queuedCall remembers which shell generation posted it. A background load that
-// outlives the shell it started in must not write the one that replaced it.
 type queuedCall struct {
 	gen   uint64
 	apply func()
@@ -62,10 +60,6 @@ type queuedCall struct {
 
 var shellExecutor = &uiExecutor{}
 
-// claimShellOwner records the calling goroutine as the shell owner. A shell is
-// built on the goroutine that will drive it, so the first background load must
-// not adopt ownership ahead of the renderer, and that goroutine's callbacks are
-// queued for it to run rather than handed to a second goroutine.
 func claimShellOwner() {
 	e := shellExecutor
 	e.mu.Lock()
@@ -76,9 +70,6 @@ func claimShellOwner() {
 	e.mu.Unlock()
 }
 
-// adoptTestOwner makes the calling goroutine the shell owner for a test, so the
-// test's renders and assertions run where the state is written. Posted callbacks
-// from background loads wait until drainPosted runs.
 func adoptTestOwner() {
 	e := shellExecutor
 	e.mu.Lock()
@@ -89,8 +80,6 @@ func adoptTestOwner() {
 	e.mu.Unlock()
 }
 
-// releaseTestOwner hands ownership back so the next test goroutine can adopt it.
-// Tests run on different goroutines, and an owner left behind would leave the
 // next test's callbacks queued instead of run.
 func releaseTestOwner() {
 	e := shellExecutor
