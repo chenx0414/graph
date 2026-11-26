@@ -166,13 +166,28 @@ func (c *chatState) follow() {
 	for attempt := 0; attempt < 450; attempt++ {
 		time.Sleep(400 * time.Millisecond)
 		c.refresh()
-		if len(c.messages) == 0 {
+		// The transcript belongs to the renderer, so the decision to stop
+		// following is taken where it is written.
+		verdict := readShell(c.window, func() followVerdict {
+			return followVerdict{
+				empty: len(c.messages) == 0,
+				done:  !c.roundPhase().busy() && roundAnswered(c.messages),
+			}
+		})
+		empty, done := verdict.empty, verdict.done
+		if empty {
 			continue
 		}
-		if !c.roundPhase().busy() && roundAnswered(c.messages) {
+		if done {
 			return
 		}
 	}
+}
+
+// followVerdict is what one poll decides about a reply that is still arriving.
+type followVerdict struct {
+	empty bool
+	done  bool
 }
 
 func (c *chatState) refresh() {
