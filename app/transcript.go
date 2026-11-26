@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -182,7 +183,10 @@ func runKey(run transcriptRun) string {
 }
 
 type chatState struct {
-	refreshMu          sync.Mutex
+	refreshMu sync.Mutex
+	// followDone is published by a transcript refresh so the follower decides
+	// whether to stop without reading the transcript itself.
+	followDone         atomic.Bool
 	tasks              []taskRow
 	artifacts          []artifactRow
 	previewTitle       string

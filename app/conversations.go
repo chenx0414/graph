@@ -172,20 +172,10 @@ func (c *chatState) sendText(text string) {
 func (c *chatState) follow() {
 	for attempt := 0; attempt < 450; attempt++ {
 		time.Sleep(400 * time.Millisecond)
+		// The transcript belongs to the renderer. A refresh publishes what it saw
+		// as one immutable verdict, so the follower never reads that state itself.
 		c.refresh()
-		// The transcript belongs to the renderer, so the decision to stop
-		// following is taken where it is written.
-		verdict := readShell(c.window, func() followVerdict {
-			return followVerdict{
-				empty: len(c.messages) == 0,
-				done:  !c.roundPhase().busy() && roundAnswered(c.messages),
-			}
-		})
-		empty, done := verdict.empty, verdict.done
-		if empty {
-			continue
-		}
-		if done {
+		if c.followDone.Load() {
 			return
 		}
 	}
