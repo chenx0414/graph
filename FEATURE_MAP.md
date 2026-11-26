@@ -169,3 +169,4 @@ Read from the workflow files themselves, so a documented job cannot outlive the 
 | `.github/workflows/nightly.yml` | `full` | full test (${{ matrix.module }}) |
 | `.github/workflows/nightly.yml` | `gate` | 全量确认（graphcheck all） |
 | `.github/workflows/nightly.yml` | `harness` | harness 行为门禁 |
+| `.github/workflows/nightly.yml` | `ui` | 界面 journey（verify-graph） |
