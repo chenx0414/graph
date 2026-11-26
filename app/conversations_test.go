@@ -314,13 +314,13 @@ func TestOnlyUnresolvedQuestionsAreShown(t *testing.T) {
 }
 
 func TestTheQuestionModuleShowsTheQuestionAndAnswersIt(t *testing.T) {
-	answered := ""
+	answeredBox := &postBox{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "POST" && r.URL.Path == "/api/tasks/t1/answer":
 			payload := make([]byte, 2048)
 			read, _ := r.Body.Read(payload)
-			answered = string(payload[:read])
+			answeredBox.set(string(payload[:read]))
 			w.Write([]byte(`{}`))
 		case r.URL.Path == "/api/conversations/c1":
 			w.Write([]byte(`{"messages":[{"role":"assistant","text":"等我问一句"}],"questions":[{"id":"q1","kind":"recovery","status":"open","suspended":true,"taskId":"t1","data":{"prompt":"**选一条**","options":["A 路线","B 路线"]}}]}`))
@@ -348,9 +348,7 @@ func TestTheQuestionModuleShowsTheQuestionAndAnswersIt(t *testing.T) {
 		t.Fatalf("click an answer: %v", err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for answered == "" && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
+	answered := answeredBox.wait(t, deadline)
 	if !contains(answered, "q1") || !contains(answered, "B 路线") || !contains(answered, "requestId") {
 		t.Fatalf("answer body %q", answered)
 	}

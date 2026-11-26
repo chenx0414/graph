@@ -107,6 +107,8 @@ func TestTheThinkingStepSendsTheModelAndClosesThePicker(t *testing.T) {
 	if !strings.Contains(posted[0], `"model":"beta:model-two"`) || !strings.Contains(posted[0], `"thinkingLevel":"high"`) {
 		t.Fatalf("the change carries the picked model and level, got %s", posted[0])
 	}
+	// The choice is written where the composer is rendered.
+	waitForUI()
 	if state.currentModel != "beta:model-two" || state.currentThinking != "high" {
 		t.Fatalf("the chat remembers the choice, got %q %q", state.currentModel, state.currentThinking)
 	}

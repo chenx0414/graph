@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -28,12 +29,25 @@ const nativeProvidersCatalog = `{"platforms":[
 ],"credentials":{"opencode-go":{"secretRef":"OPENCODE_GO_API_KEY","resolved":true}}}`
 
 type nativeProviderServer struct {
+	mu        sync.Mutex
 	config    string
 	catalog   string
 	magpie    string
 	posted    []string
 	secrets   []string
 	revisions []string
+}
+
+func (stub *nativeProviderServer) postedCount() int {
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	return len(stub.posted)
+}
+
+func (stub *nativeProviderServer) snapshot() ([]string, []string) {
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	return append([]string(nil), stub.posted...), append([]string(nil), stub.secrets...)
 }
 
 func newNativeProviderServer(t *testing.T, stub *nativeProviderServer) *httptest.Server {
@@ -44,7 +58,9 @@ func newNativeProviderServer(t *testing.T, stub *nativeProviderServer) *httptest
 			if r.Method == http.MethodPost {
 				body := make([]byte, 65536)
 				read, _ := r.Body.Read(body)
+				stub.mu.Lock()
 				stub.posted = append(stub.posted, string(body[:read]))
+				stub.mu.Unlock()
 				w.Write([]byte(`{"applied":true,"revision":4}`))
 				return
 			}
@@ -58,7 +74,9 @@ func newNativeProviderServer(t *testing.T, stub *nativeProviderServer) *httptest
 		case "/api/app/secret":
 			body := make([]byte, 8192)
 			read, _ := r.Body.Read(body)
+			stub.mu.Lock()
 			stub.secrets = append(stub.secrets, string(body[:read]))
+			stub.mu.Unlock()
 			w.Write([]byte(`{"applied":true}`))
 		case "/api/providers/magpie":
 			if stub.magpie == "" {
@@ -137,20 +155,21 @@ func TestAddingAProviderWritesTheConfigAndTheSecret(t *testing.T) {
 	if err := tester.Click("保存供应商"); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	for attempt := 0; attempt < 80 && len(stub.posted) == 0; attempt++ {
+	for attempt := 0; attempt < 80 && stub.postedCount() == 0; attempt++ {
 		render(tester)
 	}
-	if len(stub.posted) == 0 {
+	if stub.postedCount() == 0 {
 		t.Fatalf("the save never wrote the config")
 	}
-	posted := stub.posted[len(stub.posted)-1]
+	posted := stub.posted[stub.postedCount()-1]
 	for _, want := range []string{"my-openai", "gpt-4o", "gpt-4o-mini", "https://api.openai.com/v1"} {
 		if !strings.Contains(posted, want) {
 			t.Fatalf("the config carries %q, posted %s", want, posted)
 		}
 	}
-	if len(stub.secrets) == 0 || !strings.Contains(stub.secrets[len(stub.secrets)-1], "sk-test-123") {
-		t.Fatalf("the api key is pushed as a secret, got %v", stub.secrets)
+	_, secrets := stub.snapshot()
+	if len(secrets) == 0 || !strings.Contains(secrets[len(secrets)-1], "sk-test-123") {
+		t.Fatalf("the api key is pushed as a secret, got %v", secrets)
 	}
 }
 
@@ -215,13 +234,13 @@ func TestRemovingANativeProviderDropsItFromTheConfig(t *testing.T) {
 	if err := tester.Click("确认移除"); err != nil {
 		t.Fatalf("confirm the removal: %v", err)
 	}
-	for attempt := 0; attempt < 80 && len(stub.posted) == 0; attempt++ {
+	for attempt := 0; attempt < 80 && stub.postedCount() == 0; attempt++ {
 		render(tester)
 	}
-	if len(stub.posted) == 0 {
+	if stub.postedCount() == 0 {
 		t.Fatalf("the removal never wrote the config")
 	}
-	posted := stub.posted[len(stub.posted)-1]
+	posted := stub.posted[stub.postedCount()-1]
 	if strings.Contains(posted, "opencode-go") {
 		t.Fatalf("the removed provider is gone from the config, posted %s", posted)
 	}
