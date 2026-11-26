@@ -31,6 +31,7 @@ func TestChatRefreshAsksForTheVersionBeforeTheWholeTranscript(t *testing.T) {
 		}
 	}))
 	defer server.Close()
+	claimShellOwner()
 	source := newConversationChatSource(newAPIClient(server.URL, "tok"), "c")
 	chat := &chatState{source: source}
 	if err := source.Load(chat); err != nil {
@@ -80,6 +81,7 @@ func TestChatRefreshFetchesOnlyMessagesAfterTheNewestOne(t *testing.T) {
 		}
 	}))
 	defer server.Close()
+	claimShellOwner()
 	source := newConversationChatSource(newAPIClient(server.URL, "tok"), "c")
 	chat := &chatState{source: source}
 	if err := source.Load(chat); err != nil {

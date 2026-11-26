@@ -433,6 +433,10 @@ func (s *shellState) installAgentChat(source agentChatSource, agent fleetAgent) 
 	s.activeID = state.active
 	s.chat = state
 	s.chatMu.Unlock()
+	// The trajectory belongs to the chat on screen, so switching to an agent's
+	// session moves it too. Rendering used to be what refreshed it, which meant a
+	// switch that did not paint left the previous session's trajectory in place.
+	s.ensureTrajectory()
 	s.frame()
 }
 
