@@ -142,8 +142,6 @@ func (c *chatState) send() {
 
 func (c *chatState) sendText(text string) {
 	text = stripSpace(text)
-	// The send itself runs off the renderer; every field it then clears belongs
-	// to the goroutine that owns the shell.
 	// The source is set when the chat is installed and does not change under a
 	// send, so reading the pair here is safe; the fields cleared below are not.
 	if text == "" || c.active == "" || c.source == nil {
@@ -172,8 +170,6 @@ func (c *chatState) sendText(text string) {
 func (c *chatState) follow() {
 	for attempt := 0; attempt < 450; attempt++ {
 		time.Sleep(400 * time.Millisecond)
-		// The transcript belongs to the renderer. A refresh publishes what it saw
-		// as one immutable verdict, so the follower never reads that state itself.
 		c.refresh()
 		if c.followDone.Load() {
 			return
@@ -189,8 +185,6 @@ type followVerdict struct {
 }
 
 func (c *chatState) refresh() {
-	// This runs on the polling goroutine, so the source it picks is read where
-	// the renderer owns it, and the complaint it records is written there too.
 	source := readShell(c.window, func() agentChatSource {
 		if c.source == nil && c.active != "" {
 			c.source = newConversationChatSource(c.api, c.active)
