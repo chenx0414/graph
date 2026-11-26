@@ -124,7 +124,12 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 				return version == source.version
 			})
 			if still && !inFlight {
-				onUI(c.window, func() { c.clearReadFailure() })
+				// Nothing changed, but the follower still needs a verdict: publish
+				// one here as well, or it never learns the round ended.
+				onUI(c.window, func() {
+					c.clearReadFailure()
+					c.followDone.Store(!c.roundPhase().busy() && roundAnswered(c.messages))
+				})
 				return false, nil
 			}
 			source.version = version
@@ -202,6 +207,9 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 			}
 			c.tasks = tasks
 		}
+		// Publish the verdict the follower needs, so it never reads the transcript
+		// from its own goroutine.
+		c.followDone.Store(!c.roundPhase().busy() && roundAnswered(c.messages))
 	})
 	// The callback may run on the goroutine that owns the shell, so the verdict
 	// travels back atomically instead of as a shared local.

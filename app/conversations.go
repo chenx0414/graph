@@ -178,19 +178,7 @@ func (c *chatState) follow() {
 		if c.followDone.Load() {
 			return
 		}
-		// A refresh that bailed out (busy or unchanged) published nothing, so ask
-		// the owner for the verdict rather than spinning to the attempt limit.
-		if empty, done := func() (bool, bool) {
-			verdict := readShell(c.window, func() followVerdict {
-				return followVerdict{
-					empty: len(c.messages) == 0,
-					done:  !c.roundPhase().busy() && roundAnswered(c.messages),
-				}
-			})
-			return verdict.empty, verdict.done
-		}(); !empty && done {
-			return
-		}
+
 	}
 }
 
