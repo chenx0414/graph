@@ -148,7 +148,7 @@ func (l *OperationLifecycle) restoreUnsentConversation(row map[string]any) bool 
 	if kernelRow(l.store.Db, "SELECT 1 FROM messages WHERE operation_id=? AND role='user' AND state='delivered' LIMIT 1", kernelString(row["id"])) == nil {
 		return false
 	}
-	if l.hooks.CanReplayBeforeSend == nil || !l.hooks.CanReplayBeforeSend(operationFrom(row)) {
+	if l.hooks.CanReplayBeforeSend == nil || !l.hooks.CanReplayBeforeSend(l.store, operationFrom(row)) {
 		return false
 	}
 	if kernelString(row["state"]) == "not_sent" {
@@ -159,7 +159,7 @@ func (l *OperationLifecycle) restoreUnsentConversation(row map[string]any) bool 
 			if err := json.Unmarshal([]byte(kernelString(next["spec"])), &operation); err != nil {
 				panic(err)
 			}
-			if l.hooks.CanReplayBeforeSend == nil || !l.hooks.CanReplayBeforeSend(operation) {
+			if l.hooks.CanReplayBeforeSend == nil || !l.hooks.CanReplayBeforeSend(l.store, operation) {
 				return false
 			}
 		}

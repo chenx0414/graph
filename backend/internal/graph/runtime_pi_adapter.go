@@ -70,9 +70,16 @@ func CreatePiAdapter(options PiAdapterOptions) ActionAdapter {
 		Kind:          "agent",
 		ReserveTokens: &reserve,
 	}
-	adapter.CanReplayBeforeSend = func(operation Operation) bool {
-		capability, _ := graphDBRow(options.Store.Db, "SELECT 1 FROM node_capabilities WHERE operation_id=? LIMIT 1", operation.Id)
-		invocation, _ := graphDBRow(options.Store.Db, "SELECT 1 FROM invocations WHERE operation_id=? LIMIT 1", operation.Id)
+	adapter.CanReplayBeforeSend = func(store *TaskStore, operation Operation) bool {
+		// store is the handle the caller is already inside. Recovery hands over
+		// the transaction, which owns the pool's only connection; asking
+		// options.Store.Db here would wait for a second one forever.
+		db := options.Store.Db
+		if store != nil {
+			db = store.Db
+		}
+		capability, _ := graphDBRow(db, "SELECT 1 FROM node_capabilities WHERE operation_id=? LIMIT 1", operation.Id)
+		invocation, _ := graphDBRow(db, "SELECT 1 FROM invocations WHERE operation_id=? LIMIT 1", operation.Id)
 		return capability == nil && invocation == nil
 	}
 	adapter.Steer = func(operation Operation, text string) any {

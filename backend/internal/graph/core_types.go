@@ -316,5 +316,5 @@ type ActionAdapter struct {
 	Interrupt           func(operation Operation, text *string) any
 	Stop                func(operation Operation)
 	Reconcile           func(operation Operation) Reconciliation
-	CanReplayBeforeSend func(operation Operation) bool
+	CanReplayBeforeSend func(store *TaskStore, operation Operation) bool
 }

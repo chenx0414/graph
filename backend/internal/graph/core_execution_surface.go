@@ -30,12 +30,12 @@ func NewExecution(store *TaskStore, actions map[string]ActionAdapter, extras Exe
 	})
 	execution.lifecycle = NewOperationLifecycle(store, OperationLifecycleHooks{
 		OnCredentialRejected: extras.CredentialRecovery,
-		CanReplayBeforeSend: func(operation Operation) bool {
+		CanReplayBeforeSend: func(store *TaskStore, operation Operation) bool {
 			adapter := execution.adapterFor(operation.Action)
 			if adapter == nil || adapter.CanReplayBeforeSend == nil {
 				return false
 			}
-			return adapter.CanReplayBeforeSend(operation)
+			return adapter.CanReplayBeforeSend(store, operation)
 		},
 	})
 	execution.generation = execution.lifecycle.Recover()
