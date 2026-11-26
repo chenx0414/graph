@@ -1,7 +1,7 @@
 {
   "id": "controls-model-picker",
   "feature": "controls-model-picker",
-  "description": "输入区的模型按钮是真实控件（先选中一个项目会话）：按下必须打开模型选择器；输入框接受文本且 AX value 逐字回读。",
+  "description": "输入区的模型按钮是真实控件（先选中一个项目会话）：按下必须打开模型选择器；关闭选择器后输入框接受文本且 AX value 逐字回读。选择器打开时焦点属于它的搜索框。",
   "width": 1440,
   "height": 900,
   "steps": [
@@ -31,6 +31,10 @@
     {
       "verb": "assertText",
       "text": "模型选择器"
+    },
+    {
+      "verb": "key",
+      "key": "escape"
     },
     {
       "verb": "type",

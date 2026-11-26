@@ -603,30 +603,6 @@
       "note": "derived from a green journey; kept by cover derive"
     },
     {
-      "name": "在新标签页打开",
-      "role": "button",
-      "page": "panel",
-      "action": "click",
-      "journey": "controls-fleet",
-      "step": 5,
-      "lanes": [
-        "headless"
-      ],
-      "note": "derived from a green journey; kept by cover derive"
-    },
-    {
-      "name": "移除",
-      "role": "button",
-      "page": "panel",
-      "action": "click",
-      "journey": "controls-fleet",
-      "step": 10,
-      "lanes": [
-        "headless"
-      ],
-      "note": "derived from a green journey; kept by cover derive"
-    },
-    {
       "name": "供应商",
       "role": "button",
       "page": "rail",
@@ -975,6 +951,28 @@
         "没有在同一个 run 里按下它，因为按下后 daemon 与窗口都会被停掉"
       ],
       "next": "单独写一个最后一步的 tray journey：先断言窗口可见，再 press 退出 Graph，然后断言 app pid 消失且 daemon 仍健康；不要让后续步骤依赖它"
+    },
+    {
+      "name": "在新标签页打开",
+      "role": "button",
+      "page": "panel",
+      "reason": "白板卡片的这个按钮只在鼠标悬停于卡片上时渲染（app/board.go boardPanelHeader，header=boardHeaderOnHover），而 journey 场景语言没有 hover 动词；证据是 app/solo_card_shape_test.go 的 TestTheHoverHeaderKeepsItsExpandAndRemoveActions 用 tester.Move() 钉住了它",
+      "attempts": [
+        "controls-fleet 曾在编队页点它，编队页 Kind=fleetPageID 不是 freeform，永远不渲染这两个按钮，场景本身就不成立（已删除）",
+        "改成白板后仍无法点击：headless 渲染里按钮未悬停就不存在"
+      ],
+      "next": "要么给 verify-graph 的场景语言加一个 hover 步骤（Move 到卡片中心再点击），要么把这条结论永久交给 Go 测试；后者已覆盖同一合同"
+    },
+    {
+      "name": "移除",
+      "role": "button",
+      "page": "panel",
+      "reason": "白板卡片的这个按钮只在鼠标悬停于卡片上时渲染（app/board.go boardPanelHeader，header=boardHeaderOnHover），而 journey 场景语言没有 hover 动词；证据是 app/solo_card_shape_test.go 的 TestTheHoverHeaderKeepsItsExpandAndRemoveActions 用 tester.Move() 钉住了它",
+      "attempts": [
+        "controls-fleet 曾在编队页点它，编队页 Kind=fleetPageID 不是 freeform，永远不渲染这两个按钮，场景本身就不成立（已删除）",
+        "改成白板后仍无法点击：headless 渲染里按钮未悬停就不存在"
+      ],
+      "next": "要么给 verify-graph 的场景语言加一个 hover 步骤（Move 到卡片中心再点击），要么把这条结论永久交给 Go 测试；后者已覆盖同一合同"
     }
   ]
 }

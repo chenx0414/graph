@@ -1,7 +1,7 @@
 {
   "id": "controls-context-tabs",
   "feature": "controls-context-tabs",
-  "description": "上下文窗口的三个页签是真实控件（先选中一个项目会话）：切到 System Prompt 与 工具声明 后 系统提示词 必须消失，切回 上下文 必须恢复它和工具定义。",
+  "description": "上下文窗口的三个页签是真实控件（execute 实例 + 替身模型跑过一轮，上下文才有真实占用）：切到 System Prompt 与 工具声明 后 系统提示词 必须消失，切回 上下文 必须恢复它和工具定义。",
   "width": 1440,
   "height": 900,
   "steps": [
@@ -76,5 +76,12 @@
       },
       "expectStatus": 200
     }
-  ]
+  ],
+  "instance": "execute",
+  "seed": {
+    "prompt": "请用一句话说明你已就绪。",
+    "expect": "已就绪。这条回答来自验证用的替身模型，不消耗真实额度。",
+    "requestId": "vg-controls-context-turn",
+    "projectId": "verify"
+  }
 }
