@@ -54,13 +54,15 @@ type uiExecutor struct {
 
 var shellExecutor = &uiExecutor{}
 
-// claimShellOwner records the calling goroutine as the shell owner if nobody has
-// claimed it. A shell is built on the goroutine that will drive it, so its first
-// background load must not adopt ownership ahead of the renderer.
+// claimShellOwner records the calling goroutine as the shell owner. A shell is
+// built on the goroutine that will drive it, so the first background load must
+// not adopt ownership ahead of the renderer, and that goroutine's callbacks are
+// queued for it to run rather than handed to a second goroutine.
 func claimShellOwner() {
 	e := shellExecutor
 	e.mu.Lock()
 	e.owner = currentGoroutine()
+	e.adopted = true
 	e.queued = nil
 	e.mu.Unlock()
 }
@@ -158,6 +160,8 @@ func onUI(window *mygo.Window, apply func()) {
 		return
 	}
 	if e.isAdopted() {
+		// The owner drains these itself, so the write happens on the goroutine
+		// that also reads the state.
 		e.mu.Lock()
 		e.queued = append(e.queued, apply)
 		e.mu.Unlock()
@@ -188,9 +192,16 @@ func readShell[T any](window *mygo.Window, read func() T) T {
 	if e.isOwner() {
 		return read()
 	}
-	drainPosted()
-	if e.isOwner() {
-		return read()
+	if e.isAdopted() {
+		// Ownership belongs to a goroutine that is about to run this drain, so the
+		// read has to wait for it rather than start a second writer. Reading
+		// stale is the trap; posting the read itself is the fix.
+		var value T
+		e.mu.Lock()
+		e.queued = append(e.queued, func() { value = read() })
+		e.mu.Unlock()
+		drainPosted()
+		return value
 	}
 	e.start()
 	done := make(chan struct{})
