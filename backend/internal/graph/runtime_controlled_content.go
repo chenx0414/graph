@@ -51,9 +51,6 @@ func ControlledGatedProviderFetch(broker SendGate, request *http.Request, option
 		}
 		sent := false
 		release := func() {}
-		if options.AcquireSlot != nil {
-			release = options.AcquireSlot()
-		}
 		var response *http.Response
 		var failure error
 		func() {
@@ -66,6 +63,13 @@ func ControlledGatedProviderFetch(broker SendGate, request *http.Request, option
 					failure = fmt.Errorf("%v", recovered)
 				}
 			}()
+			// Waiting for an execution slot is inside this boundary on purpose: a
+			// wait can be abandoned (the turn was interrupted, its task closed),
+			// and the slot reports that shape as a panic. Outside the boundary it
+			// walked out of the provider fetch and took the daemon down with it.
+			if options.AcquireSlot != nil {
+				release = options.AcquireSlot()
+			}
 			result := broker.Dispatch(id, options.Reservation, func() any {
 				if options.OnRequest != nil {
 					options.OnRequest(id)
