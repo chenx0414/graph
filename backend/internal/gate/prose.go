@@ -28,6 +28,10 @@ func ScanProse(root string) ([]string, error) {
 		"vendor": true, "coverage": true, "target": true, ".git": true,
 		".emergence": true, "coordination": true, "state": true,
 		".run": true, // a verification run's generated prompt library is not repository prose
+		// A parallel checkout keeps its own copy of the repository, including the
+		// documents this gate already judged. Counting them here would report the
+		// same prose twice and fail on work that belongs to that checkout.
+		".worktrees": true,
 	}
 	found := []string{}
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
@@ -150,7 +154,13 @@ func StagedMarkdown(root string) ([]StagedMarkdownEntry, error) {
 		if !strings.HasSuffix(path, ".md") {
 			continue
 		}
-		entries = append(entries, StagedMarkdownEntry{Path: filepath.ToSlash(path), Added: status == "??" || strings.Contains(status, "A")})
+		slashed := filepath.ToSlash(path)
+		if strings.HasPrefix(slashed, ".worktrees/") {
+			// Another checkout of this repository keeps its work there; it is not
+			// markdown this tree is adding.
+			continue
+		}
+		entries = append(entries, StagedMarkdownEntry{Path: slashed, Added: status == "??" || strings.Contains(status, "A")})
 	}
 	return entries, nil
 }
