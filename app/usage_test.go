@@ -81,6 +81,7 @@ func TestShellOpensTheUsagePane(t *testing.T) {
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for state.usage.status != "" && time.Now().Before(deadline) {
+		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
 	if state.usage.status != "" {

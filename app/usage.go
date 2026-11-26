@@ -165,24 +165,32 @@ func newUsageState(address, token string) *usageState {
 }
 
 func (s *usageState) load() {
-	insights, err := s.api.get("/api/insights")
+	// The four reads happen here; the rows they produce are written where the
+	// renderer owns them.
+	insights, insightsErr := s.api.get("/api/insights")
+	usage, usageErr := s.api.get("/api/usage")
+	catalog, catalogErr := s.api.get("/api/catalog")
+	capabilities, capabilitiesErr := s.api.get("/api/capabilities/config")
+	onUI(s.window, func() {
+		s.applyUsage(insights, insightsErr, usage, usageErr, catalog, catalogErr, capabilities, capabilitiesErr)
+	})
+}
+
+func (s *usageState) applyUsage(insights []byte, err error, usage []byte, usageErr error, catalog []byte, catalogErr error, capabilities []byte, capabilitiesErr error) {
 	if err != nil {
 		s.status = readFailureText(err, "用量")
 		return
 	}
-	usage, err := s.api.get("/api/usage")
-	if err != nil {
-		s.status = readFailureText(err, "订阅额度")
+	if usageErr != nil {
+		s.status = readFailureText(usageErr, "订阅额度")
 		return
 	}
-	catalog, err := s.api.get("/api/catalog")
-	if err != nil {
-		s.status = readFailureText(err, "资源库")
+	if catalogErr != nil {
+		s.status = readFailureText(catalogErr, "资源库")
 		return
 	}
-	capabilities, err := s.api.get("/api/capabilities/config")
-	if err != nil {
-		s.status = readFailureText(err, "资源库")
+	if capabilitiesErr != nil {
+		s.status = readFailureText(capabilitiesErr, "资源库")
 		return
 	}
 	snapshot, err := parseUsage(insights, usage, catalog, capabilities)
