@@ -23,7 +23,7 @@ func (s *shellState) trajectoryData(ctx *ui.Context) *conversationTrajectory {
 		return state.data
 	}
 	if state.data != nil && !state.loading() {
-		go s.ensureTrajectory()
+		onUI(s.window, s.ensureTrajectory)
 	}
 	if state.failed != "" {
 		kit.Text(ctx, state.failed, t.Text.Sm).TextColor(t.Muted)
@@ -31,7 +31,7 @@ func (s *shellState) trajectoryData(ctx *ui.Context) *conversationTrajectory {
 		skeletonCard(ctx, 3, false, true)
 	}
 	if !state.loading() && (state.failed == "" || state.scopeKey != s.chatScope().key()) {
-		go s.ensureTrajectory()
+		onUI(s.window, s.ensureTrajectory)
 	}
 	return nil
 }

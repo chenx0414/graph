@@ -185,7 +185,7 @@ func (s *shellState) nodeContextCard(ctx *ui.Context) bool {
 	state := &s.trajectory
 	if state.data == nil || state.scopeKey != scope.key() {
 		if !state.loading() {
-			go s.ensureTrajectory()
+			onUI(s.window, s.ensureTrajectory)
 		}
 		return false
 	}
