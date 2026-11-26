@@ -298,7 +298,7 @@ func (s *shellState) agentDetailHeader(ctx *ui.Context, agent fleetAgent, data *
 				actions := ui.Row(ctx).Gap(th.Space(1)).AlignItems(ui.Center)
 				actions.Children(func() {
 					button := kit.Button(ctx, "打开聊天", kit.ButtonOpts{Variant: kit.Outline, Size: kit.SizeSm})
-					button.OnClick(func() { go s.openFleetAgentChat(agent) })
+					button.OnClick(func() { onUI(s.window, func() { s.openFleetAgentChat(agent) }) })
 				})
 			}
 		})
@@ -465,7 +465,7 @@ func (s *shellState) agentDetailRelations(ctx *ui.Context, data *fleetSnapshot, 
 			row := parent
 			button := kit.Button(ctx, "父级 "+fleetAgentLabel(row), kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeXs})
 			button.Label("关系 Agent " + fleetAgentLabel(row))
-			button.Justify(ui.Start).FillWidth().OnClick(func() { go s.openFleetAgentChat(row) })
+			button.Justify(ui.Start).FillWidth().OnClick(func() { onUI(s.window, func() { s.openFleetAgentChat(row) }) })
 		} else if agent.ParentID != "" {
 			kit.Text(ctx, "父级不在当前编队范围里。", t.Text.Xs).TextColor(t.Muted)
 		} else {
@@ -476,7 +476,7 @@ func (s *shellState) agentDetailRelations(ctx *ui.Context, data *fleetSnapshot, 
 			member := child
 			button := kit.Button(ctx, "下级 "+fleetAgentLabel(member), kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeXs})
 			button.Label("关系 Agent " + fleetAgentLabel(member))
-			button.Justify(ui.Start).FillWidth().OnClick(func() { go s.openFleetAgentChat(member) })
+			button.Justify(ui.Start).FillWidth().OnClick(func() { onUI(s.window, func() { s.openFleetAgentChat(member) }) })
 		}
 		if len(children) > 0 {
 			kit.Text(ctx, formatFleetCount(len(children))+" 个直接下级", t.Text.Xs).TextColor(t.Muted)

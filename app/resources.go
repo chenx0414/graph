@@ -253,42 +253,48 @@ func (s *resourceState) selectResource(id string) {
 }
 
 func (s *resourceState) saveEnv() {
-	ref := strings.TrimSpace(s.draftEnv)
-	value := strings.TrimSpace(s.draftValue)
-	if ref == "" {
-		s.status = "先选一个字段再保存"
-		s.frame()
-		return
-	}
-	if value == "" {
-		s.status = "这个字段的值不能为空"
-		s.frame()
+	// Called from a click on a bare goroutine: the fields it reads and settles
+	// belong to the shell's writer, and only the request leaves it.
+	ref := readShell(s.window, func() string { return strings.TrimSpace(s.draftEnv) })
+	value := readShell(s.window, func() string { return strings.TrimSpace(s.draftValue) })
+	secretsPath := readShell(s.window, func() string { return s.secretsPath })
+	if ref == "" || value == "" {
+		onUI(s.window, func() {
+			if ref == "" {
+				s.status = "先选一个字段再保存"
+			} else {
+				s.status = "这个字段的值不能为空"
+			}
+			s.frame()
+		})
 		return
 	}
 	body := map[string]any{"ref": ref, "value": value, "persisted": true}
+	var saveErr error
 	if _, err := s.api.postApp("/api/app/secret", s.appToken, body); err != nil {
-		s.status = "保存失败：" + err.Error()
-		s.frame()
-		return
+		saveErr = err
+	} else if secretsPath != "" {
+		saveErr = saveSecret(secretsPath, ref, &value)
 	}
-	if s.secretsPath != "" {
-		if err := saveSecret(s.secretsPath, ref, &value); err != nil {
-			s.status = "保存失败：daemon 已接受，但本机没能落盘（" + err.Error() + "）"
+	onUI(s.window, func() {
+		if saveErr != nil {
+			s.status = "保存失败：" + saveErr.Error()
 			s.frame()
 			return
 		}
-	}
-	if s.saved == nil {
-		s.saved = map[string]string{}
-	}
-	s.saved[ref] = value
-	s.draftValue = ""
-	s.status = ""
-	s.load()
-	s.frame()
+		if s.saved == nil {
+			s.saved = map[string]string{}
+		}
+		s.saved[ref] = value
+		s.draftValue = ""
+		s.status = ""
+		s.load()
+		s.frame()
+	})
 }
 
 func newResourceState(address, token string) *resourceState {
+	claimShellOwner()
 	return &resourceState{api: newAPIClient(address, token), status: "正在读取资源库…", openPath: mygo.Shell.OpenPath}
 }
 
@@ -341,12 +347,15 @@ func (s *resourceState) load() {
 }
 
 func (s *resourceState) refresh() {
-	if _, err := s.api.post("/api/catalog/refresh", nil); err != nil {
-		s.status = "刷新失败：" + err.Error()
-		s.frame()
-		return
-	}
-	s.load()
+	_, err := s.api.post("/api/catalog/refresh", nil)
+	onUI(s.window, func() {
+		if err != nil {
+			s.status = "刷新失败：" + err.Error()
+			s.frame()
+			return
+		}
+		s.load()
+	})
 }
 
 func (s *resourceState) reloadRoot() {
@@ -361,12 +370,16 @@ func (s *resourceState) reloadRoot() {
 }
 
 func (s *resourceState) openDirectory() {
-	if s.root == "" || s.openPath == nil {
-		s.status = "还不知道能力目录在哪"
-		s.frame()
+	root := readShell(s.window, func() string { return s.root })
+	openPath := readShell(s.window, func() func(string) error { return s.openPath })
+	if root == "" || openPath == nil {
+		onUI(s.window, func() {
+			s.status = "还不知道能力目录在哪"
+			s.frame()
+		})
 		return
 	}
-	if err := s.openPath(s.root); err != nil {
+	if err := openPath(root); err != nil {
 		s.status = "打不开能力目录：" + err.Error()
 		s.frame()
 		return

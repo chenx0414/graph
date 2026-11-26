@@ -67,18 +67,26 @@ func (s *resourceState) filteredRows() []resourceRow {
 }
 
 func (s *resourceState) openSource(row resourceRow) {
-	if row.source == "" || s.openPath == nil {
-		s.status = "这条资源没有本地目录"
-		s.frame()
+	// The shell opens a folder off the renderer, then records how it went where
+	// the page reads it.
+	openPath := readShell(s.window, func() func(string) error { return s.openPath })
+	if row.source == "" || openPath == nil {
+		onUI(s.window, func() {
+			s.status = "这条资源没有本地目录"
+			s.frame()
+		})
 		return
 	}
-	if err := s.openPath(row.source); err != nil {
-		s.status = "打不开资源目录：" + err.Error()
+	err := openPath(row.source)
+	onUI(s.window, func() {
+		if err != nil {
+			s.status = "打不开资源目录：" + err.Error()
+			s.frame()
+			return
+		}
+		s.status = ""
 		s.frame()
-		return
-	}
-	s.status = ""
-	s.frame()
+	})
 }
 
 func (s *resourceState) resourceHeader(ctx *ui.Context, t gwtheme.Tokens) {
