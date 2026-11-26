@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -288,12 +289,15 @@ func TestTheComposerSendsOnEnterAndBreaksLinesWithShift(t *testing.T) {
 }
 
 func TestTheModelModuleSwitchesTheConversationModel(t *testing.T) {
+	var postedMu sync.Mutex
 	posted := ""
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" && r.URL.Path == "/api/conversations/c1/model" {
 			payload := make([]byte, 2048)
 			read, _ := r.Body.Read(payload)
+			postedMu.Lock()
 			posted = string(payload[:read])
+			postedMu.Unlock()
 			w.Write([]byte(`{"model":"opencode-go:deepseek"}`))
 			return
 		}
@@ -320,14 +324,25 @@ func TestTheModelModuleSwitchesTheConversationModel(t *testing.T) {
 		t.Fatalf("click a thinking level: %v", err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for posted == "" && time.Now().Before(deadline) {
+	for {
+		postedMu.Lock()
+		sent := posted
+		postedMu.Unlock()
+		if sent != "" || !time.Now().Before(deadline) {
+			break
+		}
+		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
+	postedMu.Lock()
+	sent := posted
+	postedMu.Unlock()
 	for _, wanted := range []string{`"model":"opencode-go:deepseek"`, `"thinkingLevel":"medium"`, `"requestId"`} {
-		if !contains(posted, wanted) {
-			t.Fatalf("提交体缺 %q，实际 %q", wanted, posted)
+		if !contains(sent, wanted) {
+			t.Fatalf("提交体缺 %q，实际 %q", wanted, sent)
 		}
 	}
+	waitForUI()
 	if chat.currentModel != "opencode-go:deepseek" || chat.currentThinking != "medium" {
 		t.Fatalf("切模型后状态：model %q thinking %q", chat.currentModel, chat.currentThinking)
 	}

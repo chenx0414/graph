@@ -172,7 +172,10 @@ func (c *chatState) syncModelTelemetry(payload []byte) {
 }
 
 func (c *chatState) selectModel(model modelChoice, thinking string) {
-	if c.active == "" {
+	// The picker starts this on a bare goroutine: the request stays there, and the
+	// choice it settles is written where the composer reads it.
+	active := readShell(c.window, func() string { return c.active })
+	if active == "" {
 		return
 	}
 	if thinking == "" {
@@ -183,17 +186,20 @@ func (c *chatState) selectModel(model modelChoice, thinking string) {
 		"thinkingLevel": thinking,
 		"requestId":     requestID("native-model"),
 	}
-	if _, err := c.api.post("/api/conversations/"+c.active+"/model", body); err != nil {
-		c.status = "换模型失败：" + err.Error()
+	_, err := c.api.post("/api/conversations/"+active+"/model", body)
+	onUI(c.window, func() {
+		if err != nil {
+			c.status = "换模型失败：" + err.Error()
+			c.frame()
+			return
+		}
+		c.currentModel = model.id
+		c.currentThinking = thinking
+		c.modelTelemetryHold = 1
+		c.status = ""
+		c.problem = ""
 		c.frame()
-		return
-	}
-	c.currentModel = model.id
-	c.currentThinking = thinking
-	c.modelTelemetryHold = 1
-	c.status = ""
-	c.problem = ""
-	c.frame()
+	})
 }
 
 func (c *chatState) newAgentContext() {

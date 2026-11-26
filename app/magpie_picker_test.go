@@ -121,6 +121,8 @@ func TestChoosingAMagpieModelSendsItsID(t *testing.T) {
 	if !strings.Contains(selected[0], `"model":"magpie/codex/gpt-6-astra"`) {
 		t.Fatalf("the request carries the magpie model id, got %s", selected[0])
 	}
+	// The chosen model is written where the composer is rendered.
+	waitForUI()
 	if state.currentModel != "magpie/codex/gpt-6-astra" {
 		t.Fatalf("the session remembers the magpie model, got %q", state.currentModel)
 	}
