@@ -1,0 +1,15 @@
+{
+  "commit": "7af0c1838586886c2f1c1f67e91289b970cfcbec",
+  "endedAt": "2026-11-26T05:07:34Z",
+  "error": "step 7 (type): cannot focus \"消息\": ui: \"消息\" is not the input target at (526.4739, 806.5017); visible texts: 轨迹 | 编队 | 供应商 | 资源 | 装配 | 设置 | 会话列表标题 | 对话标题 | 对话标题名 | 白板标题 | 标签页 白板 | 白板 | …39 more… | + | + | − | − | 调整分区 | 跨 Agent 协作窗口 | 跨 Agent 协作 | 0 条协作 · 0 条泳道 | 没有匹配的协作事件。 | 模型选择器 | 全部供应商 | 全 | 还没有可用的模型 | 这份安装没有配置任何供应商凭据，模型列表是空的。 | 去供应商页添加 | 去供应商页添加 | Reasoning | Off | 理由 Default | Default",
+  "failed": 0,
+  "feature": "controls-model-picker",
+  "lane": "headless",
+  "ok": false,
+  "passed": 1,
+  "run": "7cd8575b",
+  "scenario": "controls-model-picker",
+  "skippedSteps": 0,
+  "startedAt": "2026-11-26T05:05:08Z",
+  "steps": 7
+}

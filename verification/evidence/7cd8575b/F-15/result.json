@@ -1,0 +1,7 @@
+{
+  "_graph": "graph:allow-large-file: generated journey evidence kept verbatim; generated data, not source",
+  "error": "cannot open the run's window for its shell surface: the isolated window never became visible: PERM_DENIED: Accessibility surface read failed for AXFrontmost",
+  "lane": "surface",
+  "ok": false,
+  "steps": null
+}
