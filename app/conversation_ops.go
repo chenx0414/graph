@@ -70,29 +70,47 @@ type modelListPayload struct {
 }
 
 func (c *chatState) loadModels() {
-	if c.modelsLoading || len(c.models) > 0 {
+	// A render asks for the model list, so the request cannot be made here: it
+	// would block the frame and then write the fields the frame is reading.
+	onUI(c.window, func() {
+		if c.modelsLoading || len(c.models) > 0 {
+			return
+		}
+		c.modelsLoading = true
+	})
+	if len(readShell(c.window, func() []modelChoice { return c.models })) > 0 {
 		return
 	}
-	c.modelsLoading = true
-	c.modelChoices()
-	c.modelsLoading = false
-	c.frame()
+	go func() {
+		choices, payload, err := c.fetchModels()
+		onUI(c.window, func() {
+			defer func() { c.modelsLoading = false }()
+			if err != nil {
+				c.status = err.Error()
+				return
+			}
+			if len(c.models) > 0 {
+				// Something filled the list while the request was out; keep it.
+				return
+			}
+			c.models = choices
+			_ = payload
+			c.frame()
+		})
+	}()
 }
 
-func (c *chatState) modelChoices() []modelChoice {
-	if len(c.models) > 0 {
-		return c.models
-	}
+// fetchModels reads the settings document off the renderer.
+func (c *chatState) fetchModels() ([]modelChoice, []byte, error) {
 	payload, err := c.api.get("/api/settings")
 	if err != nil {
-		c.status = readFailureText(err, "模型列表")
-		return nil
+		return nil, nil, errStatus(readFailureText(err, "模型列表"))
 	}
 	var listed modelListPayload
 	if err := json.Unmarshal(payload, &listed); err != nil {
-		c.status = "模型列表不是预期的 JSON：" + err.Error()
-		return nil
+		return nil, nil, errStatus("模型列表不是预期的 JSON：" + err.Error())
 	}
+	var choices []modelChoice
 	for _, model := range listed.Models {
 		if model.ID == "" {
 			continue
@@ -103,9 +121,9 @@ func (c *chatState) modelChoices() []modelChoice {
 				choice.available = append(choice.available, option.Level)
 			}
 		}
-		c.models = append(c.models, choice)
+		choices = append(choices, choice)
 	}
-	return c.models
+	return choices, payload, nil
 }
 
 func shortModel(id string) string {
@@ -184,4 +202,14 @@ func (c *chatState) newAgentContext() {
 	}
 	c.status = "已开启新的 Agent 上下文"
 	c.frame()
+}
+
+// modelChoices answers from what is already loaded. A caller that needs the list
+// starts loadModels and reads again on the next frame.
+func (c *chatState) modelChoices() []modelChoice {
+	if len(c.models) > 0 {
+		return c.models
+	}
+	c.loadModels()
+	return readShell(c.window, func() []modelChoice { return c.models })
 }

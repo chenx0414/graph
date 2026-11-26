@@ -57,6 +57,11 @@ func TestThePickerFiltersByTheMagpieProvider(t *testing.T) {
 	state := newChatState(server.URL, "")
 	state.active = "c1"
 	state.loadModels()
+	deadline := time.Now().Add(2 * time.Second)
+	for len(state.models) == 0 && time.Now().Before(deadline) {
+		waitForUI()
+		time.Sleep(time.Millisecond)
+	}
 	state.modelPicker.open = true
 	state.modelPicker.provider = "codex"
 
@@ -84,13 +89,20 @@ func TestChoosingAMagpieModelSendsItsID(t *testing.T) {
 	state := newChatState(server.URL, "")
 	state.active = "c1"
 	state.loadModels()
+	// The list arrives from a request now, so the test waits for the load it
+	// started instead of assuming it finished inline.
+	deadline := time.Now().Add(2 * time.Second)
+	for len(state.models) == 0 && time.Now().Before(deadline) {
+		waitForUI()
+		time.Sleep(time.Millisecond)
+	}
 	state.modelPicker.provider = "codex"
 	models := state.pickerModels()
 	if len(models) == 0 {
 		t.Fatalf("the codex filter has models, got %+v", state.models)
 	}
 	state.chooseModel(models[0])
-	deadline := time.Now().Add(5 * time.Second)
+	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		mock.mu.Lock()
 		done := len(mock.selected) > 0
