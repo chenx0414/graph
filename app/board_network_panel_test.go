@@ -321,7 +321,7 @@ func TestTheNetworkCanvasDrawsItsEdges(t *testing.T) {
 		Points: [][2]float32{{20, 60}, {200, 60}},
 		Color:  ui.RGB(0, 220, 0),
 	}}
-	tester := ui.NewTester(func(ctx *ui.Context) {
+	tester := newTester(func(ctx *ui.Context) {
 		shell.infiniteView(ctx, view, 320, 120, edges, nil, func(ctx *ui.Context, view *infiniteCanvas) {})
 	}, 480, 240)
 	frames(tester)

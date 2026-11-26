@@ -8,13 +8,13 @@ import (
 
 func TestTheContextCardStopsShrinkingBeforeItsLegendTruncates(t *testing.T) {
 	wide := contextOverviewShell(t, contextOverviewSettings)
-	wideTester := frames(ui.NewTester(wide.view, 1440, 900))
+	wideTester := frames(newTester(wide.view, 1440, 900))
 	wideCard, ok := wideTester.Find("当前上下文窗口")
 	if !ok {
 		t.Fatalf("the context card never rendered, texts %q", wideTester.Texts())
 	}
 	narrow := contextOverviewShell(t, contextOverviewSettings)
-	narrowTester := frames(ui.NewTester(narrow.view, 1280, 800))
+	narrowTester := frames(newTester(narrow.view, 1280, 800))
 	narrowCard, ok := narrowTester.Find("当前上下文窗口")
 	if !ok {
 		t.Fatalf("the context card never rendered at 1280, texts %q", narrowTester.Texts())
@@ -35,7 +35,7 @@ func TestTheContextCardStopsShrinkingBeforeItsLegendTruncates(t *testing.T) {
 func TestALongFlowCardKeepsABasicWidthAndScrolls(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
 	state.openModule("fleet")
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	for attempt := 0; attempt < 40 && state.fleet.data == nil && state.fleet.failed == ""; attempt++ {
 		tester.Frame()
 	}
@@ -51,7 +51,7 @@ func TestALongFlowCardKeepsABasicWidthAndScrolls(t *testing.T) {
 
 func TestTheContextCardKeepsRoomForItsWholeContent(t *testing.T) {
 	state := contextOverviewShell(t, contextOverviewSettings)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	card, ok := tester.Find("当前上下文窗口")
 	if !ok {
 		t.Fatalf("the context card never rendered, texts %q", tester.Texts())
@@ -73,7 +73,7 @@ func TestTheContextCardKeepsRoomForItsWholeContent(t *testing.T) {
 func TestTheContextCardKeepsItsLegendInsideAtEveryWindowSize(t *testing.T) {
 	for _, size := range [][2]int{{1440, 900}, {1280, 800}} {
 		state := contextOverviewShell(t, contextOverviewSettings)
-		tester := frames(ui.NewTester(state.view, size[0], size[1]))
+		tester := frames(newTester(state.view, size[0], size[1]))
 		card, ok := tester.Find("当前上下文窗口")
 		if !ok {
 			t.Fatalf("%dx%d: the context card never rendered, texts %q", size[0], size[1], tester.Texts())
@@ -96,7 +96,7 @@ func TestTheContextCardKeepsItsLegendInsideAtEveryWindowSize(t *testing.T) {
 func TestTheCollaborationCardKeepsRoomForBothLanesAtEveryWindowSize(t *testing.T) {
 	for _, size := range [][2]int{{1598, 928}, {1440, 900}, {1280, 800}} {
 		state := contextOverviewShell(t, contextOverviewSettings)
-		tester := frames(ui.NewTester(state.view, size[0], size[1]))
+		tester := frames(newTester(state.view, size[0], size[1]))
 		card, ok := tester.Find("跨 Agent 协作窗口")
 		if !ok {
 			t.Fatalf("%dx%d: the collaboration card never rendered, texts %q", size[0], size[1], tester.Texts())
@@ -111,7 +111,7 @@ func TestTheCollaborationCardKeepsRoomForBothLanesAtEveryWindowSize(t *testing.T
 func TestEveryModuleCardKeepsItsHeaderTuckedAwayUntilHover(t *testing.T) {
 	state := contextOverviewShell(t, contextOverviewSettings)
 	state.openModule("trajectory")
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	shown := func() bool {
 		for _, text := range tester.Texts() {
 			if text == "上下文统计" {
@@ -139,7 +139,7 @@ func TestEveryCardKindDeclaresAMinimumHeight(t *testing.T) {
 	state := fourPaneShell(t)
 	var missing []string
 	var tooSmall []string
-	frames(ui.NewTester(func(ctx *ui.Context) {
+	frames(newTester(func(ctx *ui.Context) {
 		for _, kind := range boardPanelAllKinds() {
 			panel := &boardPanel{ID: kind, Kind: kind}
 			height := state.boardPanelMinHeight(ctx, panel)
@@ -163,14 +163,14 @@ func TestEveryCardKindDeclaresAMinimumHeight(t *testing.T) {
 
 func TestTheBoardScrollsInsteadOfSqueezingCardsBelowTheirMinimum(t *testing.T) {
 	state := contextOverviewShell(t, contextOverviewSettings)
-	frames(ui.NewTester(state.view, 1024, 640))
+	frames(newTester(state.view, 1024, 640))
 	for _, kind := range []string{"context-overview", "agent-network", "fleet-collaboration"} {
 		card, ok := state.board.rects[kind]
 		if !ok {
 			t.Fatalf("%s never laid out at the minimum window, rects %+v", kind, state.board.rects)
 		}
 		var want float32
-		frames(ui.NewTester(func(ctx *ui.Context) {
+		frames(newTester(func(ctx *ui.Context) {
 			want = state.boardPanelMinHeight(ctx, &boardPanel{ID: kind, Kind: kind})
 			ui.Column(ctx).Fill()
 		}, 100, 100))
@@ -183,7 +183,7 @@ func TestTheBoardScrollsInsteadOfSqueezingCardsBelowTheirMinimum(t *testing.T) {
 func TestTheFleetPageScrollsInsteadOfSqueezingCardsBelowTheirMinimum(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
 	state.openModule("fleet")
-	tester := frames(ui.NewTester(state.view, 1024, 640))
+	tester := frames(newTester(state.view, 1024, 640))
 	for attempt := 0; attempt < 40 && state.fleet.data == nil && state.fleet.failed == ""; attempt++ {
 		tester.Frame()
 	}
@@ -194,7 +194,7 @@ func TestTheFleetPageScrollsInsteadOfSqueezingCardsBelowTheirMinimum(t *testing.
 			t.Fatalf("%s never laid out at the minimum window, rects %+v", kind, state.board.rects)
 		}
 		var want float32
-		frames(ui.NewTester(func(ctx *ui.Context) {
+		frames(newTester(func(ctx *ui.Context) {
 			want = state.boardPanelMinHeight(ctx, &boardPanel{ID: kind, Kind: kind})
 			ui.Column(ctx).Fill()
 		}, 100, 100))

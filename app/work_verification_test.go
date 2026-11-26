@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/egoist/mygo/ui"
 )
 
 func TestDesktopConfirmsTheVerificationDraftItShows(t *testing.T) {
@@ -28,7 +26,7 @@ func TestDesktopConfirmsTheVerificationDraftItShows(t *testing.T) {
 	defer server.Close()
 	chat := newChatState(server.URL, "tok")
 	chat.open("c1")
-	tester := ui.NewTester(chat.view, 720, 650)
+	tester := newTester(chat.view, 720, 650)
 	tester.Frame()
 	for _, label := range []string{"保留等号", "解析 X=a=b 时保留 a=b", "确认草稿 · main"} {
 		if !tester.HasText(label) {

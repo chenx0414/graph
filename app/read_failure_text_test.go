@@ -157,7 +157,7 @@ func TestTheTrajectoryPanelNeverShowsTheRawTransportError(t *testing.T) {
 		t.Fatalf("the panel names what it could not read, got %q", failed)
 	}
 
-	tester := ui.NewTester(func(ctx *ui.Context) { shell.panelTrajectory(ctx) }, 900, 600)
+	tester := newTester(func(ctx *ui.Context) { shell.panelTrajectory(ctx) }, 900, 600)
 	frames(tester)
 	for _, text := range tester.Texts() {
 		for _, forbidden := range []string{"http://", "127.0.0.1", "EOF"} {

@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/egoist/mygo/ui"
 )
 
 func artifactsShell(t *testing.T, state *chatState) *shellState {
@@ -50,7 +48,7 @@ func TestArtifactsModuleListsAndPreviews(t *testing.T) {
 		t.Fatalf("label %q", artifactLabel(state.artifacts[0]))
 	}
 	shell := artifactsShell(t, state)
-	tester := ui.NewTester(shell.view, 1100, 760)
+	tester := newTester(shell.view, 1100, 760)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
@@ -91,7 +89,7 @@ func TestArtifactListStopsAtTheLimit(t *testing.T) {
 	state.status = ""
 	state.artifacts = rows
 	shell := artifactsShell(t, state)
-	tester := ui.NewTester(shell.view, 1100, 760)
+	tester := newTester(shell.view, 1100, 760)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
@@ -156,7 +154,7 @@ func TestExportWritesTheWholeArtifactNotThePreview(t *testing.T) {
 		t.Fatalf("status %q", state.status)
 	}
 	shell := artifactsShell(t, state)
-	tester := ui.NewTester(shell.view, 1100, 760)
+	tester := newTester(shell.view, 1100, 760)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}

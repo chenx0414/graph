@@ -64,7 +64,7 @@ func assemblyServer(t *testing.T, actions map[string]int, bodies *[]string) *htt
 }
 
 func assemblyTester(state *assemblyState) *ui.Tester {
-	tester := ui.NewTester(state.view, 1100, 820)
+	tester := newTester(state.view, 1100, 820)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}

@@ -5,8 +5,6 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
-
-	"github.com/egoist/mygo/ui"
 )
 
 var settingsFixtures = map[string]string{
@@ -63,7 +61,7 @@ func TestSettingsPaneRendersAndArchivesAProject(t *testing.T) {
 	if state.status != "" {
 		t.Fatalf("status %q", state.status)
 	}
-	tester := ui.NewTester(state.view, 820, 620)
+	tester := newTester(state.view, 820, 620)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
@@ -96,7 +94,7 @@ func TestShellSwitchesBetweenChatsAndSettings(t *testing.T) {
 	defer server.Close()
 
 	state := newShellState(server.URL, "tok")
-	tester := ui.NewTester(state.view, 1280, 800)
+	tester := newTester(state.view, 1280, 800)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
@@ -134,7 +132,7 @@ func TestTheSettingsPageFollowsTheGodwitLayout(t *testing.T) {
 
 	state := newSettingsState(server.URL, "tok")
 	state.load()
-	tester := ui.NewTester(state.view, 1200, 800)
+	tester := newTester(state.view, 1200, 800)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
@@ -178,7 +176,7 @@ func TestTheRunSettingsOwnTheExtensionAutoUpdate(t *testing.T) {
 
 	state := newSettingsState(server.URL, "tok")
 	state.load()
-	tester := ui.NewTester(state.view, 900, 700)
+	tester := newTester(state.view, 900, 700)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}

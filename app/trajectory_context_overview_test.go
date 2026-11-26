@@ -44,7 +44,7 @@ func contextOverviewShell(t *testing.T, settings string) *shellState {
 	shell.chat.currentModel = "command-goat:deepseek/deepseek-v4.1-flash"
 	shell.ensureTrajectory()
 	shell.ensureModelMeta()
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	deadline := time.Now().Add(2 * time.Second)
 	for (shell.trajectory.data == nil || shell.modelMeta == nil) && time.Now().Before(deadline) {
 		tester.Frame()
@@ -58,7 +58,7 @@ func contextOverviewShell(t *testing.T, settings string) *shellState {
 func TestTheContextOverviewCardMirrorsTheContextComposition(t *testing.T) {
 	shell := contextOverviewShell(t, contextOverviewSettings)
 	shell.openModule("trajectory")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	for _, wanted := range []string{"当前上下文", "489.3k", "1.0M tokens", "48.9%", "上下文已用",
 		"系统提示词", "≈2.5k", "1%", "工具定义", "≈11.4k", "2%", "用户消息", "≈351", "0%",
 		"注入内容", "≈7.3k", "助手消息", "≈289.3k", "59%", "工具结果", "≈178.5k", "36%"} {
@@ -71,7 +71,7 @@ func TestTheContextOverviewCardMirrorsTheContextComposition(t *testing.T) {
 func TestTheContextOverviewLegendKeepsTheCategoryColors(t *testing.T) {
 	shell := contextOverviewShell(t, contextOverviewSettings)
 	shell.openModule("trajectory")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	img := tester.Image()
 	colors := []ui.Color{palette.Indigo500.Color(), palette.Amber500.Color(), palette.Green500.Color(),
 		palette.Purple500.Color(), palette.Blue500.Color(), palette.Teal500.Color()}
@@ -85,7 +85,7 @@ func TestTheContextOverviewLegendKeepsTheCategoryColors(t *testing.T) {
 func TestTheContextOverviewFallsBackToAnEstimateWithoutAWindow(t *testing.T) {
 	shell := contextOverviewShell(t, `{"models":[]}`)
 	shell.openModule("trajectory")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	if !tester.HasText("tokens（估算）") {
 		t.Fatalf("without a window the card estimates, texts %q", tester.Texts())
 	}
@@ -115,7 +115,7 @@ func TestTheContextOverviewPartsKeepTheCategoryOrder(t *testing.T) {
 func TestTheContextOverviewSpansTheWholeRow(t *testing.T) {
 	shell := contextOverviewShell(t, contextOverviewSettings)
 	shell.openModule("trajectory")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	card, ok := tester.Find("当前上下文窗口")
 	if !ok {
 		t.Fatalf("the context overview never rendered, texts %q", tester.Texts())
@@ -161,13 +161,13 @@ func TestTheContextOverviewPrefersTheLatestRequestComposition(t *testing.T) {
 	shell.chat.currentModel = "command-goat:deepseek/deepseek-v4.1-flash"
 	shell.ensureTrajectory()
 	shell.ensureModelMeta()
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	deadline := time.Now().Add(2 * time.Second)
 	for (shell.trajectory.data == nil || shell.modelMeta == nil) && time.Now().Before(deadline) {
 		tester.Frame()
 	}
 	shell.openModule("trajectory")
-	tester = frames(ui.NewTester(shell.view, 1440, 900))
+	tester = frames(newTester(shell.view, 1440, 900))
 	if tester.HasText("≈9.0k") {
 		t.Fatalf("the card uses the cumulative composition, texts %q", tester.Texts())
 	}
@@ -200,7 +200,7 @@ func TestTheModelMetaMatchesProviderQualifiedIDs(t *testing.T) {
 func TestTheContextCardFitsItsLegendAtTheDefaultWidth(t *testing.T) {
 	shell := contextOverviewShell(t, contextOverviewSettings)
 	const width float32 = 760
-	tester := ui.NewTester(func(ctx *ui.Context) {
+	tester := newTester(func(ctx *ui.Context) {
 		ui.Box(ctx).FillWidth().Height(220).Children(func() {
 			shell.panelContextOverview(ctx)
 		})

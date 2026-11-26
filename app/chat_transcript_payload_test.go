@@ -61,7 +61,7 @@ func TestAToolPanelShowsTheStringErrorText(t *testing.T) {
 		t.Fatalf("the transcript parses: %v", err)
 	}
 	state := &chatState{expanded: map[string]bool{}}
-	tester := ui.NewTester(func(ctx *ui.Context) {
+	tester := newTester(func(ctx *ui.Context) {
 		gwtheme.Apply(ctx, gwtheme.Light())
 		state.messages = messages
 		state.view(ctx)

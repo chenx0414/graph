@@ -3,8 +3,6 @@ package main
 import (
 	"testing"
 	"time"
-
-	"github.com/egoist/mygo/ui"
 )
 
 func activityTool(name, text, state string) transcriptMessage {
@@ -58,7 +56,7 @@ func TestTheToolActivityStartsFoldedUnderItsDurationHeader(t *testing.T) {
 	second := activityTool("bash", "bash: go test ./...", "done")
 	second.CreatedAt = 1_181_000
 	state.messages = []transcriptMessage{first, second}
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	if !tester.HasText("用时 3m 1s") {
 		t.Fatalf("the run shows its duration header, texts %q", tester.Texts())
 	}
@@ -102,7 +100,7 @@ func TestAToolRowExpandsIntoTheCodexPanel(t *testing.T) {
 	message.Data.ToolCallID = "call-1"
 	message.CreatedAt = 1_000_000
 	state.messages = []transcriptMessage{message}
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	if err := tester.Click("1 次工具调用"); err != nil {
 		t.Fatalf("open the activity: %v", err)
 	}
@@ -132,7 +130,7 @@ func TestAToolRowShowsItsArgumentsAndReturnValue(t *testing.T) {
 	message.Data.ToolCallID = "call-2"
 	message.CreatedAt = 1_000_000
 	state.messages = []transcriptMessage{message}
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	if err := tester.Click("1 次工具调用"); err != nil {
 		t.Fatalf("open the activity: %v", err)
 	}
@@ -156,7 +154,7 @@ func TestAShellRowKeepsItsCommandOutOfTheArgumentsBlock(t *testing.T) {
 	message.Data.ToolCallID = "call-3"
 	message.CreatedAt = 1_000_000
 	state.messages = []transcriptMessage{message}
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	if err := tester.Click("1 次工具调用"); err != nil {
 		t.Fatalf("open the activity: %v", err)
 	}
@@ -183,7 +181,7 @@ func TestAToolRowFallsBackToItsArgumentsForTheCommand(t *testing.T) {
 	message.Data.ToolCallID = "call-4"
 	message.CreatedAt = 1_000_000
 	state.messages = []transcriptMessage{message}
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	if err := tester.Click("1 次工具调用"); err != nil {
 		t.Fatalf("open the activity: %v", err)
 	}
@@ -206,7 +204,7 @@ func TestAGroupedCommandRowDoesNotRepeatItsArguments(t *testing.T) {
 	second.Data.ToolCallID = "call-6"
 	second.CreatedAt = 1_001_000
 	state.messages = []transcriptMessage{first, second}
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	if err := tester.Click("用时 1s"); err != nil {
 		t.Fatalf("open the activity: %v", err)
 	}

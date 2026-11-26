@@ -137,7 +137,7 @@ func fleetGraphTester(t *testing.T, mock *fleetGraphMock, data *fleetSnapshot) (
 		Layout: boardNode{Kind: "panel", PanelID: "graph-dag"},
 	})
 	state.board.active = len(state.board.pages) - 1
-	tester := ui.NewTester(state.view, 1440, 900)
+	tester := newTester(state.view, 1440, 900)
 	tester.Frame()
 	for attempt := 0; attempt < 500 && state.graph.data == nil && state.graph.failed == ""; attempt++ {
 		runtime.Gosched()

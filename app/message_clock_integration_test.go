@@ -3,8 +3,6 @@ package main
 import (
 	"testing"
 	"time"
-
-	"github.com/egoist/mygo/ui"
 )
 
 // TestMessageClockRendersRelativeDates is the user-visible half of wish 5 for
@@ -32,7 +30,7 @@ func TestMessageBubblesShowRelativeDate(t *testing.T) {
 		{Role: "assistant", Text: "一句回答", CreatedAt: old},
 		{Role: "user", Text: "一句提问", CreatedAt: old},
 	}
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	if !tester.HasText("2001年3月14日 15:04") {
 		t.Fatalf("message bubbles must show a dated timestamp, texts %q", tester.Texts())
 	}
@@ -40,7 +38,7 @@ func TestMessageBubblesShowRelativeDate(t *testing.T) {
 	state.messages = []transcriptMessage{
 		{Role: "assistant", Text: "没有时间的回答", CreatedAt: 0},
 	}
-	tester = frames(ui.NewTester(state.view, 760, 620))
+	tester = frames(newTester(state.view, 760, 620))
 	for _, text := range tester.Texts() {
 		if text == "00:00" || text == "08:00" {
 			t.Fatalf("a bubble without a timestamp must not invent one, texts %q", tester.Texts())

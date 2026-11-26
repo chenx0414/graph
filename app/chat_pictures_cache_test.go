@@ -80,7 +80,7 @@ func TestAPictureBiggerThanTheLimitIsStillDrawn(t *testing.T) {
 	// One frame, counted from zero: this asserts the picture is drawn, not how many frames the
 	// tester settles.
 	chat.pictureCount = 0
-	tester := ui.NewTester(func(ctx *ui.Context) {
+	tester := newTester(func(ctx *ui.Context) {
 		chat.pictureCount = 0
 		chat.drawPicture(ctx, big)
 	}, 600, 400)

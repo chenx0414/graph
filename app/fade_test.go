@@ -26,7 +26,7 @@ func fadeInsetTester(t *testing.T) (*shellState, *ui.Tester) {
 			})
 		})
 	}
-	return state, frames(ui.NewTester(view, 1440, 900))
+	return state, frames(newTester(view, 1440, 900))
 }
 
 func fadeCard(t *testing.T, tester *ui.Tester) ui.Rect {

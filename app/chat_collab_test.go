@@ -2,8 +2,6 @@ package main
 
 import (
 	"testing"
-
-	"github.com/egoist/mygo/ui"
 )
 
 func supervisorNotice(text string) transcriptMessage {
@@ -21,7 +19,7 @@ func TestAgentMessagesStayOutOfTheChatFlow(t *testing.T) {
 		supervisorNotice(supervisorNoticeText),
 		{ID: "a1", Role: "assistant", Kind: "chat", Text: "侦察已经完成。", State: "done", CreatedAt: 1_010_000},
 	}
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	if !tester.HasText("帮我看一下进度") {
 		t.Fatalf("the user message stays in the chat, texts %q", tester.Texts())
 	}
@@ -49,7 +47,7 @@ func TestAnAgentMessageNeverCountsAsTheFinalAnswer(t *testing.T) {
 	if len(collab) != 1 || len(spoken) != 2 {
 		t.Fatalf("the agent message leaves the chat flow, spoken %d collab %d", len(spoken), len(collab))
 	}
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	if !tester.HasText("1 次工具调用") {
 		t.Fatalf("a trailing agent message keeps the tool run unfurled, texts %q", tester.Texts())
 	}
@@ -58,7 +56,7 @@ func TestAnAgentMessageNeverCountsAsTheFinalAnswer(t *testing.T) {
 func TestAChatWithOnlyAgentMessagesPointsAtTheFleetTab(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
 	state.messages = []transcriptMessage{supervisorNotice(supervisorNoticeText)}
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	if tester.HasText("跨 Agent 协作") {
 		t.Fatalf("the chat window keeps no collaboration card, texts %q", tester.Texts())
 	}

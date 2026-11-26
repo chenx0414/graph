@@ -70,7 +70,7 @@ func TestChatStateReadsTheDaemonAndRenders(t *testing.T) {
 	if len(state.messages) != 2 {
 		t.Fatalf("messages %+v", state.messages)
 	}
-	tester := ui.NewTester(state.view, 720, 620)
+	tester := newTester(state.view, 720, 620)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
@@ -269,7 +269,7 @@ func TestToolRunsExpandAndCollapse(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
 	state.messages = messages
 	state.status = ""
-	tester := ui.NewTester(state.view, 700, 500)
+	tester := newTester(state.view, 700, 500)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
@@ -339,7 +339,7 @@ func TestTheQuestionModuleShowsTheQuestionAndAnswersIt(t *testing.T) {
 	state.chat = chat
 	state.activeID = "c1"
 	state.board.pages = []boardPage{{ID: "board", Title: boardDefaultTitle, Panels: []boardPanel{{ID: "questions", Kind: "questions"}}, Layout: boardNode{Kind: "panel", PanelID: "questions"}}}
-	tester := ui.NewTester(state.view, 1100, 760)
+	tester := newTester(state.view, 1100, 760)
 	frames(tester)
 	if !tester.HasText("需要你决定 · recovery") || !tester.HasText("A 路线") {
 		t.Fatalf("the question module must render, texts %q", tester.Texts())
@@ -367,7 +367,7 @@ func TestChatBubblesCarryATimeAndACopyButton(t *testing.T) {
 		{Role: "assistant", Text: "一句回答", CreatedAt: stamp},
 		{Role: "user", Text: "一句提问", CreatedAt: stamp},
 	}
-	tester := ui.NewTester(state.view, 760, 620)
+	tester := newTester(state.view, 760, 620)
 	frames(tester)
 	if !tester.HasText("09:05") {
 		t.Fatalf("a bubble must show the time it was sent, texts %q", tester.Texts())
@@ -393,11 +393,11 @@ func TestTheUserBubbleIsLightBlue(t *testing.T) {
 		{Role: "assistant", Text: "一句回答", CreatedAt: time.Now().UnixMilli()},
 		{Role: "user", Text: "一句提问", CreatedAt: time.Now().UnixMilli()},
 	}
-	light := frames(ui.NewTester(state.view, 760, 620))
+	light := frames(newTester(state.view, 760, 620))
 	if got := countColor(light.Image(), userBubble(gwtheme.Light())); got < 300 {
 		t.Fatalf("the user bubble takes the reference blue, %d pixels", got)
 	}
-	dark := ui.NewTester(state.view, 760, 620)
+	dark := newTester(state.view, 760, 620)
 	dark.SetDark(true)
 	frames(dark)
 	if got := countColor(dark.Image(), userBubble(gwtheme.Dark())); got < 300 {
@@ -411,7 +411,7 @@ func TestTheChatOffersABackToLatestButtonWhenScrolledUp(t *testing.T) {
 	for index := 0; index < 40; index++ {
 		state.messages = append(state.messages, transcriptMessage{ID: "m" + strconv.Itoa(index), Role: "assistant", Text: "第" + strconv.Itoa(index) + "条"})
 	}
-	tester := frames(ui.NewTester(state.view, 700, 500))
+	tester := frames(newTester(state.view, 700, 500))
 	if tester.HasText("回到最新") {
 		t.Fatalf("at the end no back-to-latest button shows, texts %q", tester.Texts())
 	}
@@ -440,7 +440,7 @@ func TestAssistantMessagesAreFlatMarkdownWithActions(t *testing.T) {
 		{Role: "assistant", Text: "一句回答", CreatedAt: time.Now().UnixMilli()},
 		{Role: "user", Text: "一句提问", CreatedAt: time.Now().UnixMilli()},
 	}
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	for _, label := range []string{"赞", "踩", "朗读", "更多"} {
 		if !tester.HasText(label) {
 			t.Fatalf("the assistant message carries the reference actions, missing %q, texts %q", label, tester.Texts())

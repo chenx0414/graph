@@ -62,7 +62,7 @@ func pickerChat(t *testing.T) (*chatState, *pickerMock) {
 
 func TestTheModelPickerShowsTheModelsAndTheReasoning(t *testing.T) {
 	state, _ := pickerChat(t)
-	tester := frames(ui.NewTester(state.view, 900, 700))
+	tester := frames(newTester(state.view, 900, 700))
 	for !tester.HasText("Reasoning") {
 		tester.Frame()
 		if len(tester.Texts()) == 0 {
@@ -82,7 +82,7 @@ func TestTheModelPickerShowsTheModelsAndTheReasoning(t *testing.T) {
 
 func TestPickingAReasoningLevelChangesTheModel(t *testing.T) {
 	state, mock := pickerChat(t)
-	tester := frames(ui.NewTester(state.view, 900, 700))
+	tester := frames(newTester(state.view, 900, 700))
 	if err := tester.Click("理由 High"); err != nil {
 		t.Fatalf("pick the high level: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestPickingAReasoningLevelChangesTheModel(t *testing.T) {
 func TestHidingAProviderFiltersThePicker(t *testing.T) {
 	state, _ := pickerChat(t)
 	state.providerOn = func(id string) bool { return id != "opencode-go" }
-	tester := frames(ui.NewTester(state.view, 900, 700))
+	tester := frames(newTester(state.view, 900, 700))
 	if tester.HasText("longcat-2.5-preview-free") {
 		t.Fatalf("a disabled provider keeps its models out, texts %q", tester.Texts())
 	}
@@ -122,7 +122,7 @@ func TestHidingAProviderFiltersThePicker(t *testing.T) {
 
 func TestShowMoreRevealsTheRest(t *testing.T) {
 	state, _ := pickerChat(t)
-	tester := frames(ui.NewTester(state.view, 900, 700))
+	tester := frames(newTester(state.view, 900, 700))
 	if err := tester.Click("Show more"); err != nil {
 		t.Fatalf("expand the list: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestShowMoreRevealsTheRest(t *testing.T) {
 func TestTheModelChipOpensThePicker(t *testing.T) {
 	state, _ := pickerChat(t)
 	state.modelPicker.open = false
-	tester := frames(ui.NewTester(state.view, 900, 700))
+	tester := frames(newTester(state.view, 900, 700))
 	if err := tester.Click("模型"); err != nil {
 		t.Fatalf("click the model chip: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestTheModelChipOpensThePicker(t *testing.T) {
 func TestCommandNumberSelectsTheModelTheChipAdvertises(t *testing.T) {
 	state, mock := pickerChat(t)
 	state.modelPicker.open = false
-	tester := frames(ui.NewTester(state.view, 900, 700))
+	tester := frames(newTester(state.view, 900, 700))
 	if err := tester.Click("模型"); err != nil {
 		t.Fatalf("open the picker: %v", err)
 	}

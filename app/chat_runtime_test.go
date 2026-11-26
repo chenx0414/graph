@@ -3,8 +3,6 @@ package main
 import (
 	"testing"
 	"time"
-
-	"github.com/egoist/mygo/ui"
 )
 
 func TestTheRunClockKeepsTickingWhileToolsRun(t *testing.T) {
@@ -14,7 +12,7 @@ func TestTheRunClockKeepsTickingWhileToolsRun(t *testing.T) {
 	running.Data.ToolCallID = "call-live"
 	first.Data.ToolCallID = "call-first"
 	state.messages = []transcriptMessage{first, running}
-	tester := ui.NewTester(state.view, 760, 620)
+	tester := newTester(state.view, 760, 620)
 	tester.Frame()
 	start := tester.Now()
 	state.messages[0].CreatedAt = start.Add(-time.Second).UnixMilli()

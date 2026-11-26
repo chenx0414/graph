@@ -7,8 +7,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/egoist/mygo/ui"
 )
 
 // 20 tasks including terminal ones -- the old fleet panel would only show 12.
@@ -113,7 +111,7 @@ func TestFleetHistoryPageListsAllTasksAndOpensGraph(t *testing.T) {
 	defer cleanup()
 	state.openFleetHistoryPage("p1")
 	state.ensureFleetHistory()
-	tester := frames(ui.NewTester(state.view, 1280, 800))
+	tester := frames(newTester(state.view, 1280, 800))
 	all := strings.Join(tester.Texts(), "|")
 	// No 12-row cut: the header reports all 15 tasks of the project, and a
 	// terminal task (completed/stopped) is on screen like any other.

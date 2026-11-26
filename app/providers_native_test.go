@@ -5,8 +5,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/egoist/mygo/ui"
 )
 
 const nativeProvidersConfig = `{"revision":3,"config":{
@@ -81,7 +79,7 @@ func TestTheProvidersPageWorksWithoutMagpie(t *testing.T) {
 	server := newNativeProviderServer(t, stub)
 	shell := newShellState(server.URL, "")
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	for attempt := 0; attempt < 40 && len(shell.providers.native) == 0; attempt++ {
 		tester.Frame()
 	}
@@ -103,7 +101,7 @@ func TestAddingAProviderWritesTheConfigAndTheSecret(t *testing.T) {
 	server := newNativeProviderServer(t, stub)
 	shell := newShellState(server.URL, "")
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	for attempt := 0; attempt < 40 && len(shell.providers.native) == 0; attempt++ {
 		tester.Frame()
 	}
@@ -161,7 +159,7 @@ func TestMagpieStaysAnOptionalExtension(t *testing.T) {
 	server := newNativeProviderServer(t, stub)
 	shell := newShellState(server.URL, "")
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	for attempt := 0; attempt < 40 && (len(shell.providers.native) == 0 || len(shell.providers.entries) == 0); attempt++ {
 		tester.Frame()
 	}
@@ -181,7 +179,7 @@ func TestClickingANativeProviderOpensItsEditor(t *testing.T) {
 	server := newNativeProviderServer(t, stub)
 	shell := newShellState(server.URL, "")
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	for attempt := 0; attempt < 40 && len(shell.providers.native) == 0; attempt++ {
 		tester.Frame()
 	}
@@ -202,7 +200,7 @@ func TestRemovingANativeProviderDropsItFromTheConfig(t *testing.T) {
 	server := newNativeProviderServer(t, stub)
 	shell := newShellState(server.URL, "")
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	for attempt := 0; attempt < 40 && len(shell.providers.native) == 0; attempt++ {
 		tester.Frame()
 	}
@@ -237,7 +235,7 @@ func TestTheProviderRowOffersItsModelsWithoutOpeningTheEditor(t *testing.T) {
 	chat.active = "c1"
 	shell.chat = chat
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	for attempt := 0; attempt < 40 && len(shell.providers.native) == 0; attempt++ {
 		tester.Frame()
 	}

@@ -2,8 +2,6 @@ package main
 
 import (
 	"testing"
-
-	"github.com/egoist/mygo/ui"
 )
 
 func stepToolMessage(id, callID, text, state string) transcriptMessage {
@@ -21,7 +19,7 @@ func TestTheFinalAnswerFoldsTheStepsThatCameBeforeIt(t *testing.T) {
 		stepToolMessage("t1", "call-1", "bash: go test ./...", "done"),
 		{ID: "a1", Role: "assistant", Kind: "chat", Text: "做完了，全部通过。", State: "done", CreatedAt: 1_010_000},
 	}
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	if !tester.HasText("做完了，全部通过。") {
 		t.Fatalf("the final answer stays in the chat, texts %q", tester.Texts())
 	}
@@ -57,7 +55,7 @@ func TestARunningAnswerKeepsItsStepsOpen(t *testing.T) {
 		stepToolMessage("t1", "call-1", "bash: go test ./...", "done"),
 		{ID: "a1", Role: "assistant", Kind: "chat", Text: "正在整理结果", State: "streaming", CreatedAt: 1_010_000},
 	}
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	if tester.HasText("思考与工具调用") {
 		t.Fatalf("a running answer folds nothing yet, texts %q", tester.Texts())
 	}
@@ -72,7 +70,7 @@ func TestAnAnswerWithoutStepsHasNoFoldBar(t *testing.T) {
 		{ID: "u1", Role: "user", Kind: "chat", Text: "你好", State: "delivered", CreatedAt: 1_000_000},
 		{ID: "a1", Role: "assistant", Kind: "chat", Text: "你好，我在。", State: "done", CreatedAt: 1_005_000},
 	}
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	if !tester.HasText("你好，我在。") {
 		t.Fatalf("the answer shows, texts %q", tester.Texts())
 	}
@@ -89,7 +87,7 @@ func TestTheFoldKeepsTheInterimThoughtsToo(t *testing.T) {
 		stepToolMessage("t1", "call-1", "bash: ls", "done"),
 		{ID: "a1", Role: "assistant", Kind: "chat", Text: "问题在配置里。", State: "done", CreatedAt: 1_010_000},
 	}
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	if !tester.HasText("问题在配置里。") {
 		t.Fatalf("the final answer shows, texts %q", tester.Texts())
 	}

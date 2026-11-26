@@ -13,7 +13,7 @@ import (
 func TestTheAgentCardClockKeepsCountingWhileTheAgentRuns(t *testing.T) {
 	shell := newShellState("http://127.0.0.1:1", "tok")
 	shown := fleetAgent{ID: "a1", Name: "worker", Status: "running"}
-	tester := ui.NewTester(func(ctx *ui.Context) {
+	tester := newTester(func(ctx *ui.Context) {
 		shell.fleetAgentCard(ctx, shown, 220, 120)
 	}, 280, 160)
 	tester.Frame()

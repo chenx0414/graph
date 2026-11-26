@@ -76,7 +76,7 @@ func TestTheResourcePageLooksLikeTheMagpieLibrary(t *testing.T) {
 	if state.status != "" {
 		t.Fatalf("status %q", state.status)
 	}
-	tester := ui.NewTester(state.view, 1200, 820)
+	tester := newTester(state.view, 1200, 820)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
@@ -96,7 +96,7 @@ func TestSearchFiltersBothSections(t *testing.T) {
 	state := newResourceState(server.URL, "tok")
 	state.load()
 	state.search = "web-search"
-	tester := ui.NewTester(state.view, 1200, 820)
+	tester := newTester(state.view, 1200, 820)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
@@ -126,7 +126,7 @@ func TestOpeningAResourceAndRefreshingTheCatalog(t *testing.T) {
 	if actions["refresh"] != 1 {
 		t.Fatalf("refresh must hit /api/catalog/refresh, actions %v", actions)
 	}
-	tester := ui.NewTester(state.view, 1200, 820)
+	tester := newTester(state.view, 1200, 820)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
@@ -154,7 +154,7 @@ func TestTheAgentSectionShowsFiveThenExpands(t *testing.T) {
 			source: "/tmp/found-" + itoa(index), ready: true, status: "available",
 		})
 	}
-	tester := ui.NewTester(state.view, 900, 700)
+	tester := newTester(state.view, 900, 700)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
@@ -183,7 +183,7 @@ func TestTheResourceSearchFieldHasAStableAccessibleName(t *testing.T) {
 
 	state := newResourceState(server.URL, "tok")
 	state.load()
-	tester := ui.NewTester(state.view, 1200, 820)
+	tester := newTester(state.view, 1200, 820)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}

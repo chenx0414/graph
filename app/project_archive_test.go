@@ -33,7 +33,7 @@ func TestHoveringAProjectConversationArchivesIt(t *testing.T) {
 		{ID: "c2", Role: "project", ProjectID: "p2", Title: "Other"},
 	}
 	state.activeID = "c2"
-	tester := ui.NewTester(func(c *ui.Context) {
+	tester := newTester(func(c *ui.Context) {
 		theme.Apply(c, theme.Dark())
 		ui.Column(c).Width(300).Children(func() { state.conversationList(c) })
 	}, 320, 400)
@@ -108,7 +108,7 @@ func TestALongProjectNameKeepsTheArchiveActionAtTheRight(t *testing.T) {
 	long := strings.Repeat("很长的项目名字", 8)
 	state := newShellState("http://127.0.0.1:1", "tok")
 	state.conversations = []conversationSummary{{ID: "c1", Role: "project", ProjectID: long, Title: long}}
-	tester := ui.NewTester(func(c *ui.Context) {
+	tester := newTester(func(c *ui.Context) {
 		theme.Apply(c, theme.Dark())
 		ui.Column(c).Width(300).Children(func() { state.conversationList(c) })
 	}, 320, 400)
@@ -152,7 +152,7 @@ func TestArchivingAProjectWithRunningWorkAsksFirst(t *testing.T) {
 	if state.archiveConfirm == nil {
 		t.Fatal("running work opens the archive confirmation")
 	}
-	tester := ui.NewTester(state.view, 1200, 800)
+	tester := newTester(state.view, 1200, 800)
 	frames(tester)
 	if !tester.HasText("归档项目？") || !tester.HasText("2 个正在运行的任务") {
 		t.Fatalf("the confirmation lists the running work, texts %q", tester.Texts())
@@ -173,7 +173,7 @@ func TestArchivingAProjectWithRunningWorkAsksFirst(t *testing.T) {
 	for state.archiveConfirm == nil && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	tester = ui.NewTester(state.view, 1200, 800)
+	tester = newTester(state.view, 1200, 800)
 	frames(tester)
 	if err := tester.Click("归档"); err != nil {
 		t.Fatal(err)
@@ -192,7 +192,7 @@ func TestAnArchivedProjectHasNoArchiveAction(t *testing.T) {
 	archivedAt := int64(1)
 	state := newShellState("http://127.0.0.1:1", "tok")
 	state.conversations = []conversationSummary{{ID: "c1", Role: "project", ProjectID: "p1", Title: "p1", ProjectArchivedAt: &archivedAt}}
-	tester := ui.NewTester(func(c *ui.Context) {
+	tester := newTester(func(c *ui.Context) {
 		theme.Apply(c, theme.Dark())
 		ui.Column(c).Width(300).Children(func() { state.conversationList(c) })
 	}, 320, 400)

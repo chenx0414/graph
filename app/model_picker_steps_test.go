@@ -54,7 +54,7 @@ func postedModels(mock *pickerMock) []string {
 func TestPickingAModelKeepsThePickerOpenForTheThinkingStep(t *testing.T) {
 	mock := &pickerMock{}
 	state := pickerStepsChat(t, mock)
-	tester := frames(ui.NewTester(state.view, 900, 700))
+	tester := frames(newTester(state.view, 900, 700))
 	if !tester.HasText("模型选择器") {
 		t.Fatalf("the picker starts open, texts %q", tester.Texts())
 	}
@@ -85,7 +85,7 @@ func TestPickingAModelKeepsThePickerOpenForTheThinkingStep(t *testing.T) {
 func TestTheThinkingStepSendsTheModelAndClosesThePicker(t *testing.T) {
 	mock := &pickerMock{}
 	state := pickerStepsChat(t, mock)
-	tester := frames(ui.NewTester(state.view, 900, 700))
+	tester := frames(newTester(state.view, 900, 700))
 	if err := tester.Click("model-two"); err != nil {
 		t.Fatalf("pick the model: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestTheThinkingStepSendsTheModelAndClosesThePicker(t *testing.T) {
 func TestPickingAProviderNarrowsTheModelStep(t *testing.T) {
 	mock := &pickerMock{}
 	state := pickerStepsChat(t, mock)
-	tester := frames(ui.NewTester(state.view, 900, 700))
+	tester := frames(newTester(state.view, 900, 700))
 	if err := tester.Click("过滤 beta"); err != nil {
 		t.Fatalf("pick the provider: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestPickingAProviderNarrowsTheModelStep(t *testing.T) {
 
 func TestClickingOutsideClosesTheModelPicker(t *testing.T) {
 	state, _ := pickerChat(t)
-	tester := frames(ui.NewTester(state.view, 900, 700))
+	tester := frames(newTester(state.view, 900, 700))
 	if !tester.HasText("模型选择器") {
 		t.Fatalf("the picker starts open, texts %q", tester.Texts())
 	}
@@ -161,7 +161,7 @@ func TestTheChatRestoresTheModelFromTelemetry(t *testing.T) {
 	if state.currentModel != "alpha:model-one" || state.currentThinking != "high" {
 		t.Fatalf("opening the chat reads the model the console reports, got %q %q", state.currentModel, state.currentThinking)
 	}
-	tester := frames(ui.NewTester(state.view, 900, 700))
+	tester := frames(newTester(state.view, 900, 700))
 	if !tester.HasText("model-one high") {
 		t.Fatalf("the model chip shows the restored model, texts %q", tester.Texts())
 	}

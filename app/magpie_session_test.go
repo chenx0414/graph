@@ -8,8 +8,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/egoist/mygo/ui"
 )
 
 const magpieSessionModelsFixture = `{"models":[
@@ -67,7 +65,7 @@ func TestAProviderRowLeadsToItsModelInTheSession(t *testing.T) {
 	shell.chat.providerOn = shell.providersEnabled
 	shell.chat.loadModels()
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) > 0 })
 
 	if err := tester.Click("用 ChatGPT 的模型"); err != nil {
@@ -83,7 +81,7 @@ func TestAProviderRowLeadsToItsModelInTheSession(t *testing.T) {
 		t.Fatalf("the picker is not empty for the provider, got %+v", models)
 	}
 
-	picker := frames(ui.NewTester(chat.view, 900, 700))
+	picker := frames(newTester(chat.view, 900, 700))
 	if !picker.HasText("gpt-6.1-sol") {
 		t.Fatalf("the picker shows the provider's model, texts %q", picker.Texts())
 	}
@@ -144,7 +142,7 @@ func TestRefreshingProvidersLoadsTheNewMagpieModelList(t *testing.T) {
 	shell.chat.providerOn = shell.providersEnabled
 	shell.chat.loadModels()
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) > 0 })
 
 	refreshed.Store(true)
@@ -154,7 +152,7 @@ func TestRefreshingProvidersLoadsTheNewMagpieModelList(t *testing.T) {
 	chat := shell.active()
 	chat.modelPicker.provider = "codex"
 	chat.modelPicker.open = true
-	picker := frames(ui.NewTester(chat.view, 900, 700))
+	picker := frames(newTester(chat.view, 900, 700))
 	deadline := time.Now().Add(5 * time.Second)
 	for !picker.HasText("gpt-6.1-terra") && time.Now().Before(deadline) {
 		picker.Frame()

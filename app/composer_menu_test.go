@@ -42,7 +42,7 @@ func composerShell(t *testing.T) (*chatState, *ui.Tester) {
 	server, _ := composerServer(t)
 	state := newChatState(server.URL, "tok")
 	state.open("c1")
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	deadline := time.Now().Add(2 * time.Second)
 	for len(state.messages) == 0 && time.Now().Before(deadline) {
 		tester.Frame()
@@ -144,7 +144,7 @@ func TestSendingCarriesTheAttachments(t *testing.T) {
 	server, posted := composerServer(t)
 	state := newChatState(server.URL, "tok")
 	state.open("c1")
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	deadline := time.Now().Add(2 * time.Second)
 	for len(state.messages) == 0 && time.Now().Before(deadline) {
 		tester.Frame()
@@ -223,7 +223,7 @@ func TestSendingAnImageCarriesItsBase64Data(t *testing.T) {
 	server, posted := composerServer(t)
 	state := newChatState(server.URL, "tok")
 	state.open("c1")
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	deadline := time.Now().Add(2 * time.Second)
 	for len(state.messages) == 0 && time.Now().Before(deadline) {
 		tester.Frame()
@@ -283,7 +283,7 @@ func TestSlashNewStartsAFreshAgentContext(t *testing.T) {
 
 	state := newChatState(server.URL, "tok")
 	state.open("c1")
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	if err := tester.Click("消息"); err != nil {
 		t.Fatalf("focus the composer: %v", err)
 	}

@@ -2,8 +2,6 @@ package main
 
 import (
 	"testing"
-
-	"github.com/egoist/mygo/ui"
 )
 
 const graphConversation = `{"messages":[{"role":"assistant","text":"派了两个节点"}],"tasks":[
@@ -43,7 +41,7 @@ func TestTheTaskModuleListsTasksAndNodes(t *testing.T) {
 	state.chat = chat
 	state.activeID = "c1"
 	state.board.pages = []boardPage{{ID: "board", Title: boardDefaultTitle, Panels: []boardPanel{{ID: "tasks", Kind: "tasks"}}, Layout: boardNode{Kind: "panel", PanelID: "tasks"}}}
-	tester := ui.NewTester(state.view, 1100, 760)
+	tester := newTester(state.view, 1100, 760)
 	frames(tester)
 	for _, wanted := range []string{
 		"Harness probe · completed · settle",

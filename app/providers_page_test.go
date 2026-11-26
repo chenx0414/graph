@@ -4,8 +4,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/egoist/mygo/ui"
 )
 
 const magpieProvidersFixture = `{
@@ -41,7 +39,7 @@ func TestTheProvidersPageReadsMagpie(t *testing.T) {
 	server := magpieProvidersServer(t)
 	shell := newShellState(server.URL, "")
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) > 0 })
 	if len(shell.providers.entries) != 3 {
 		t.Fatalf("every magpie provider is listed, got %d (%q)", len(shell.providers.entries), shell.providers.failed)
@@ -65,7 +63,7 @@ func TestTheProvidersPageSaysWhereTheDataComesFrom(t *testing.T) {
 	server := magpieProvidersServer(t)
 	shell := newShellState(server.URL, "")
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) > 0 })
 	if !tester.HasText("Magpie") {
 		t.Fatalf("the page names its data source, texts %q", tester.Texts())
@@ -88,7 +86,7 @@ func TestAnUnreadableMagpieSaysSoAndRetries(t *testing.T) {
 
 	shell := newShellState(server.URL, "")
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	providersFrameUntil(t, tester, func() bool { return tester.HasText("读不到 magpie") })
 	if !tester.HasText("读不到 magpie") {
 		t.Fatalf("a missing magpie is reported, texts %q", tester.Texts())
@@ -107,7 +105,7 @@ func TestTheProviderSwitchIsReadOnlyBecauseMagpieOwnsIt(t *testing.T) {
 	server := magpieProvidersServer(t)
 	shell := newShellState(server.URL, "")
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) > 0 })
 	if !tester.HasText("开关在 Magpie 里") {
 		t.Fatalf("the page says where the switch lives, texts %q", tester.Texts())
@@ -128,7 +126,7 @@ func TestClickingAProviderOpensItsModels(t *testing.T) {
 	chat.providerOn = shell.providersEnabled
 	shell.chat = chat
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) > 0 })
 	if err := tester.Click("用 ChatGPT 的模型"); err != nil {
 		t.Fatalf("open the provider's models: %v", err)
@@ -154,7 +152,7 @@ func TestThePickerFollowsMagpieWithoutHidingUnknownProviders(t *testing.T) {
 	server := magpieProvidersServer(t)
 	shell := newShellState(server.URL, "")
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) > 0 })
 
 	if !shell.providersEnabled("codex") {
@@ -181,7 +179,7 @@ func TestAProviderSwitchedOffInMagpieIsOff(t *testing.T) {
 
 	shell := newShellState(server.URL, "")
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) > 0 })
 	if shell.providersEnabled("codex") {
 		t.Fatal("a provider magpie switched off is off here")
@@ -195,7 +193,7 @@ func TestTheProvidersPageDoesNotOfferFakeWriteActions(t *testing.T) {
 	server := magpieProvidersServer(t)
 	shell := newShellState(server.URL, "")
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) > 0 })
 	if !tester.HasText("添加供应商") {
 		t.Fatalf("the page offers its own provider onboarding, texts %q", tester.Texts())
@@ -232,7 +230,7 @@ func TestTheProvidersPageRefreshesWhenMagpieChanges(t *testing.T) {
 
 	shell := newShellState(server.URL, "")
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) == 3 })
 	refreshed = true
 	if err := tester.Click("刷新供应商"); err != nil {
@@ -250,7 +248,7 @@ func TestTheProvidersPageOpensMagpieWhenTheSwitchLivesThere(t *testing.T) {
 	opened := ""
 	shell.providers.openPath = func(path string) error { opened = path; return nil }
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) > 0 })
 	if err := tester.Click("打开 Magpie 配置"); err != nil {
 		t.Fatalf("open magpie: %v", err)

@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/egoist/mygo/ui"
 )
 
 // A user message carries its attachments as metadata with the image bytes stripped: the server
@@ -61,7 +59,7 @@ func TestOnlyImageAttachmentsAreDrawn(t *testing.T) {
 		}},
 	}
 	chat.loadAttachmentPictures()
-	tester := ui.NewTester(chat.view, 900, 700)
+	tester := newTester(chat.view, 900, 700)
 	frames(tester)
 
 	if chat.pictureCount != 1 {
@@ -83,7 +81,7 @@ func TestAPictureThatCannotBeReadDoesNotBreakTheChat(t *testing.T) {
 		}},
 	}
 	chat.loadAttachmentPictures()
-	tester := ui.NewTester(chat.view, 900, 700)
+	tester := newTester(chat.view, 900, 700)
 	frames(tester)
 
 	if !tester.HasText("图挂了") {

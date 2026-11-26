@@ -5,8 +5,6 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
-
-	"github.com/egoist/mygo/ui"
 )
 
 func TestTrajectoryModuleQuantifiesTheLatestConversation(t *testing.T) {
@@ -49,7 +47,7 @@ func TestTrajectoryModuleQuantifiesTheLatestConversation(t *testing.T) {
 		t.Fatalf("trajectory never loaded: %q", shell.trajectory.failed)
 	}
 	shell.openModule("trajectory")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	for _, wanted := range []string{"上下文统计窗口", "Token 统计窗口", "耗时统计窗口", "当前上下文窗口",
 		"上下文趋势窗口", "上下文事件窗口", "命令执行窗口", "文件活动窗口", "Token 组成窗口", "请求浏览窗口", "Agent 网络窗口", "请求详情窗口",
 		"轮次", "步数", "工具调用", "缓存命中", "44.4%", "bash", "未缓存输入", "首 token 等待", "峰值",

@@ -84,7 +84,7 @@ func TestTheFleetPageClosesLikeAnyModule(t *testing.T) {
 func TestTheFleetTabLooksLikeTheWhiteboardAndCloses(t *testing.T) {
 	state := newShellState("http://127.0.0.1:1", "tok")
 	state.openModule("fleet")
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	boardTab, ok := tester.Find("标签页 白板")
 	if !ok {
 		t.Fatalf("the whiteboard tab never rendered, texts %q", tester.Texts())
@@ -174,7 +174,7 @@ func fleetSampleServer(w http.ResponseWriter, r *http.Request) {
 func openFleetTester(t *testing.T, state *shellState) *ui.Tester {
 	t.Helper()
 	state.openModule("fleet")
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	deadline := time.Now().Add(2 * time.Second)
 	for state.fleet.data == nil && state.fleet.failed == "" {
 		if !time.Now().Before(deadline) {

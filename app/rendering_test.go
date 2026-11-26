@@ -24,7 +24,7 @@ func TestListRowsRenderEveryRowAfterAFrame(t *testing.T) {
 			ui.List(c, state, len(labels), func(index int) { ui.Text(c, labels[index]) }).Grow(1)
 		})
 	}
-	texts := settle(ui.NewTester(view, 600, 400)).Texts()
+	texts := settle(newTester(view, 600, 400)).Texts()
 	for _, label := range labels {
 		if !contains(texts[0]+contains3(texts), label) {
 			t.Fatalf("row %q missing, texts %q", label, texts)
@@ -54,7 +54,7 @@ func TestListRowsMayBeBuiltWithARowOrAColumn(t *testing.T) {
 				ui.List(c, state, len(labels), func(index int) { row(index)(c) }).Grow(1)
 			})
 		}
-		texts := settle(ui.NewTester(view, 600, 400)).Texts()
+		texts := settle(newTester(view, 600, 400)).Texts()
 		joined := ""
 		for _, text := range texts {
 			joined += text
@@ -72,7 +72,7 @@ func TestStreamingMarkdownWaitsForTheRevealClock(t *testing.T) {
 	source := "## 标题\n\n**结论。**后文"
 	view := func(c *ui.Context) { markdown.Stream(c, source, &options) }
 
-	tester := ui.NewTester(view, 600, 300)
+	tester := newTester(view, 600, 300)
 	immediately := tester.Texts()
 	tester.Advance(2 * time.Second)
 	revealed := tester.Texts()

@@ -30,7 +30,7 @@ func scrollingTranscript(t *testing.T, shell *shellState) *ui.Tester {
 	shell.chat.messages = messages
 	shell.modelMeta = ambiguousModelMeta()
 	shell.trajectory.data = truthTrajectory(120_000, 900_000)
-	return ui.NewTester(func(ctx *ui.Context) {
+	return newTester(func(ctx *ui.Context) {
 		ui.Row(ctx).Fill().Children(func() {
 			ui.Column(ctx).Grow(1).Children(func() {
 				scroll := ui.Scroll(ctx).Grow(1)

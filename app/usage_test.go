@@ -5,8 +5,6 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
-
-	"github.com/egoist/mygo/ui"
 )
 
 var usageFixtures = map[string]string{
@@ -88,7 +86,7 @@ func TestShellOpensTheUsagePane(t *testing.T) {
 	if state.usage.status != "" {
 		t.Fatalf("usage did not load, status %q", state.usage.status)
 	}
-	tester := ui.NewTester(state.view, 1000, 640)
+	tester := newTester(state.view, 1000, 640)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}

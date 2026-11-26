@@ -3,13 +3,11 @@ package main
 import (
 	"testing"
 	"time"
-
-	"github.com/egoist/mygo/ui"
 )
 
 func TestTheToolRunStopwatchAdvancesWhileActive(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
-	tester := ui.NewTester(state.view, 760, 620)
+	tester := newTester(state.view, 760, 620)
 	tester.Frame()
 	now := tester.Now()
 	running := activityTool("bash", "bash: go test ./...", "running")
@@ -31,7 +29,7 @@ func TestTheToolRunStopwatchAdvancesWhileActive(t *testing.T) {
 
 func TestTheToolRunStopwatchStopsWhenTheToolSettles(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
-	tester := ui.NewTester(state.view, 760, 620)
+	tester := newTester(state.view, 760, 620)
 	tester.Frame()
 	now := tester.Now()
 	first := activityTool("bash", "bash: go test ./...", "done")

@@ -99,10 +99,16 @@ func (m *nodeChatMock) server(t *testing.T) *httptest.Server {
 func nodeChatShell(t *testing.T, mock *nodeChatMock) (*shellState, *ui.Tester) {
 	t.Helper()
 	server := mock.server(t)
-	state := fleetServerShell(t, fleetSampleServer)
-	state.api = newAPIClient(server.URL, "")
-	state.fleet = fleetState{conversationID: "g1", data: mock.fleet}
-	tester := newTester(state.view, 1440, 900)
+	var state *shellState
+	var tester *ui.Tester
+	// The shell has one writer, so its setup happens there too: otherwise the
+	// render reads fields the test goroutine wrote.
+	stepUI(func() {
+		state = fleetServerShell(t, fleetSampleServer)
+		state.api = newAPIClient(server.URL, "")
+		state.fleet = fleetState{conversationID: "g1", data: mock.fleet}
+		tester = ui.NewTester(state.view, 1440, 900)
+	})
 	return state, tester
 }
 

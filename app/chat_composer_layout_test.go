@@ -5,8 +5,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/egoist/mygo/ui"
 )
 
 func chatWithTwoMessages() *chatState {
@@ -20,7 +18,7 @@ func chatWithTwoMessages() *chatState {
 
 func TestTheChatShowsNoStatusLineAboveTheComposer(t *testing.T) {
 	state := chatWithTwoMessages()
-	tester := frames(ui.NewTester(state.view, 900, 700))
+	tester := frames(newTester(state.view, 900, 700))
 	quiet := tester.Texts()
 	state.status = "读不到更早的对话：json: cannot unmarshal string into Go struct field"
 	tester = frames(tester)
@@ -37,7 +35,7 @@ func TestTheChatShowsNoStatusLineAboveTheComposer(t *testing.T) {
 
 func TestAFailedOlderReadReadsBesideTheChatNotInTheComposer(t *testing.T) {
 	state := chatWithTwoMessages()
-	tester := frames(ui.NewTester(state.view, 900, 700))
+	tester := frames(newTester(state.view, 900, 700))
 	quiet, ok := tester.Access("消息")
 	if !ok {
 		t.Fatalf("the composer is on screen, texts %q", tester.Texts())
@@ -85,7 +83,7 @@ func TestAFailedOlderReadReadsBesideTheChatNotInTheComposer(t *testing.T) {
 
 func TestTheComposerStartsTwoLinesTall(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
-	tester := frames(ui.NewTester(state.view, 900, 700))
+	tester := frames(newTester(state.view, 900, 700))
 	empty, ok := tester.Find("消息")
 	if !ok {
 		t.Fatalf("the composer is on screen, texts %q", tester.Texts())
@@ -121,7 +119,7 @@ func TestAFailureStaysVisibleWhileTheComposerHoldsADraft(t *testing.T) {
 	state := chatWithTwoMessages()
 	state.connection = "读不到更早的对话，正在重试"
 	state.draft = "还没发出去的一句话"
-	tester := frames(ui.NewTester(state.view, 900, 700))
+	tester := frames(newTester(state.view, 900, 700))
 	if !tester.HasText("读不到更早的对话，正在重试") {
 		t.Fatalf("a failure must stay readable even when the composer holds a draft, texts %q", tester.Texts())
 	}

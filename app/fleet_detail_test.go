@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/egoist/mygo/ui"
 )
 
 func TestTheAgentPageLoadsConversationHistory(t *testing.T) {
@@ -25,7 +23,7 @@ func TestTheAgentPageLoadsConversationHistory(t *testing.T) {
 	if err := state.openFleetAgentPageForTest("p1"); err != nil {
 		t.Fatalf("open the agent page: %v", err)
 	}
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	deadline := time.Now().Add(2 * time.Second)
 	for len(state.fleet.detail.entries) == 0 {
 		if !time.Now().Before(deadline) {
@@ -58,7 +56,7 @@ func TestTheAgentPageLoadsNodeRunEntries(t *testing.T) {
 	if err := state.openFleetAgentPageForTest("n2"); err != nil {
 		t.Fatalf("open the agent page: %v", err)
 	}
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	deadline := time.Now().Add(2 * time.Second)
 	for len(state.fleet.detail.entries) == 0 {
 		if !time.Now().Before(deadline) {
@@ -98,7 +96,7 @@ func TestTheAgentPageFallsBackToTheGlobalFleet(t *testing.T) {
 	if err := state.openFleetAgentPageForTest("g9"); err != nil {
 		t.Fatalf("open the missing agent page: %v", err)
 	}
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	deadline := time.Now().Add(2 * time.Second)
 	for !tester.HasText("孤儿 Agent") {
 		if !time.Now().Before(deadline) {
@@ -120,7 +118,7 @@ func TestTheAgentPageExplainsAMissingAgent(t *testing.T) {
 	if err := state.openFleetAgentPageForTest("missing"); err != nil {
 		t.Fatalf("open the missing agent page: %v", err)
 	}
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	if !tester.HasText("找不到这个 Agent") {
 		t.Fatalf("the agent page explains a missing agent, texts %q", tester.Texts())
 	}
@@ -152,7 +150,7 @@ func TestTheAgentPageSurvivesARestart(t *testing.T) {
 	if page := state.boardPage(); page.ID != "agent:n2" || page.Kind != "agent" {
 		t.Fatalf("the saved agent page is restored, page %+v", page)
 	}
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	deadline := time.Now().Add(2 * time.Second)
 	for len(state.fleet.detail.entries) == 0 {
 		if !time.Now().Before(deadline) {
@@ -244,7 +242,7 @@ func TestTheAgentPageReusesItsTabAndKeepsLongTitlesShort(t *testing.T) {
 	if len(state.board.pages) != pages {
 		t.Fatalf("a second click reuses the open agent page, pages %d then %d", pages, len(state.board.pages))
 	}
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	tab, ok := tester.Find("标签页 " + long)
 	if !ok {
 		t.Fatalf("the long agent tab never rendered, texts %q", tester.Texts())

@@ -102,7 +102,7 @@ func TestTheAgentPanelDoesNotCallAProjectTheRoot(t *testing.T) {
 	state, tester := nodeChatShell(t, mock)
 	state.selectConversation("p1")
 	tester = frames(frames(tester))
-	panel := frames(ui.NewTester(func(ctx *ui.Context) {
+	panel := frames(newTester(func(ctx *ui.Context) {
 		ui.Column(ctx).Fill().Children(func() { state.panelChatAgent(ctx) })
 	}, 800, 600))
 	if panel.HasText("它是编队的根。") {

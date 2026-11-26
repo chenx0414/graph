@@ -82,7 +82,7 @@ func TestTheFinishedMainAgentAnswerAppearsWithoutSwitchingConversations(t *testi
 		}
 	}
 	state := liveShell(t, handler)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	waitForChatText(t, tester, "正在整理结果")
 	mu.Lock()
 	finished = true
@@ -125,7 +125,7 @@ func TestTheFinishedAnswerShowsEvenWhenTheVersionStandsStill(t *testing.T) {
 		}
 	}
 	state := liveShell(t, handler)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	waitForChatText(t, tester, "正在整理结果")
 	mu.Lock()
 	finished = true
@@ -188,7 +188,7 @@ func TestSwitchingBackToTheMainAgentShowsItsContentAtOnce(t *testing.T) {
 	}
 	t.Cleanup(release)
 	state := liveShell(t, handler)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	if !tester.HasText("主控旧内容") {
 		t.Fatalf("the main agent conversation must open with its content, texts %q", tester.Texts())
 	}

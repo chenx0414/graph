@@ -3,8 +3,6 @@ package main
 import (
 	"testing"
 	"time"
-
-	"github.com/egoist/mygo/ui"
 )
 
 func foldStepTool(at time.Time, text string) transcriptMessage {
@@ -23,7 +21,7 @@ func foldFinalAnswer(at time.Time) transcriptMessage {
 
 func TestTheFoldedStepsShowTheirTotalDurationWhenCollapsed(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
-	tester := ui.NewTester(state.view, 760, 620)
+	tester := newTester(state.view, 760, 620)
 	tester.Frame()
 	now := tester.Now()
 	start := now.Add(-14 * time.Second)
@@ -67,7 +65,7 @@ func TestStaleFoldStepsShowNoInventedDuration(t *testing.T) {
 		foldStepTool(time.UnixMilli(1_000_000), "bash: go test ./..."),
 		foldFinalAnswer(time.UnixMilli(1_012_000)),
 	}
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	if tester.HasText("用时") {
 		t.Fatalf("an old fold invents no duration, texts %q", tester.Texts())
 	}
@@ -80,7 +78,7 @@ func TestFoldedStepsWithNoTimestampsShowNoDuration(t *testing.T) {
 		foldStepTool(time.UnixMilli(0), "bash: go test ./..."),
 		foldFinalAnswer(time.UnixMilli(1_012_000)),
 	}
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	if tester.HasText("用时") {
 		t.Fatalf("steps with no timestamps show no duration, texts %q", tester.Texts())
 	}
@@ -88,7 +86,7 @@ func TestFoldedStepsWithNoTimestampsShowNoDuration(t *testing.T) {
 
 func TestFoldDurationFormatsMinutesAndSeconds(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
-	tester := ui.NewTester(state.view, 760, 620)
+	tester := newTester(state.view, 760, 620)
 	tester.Frame()
 	now := tester.Now()
 	start := now.Add(-3 * time.Minute)

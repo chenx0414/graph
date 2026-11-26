@@ -6,8 +6,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/egoist/mygo/ui"
 )
 
 type failingChatSource struct{ failures int }
@@ -41,7 +39,7 @@ func TestATransportFailureNeverEntersTheComposer(t *testing.T) {
 	if state.problem != "" {
 		t.Fatalf("a failed read must not occupy the composer, got %q", state.problem)
 	}
-	tester := frames(ui.NewTester(state.view, 900, 700))
+	tester := frames(newTester(state.view, 900, 700))
 	for _, text := range tester.Texts() {
 		if strings.Contains(text, "读不到这个会话") || strings.Contains(text, "connection refused") {
 			t.Fatalf("the transport error reached the chat surface: %q", text)
@@ -56,7 +54,7 @@ func TestATransportFailureIsReportedBesideTheChat(t *testing.T) {
 	state.source = &failingChatSource{}
 	state.active = "c1"
 	state.refresh()
-	tester := frames(ui.NewTester(state.view, 900, 700))
+	tester := frames(newTester(state.view, 900, 700))
 	if !tester.HasText("连接中断") {
 		t.Fatalf("the failure must be reported beside the chat, texts %q", tester.Texts())
 	}
@@ -76,7 +74,7 @@ func TestASuccessfulReadClearsTheTransportFailure(t *testing.T) {
 	state.api = newAPIClient(server.URL, "")
 	state.source = newConversationChatSource(state.api, "c1")
 	state.refresh()
-	tester := frames(ui.NewTester(state.view, 900, 700))
+	tester := frames(newTester(state.view, 900, 700))
 	if tester.HasText("连接中断") {
 		t.Fatalf("a healthy read must clear the warning, texts %q", tester.Texts())
 	}

@@ -36,7 +36,7 @@ func mainAgentWindow(tester *ui.Tester, state *chatState, now time.Time) {
 // answer (#7). It is the acceptance walk-through, not a unit test of each part.
 func TestTheMainAgentWindowCountsKeepsAgentTalkAsideAndFoldsTheSteps(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
-	tester := ui.NewTester(state.view, 760, 620)
+	tester := newTester(state.view, 760, 620)
 	tester.Frame()
 	now := tester.Now()
 	mainAgentWindow(tester, state, now)
@@ -110,7 +110,7 @@ func TestTheMainAgentModelPickerMarksEveryProvider(t *testing.T) {
 	}
 	state.currentModel = "codex:gpt-5"
 	state.modelPicker.open = true
-	tester := frames(ui.NewTester(state.view, 900, 700))
+	tester := frames(newTester(state.view, 900, 700))
 	texts := tester.Texts()
 	for _, letter := range []string{"C", "D"} {
 		if exactText(texts, letter) {

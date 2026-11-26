@@ -28,7 +28,7 @@ func nodeSessionContextShell() (*shellState, *ui.Tester) {
 		Panels: []boardPanel{{ID: "context-overview", Kind: "context-overview"}},
 		Layout: boardNode{Kind: "panel", PanelID: "context-overview"},
 	}}
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	return state, tester
 }
 

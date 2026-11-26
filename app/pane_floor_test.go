@@ -12,7 +12,7 @@ func paneProbeShell(t *testing.T, width, height int, kind string) (*shellState, 
 	if kind != "" {
 		state.openModule(kind)
 	}
-	tester := frames(ui.NewTester(state.view, width, height))
+	tester := frames(newTester(state.view, width, height))
 	return state, tester
 }
 
@@ -136,7 +136,7 @@ func TestTheWhiteboardFloorFitsEveryStandardPage(t *testing.T) {
 		state.view(ctx)
 		need = state.boardPageMinWidth(ctx) + boardCardChrome(ctx) + ctx.Theme().Space(2.5)*2
 	}
-	tester := frames(ui.NewTester(view, 1440, 900))
+	tester := frames(newTester(view, 1440, 900))
 	for _, kind := range append(panePages(), "history", "overview", "conversation", "artifacts") {
 		if kind != "" {
 			state.openModule(kind)
@@ -156,7 +156,7 @@ func TestTheWhiteboardTabsStayInsideTheirColumnAtTheWindowFloor(t *testing.T) {
 	for _, kind := range []string{"trajectory", "fleet", "capabilities", "resources", "providers", "models", "tasks"} {
 		state.openModule(kind)
 	}
-	tester := frames(ui.NewTester(state.view, width, height))
+	tester := frames(newTester(state.view, width, height))
 	if len(state.board.pages) < 7 {
 		t.Fatalf("the probe needs every tab open, pages %d", len(state.board.pages))
 	}

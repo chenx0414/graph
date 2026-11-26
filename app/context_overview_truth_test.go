@@ -15,7 +15,7 @@ func contextTruthCard(data *conversationTrajectory, model string) *ui.Tester {
 		model: {id: model, modelID: model, contextWindow: 1_000_000, maxTokens: 384_000},
 	}
 	shell.trajectory.data = data
-	return frames(ui.NewTester(func(ctx *ui.Context) {
+	return frames(newTester(func(ctx *ui.Context) {
 		ui.Box(ctx).FillWidth().Height(320).Children(func() {
 			shell.panelContextOverview(ctx)
 		})

@@ -42,7 +42,7 @@ func TestTheContextCardKeepsItsNumbersWhileScrolling(t *testing.T) {
 	shell.chat.currentModel = "deepseek/deepseek-v4.1-flash"
 	shell.modelMeta = ambiguousModelMeta()
 	shell.trajectory.data = truthTrajectory(120_000, 900_000)
-	tester := frames(ui.NewTester(func(ctx *ui.Context) {
+	tester := frames(newTester(func(ctx *ui.Context) {
 		ui.Box(ctx).FillWidth().Height(320).Children(func() {
 			shell.panelContextOverview(ctx)
 		})

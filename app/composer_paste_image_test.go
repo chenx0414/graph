@@ -102,7 +102,7 @@ func TestPastingAPictureAttachesItAsAnImage(t *testing.T) {
 func TestPastingTextStillInsertsText(t *testing.T) {
 	chat := &chatState{draft: ""}
 	chat.clipboard = &pictureClipboard{text: "一段普通文字"}
-	tester := ui.NewTester(chat.composer, 900, 260)
+	tester := newTester(chat.composer, 900, 260)
 	frames(tester)
 
 	if chat.handleComposerPaste(nil, "一段普通文字") {
@@ -118,7 +118,7 @@ func TestPastingTextStillInsertsText(t *testing.T) {
 func TestPastingAPictureWithTextTakesThePicture(t *testing.T) {
 	chat := &chatState{draft: ""}
 	chat.clipboard = &pictureClipboard{picture: pngBytes(t), text: "caption"}
-	tester := ui.NewTester(chat.composer, 900, 260)
+	tester := newTester(chat.composer, 900, 260)
 	frames(tester)
 
 	if !chat.handleComposerPaste(nil, "caption") {
@@ -133,7 +133,7 @@ func TestPastingAPictureWithTextTakesThePicture(t *testing.T) {
 func TestPastingAnEmptyClipboardAttachesNothing(t *testing.T) {
 	chat := &chatState{draft: ""}
 	chat.clipboard = &pictureClipboard{}
-	tester := ui.NewTester(chat.composer, 900, 260)
+	tester := newTester(chat.composer, 900, 260)
 	frames(tester)
 
 	if chat.handleComposerPaste(nil, "") {
@@ -149,7 +149,7 @@ func TestPastingAPictureOverTheLimitIsRefused(t *testing.T) {
 	chat := &chatState{draft: ""}
 	// composerImageLimit bytes of picture is already over the limit once encoded.
 	chat.clipboard = &pictureClipboard{picture: make([]byte, composerImageLimit+1)}
-	tester := ui.NewTester(chat.composer, 900, 260)
+	tester := newTester(chat.composer, 900, 260)
 	frames(tester)
 
 	chat.handleComposerPaste(nil, "")
@@ -167,7 +167,7 @@ func TestPastingAPictureOverTheLimitIsRefused(t *testing.T) {
 func TestCmdVPastesAPictureThroughTheInput(t *testing.T) {
 	chat := &chatState{draft: "", source: &conversationChatSource{id: "c1"}}
 	chat.clipboard = &pictureClipboard{picture: pngBytes(t)}
-	tester := ui.NewTester(chat.composer, 900, 260)
+	tester := newTester(chat.composer, 900, 260)
 	frames(tester)
 
 	// Focus the composer the way the user does, then paste. The injected clipboard answers the
@@ -191,7 +191,7 @@ func TestCmdVPastesAPictureThroughTheInput(t *testing.T) {
 func TestCmdVPastesTextIntoTheDraft(t *testing.T) {
 	chat := &chatState{draft: "", source: &conversationChatSource{id: "c1"}}
 	chat.clipboard = &pictureClipboard{text: "粘贴的文字"}
-	tester := ui.NewTester(chat.composer, 900, 260)
+	tester := newTester(chat.composer, 900, 260)
 	frames(tester)
 
 	if err := tester.Click("消息"); err != nil {

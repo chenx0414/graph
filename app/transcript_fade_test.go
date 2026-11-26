@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"testing"
-
-	"github.com/egoist/mygo/ui"
 )
 
 func transcriptFadeShell(t *testing.T) *shellState {
@@ -33,7 +31,7 @@ func transcriptFadeShell(t *testing.T) *shellState {
 
 func TestTheChatTranscriptStartsAtItsDividerWithoutABlankBand(t *testing.T) {
 	state := transcriptFadeShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	chat := state.chat
 	if first, last := chat.list.Visible(); last < 0 {
 		t.Fatalf("the transcript never rendered its rows, first %d last %d", first, last)

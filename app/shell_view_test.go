@@ -58,7 +58,7 @@ func frames(tester *ui.Tester) *ui.Tester {
 
 func TestTheWindowShowsFourPanesLeftToRight(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 
 	rail, ok := tester.Find("轨迹")
 	if !ok {
@@ -95,7 +95,7 @@ func TestTheWindowShowsFourPanesLeftToRight(t *testing.T) {
 
 func TestTheMainAgentRowStandsOutFromTheProjects(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	if !tester.HasText("main agent") {
 		t.Fatalf("the main agent row must read as the agent, texts %q", tester.Texts())
 	}
@@ -117,7 +117,7 @@ func TestTheMainAgentRowStandsOutFromTheProjects(t *testing.T) {
 
 func TestTheAppFocusesTheComposerOnOpen(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	tester.Type("你好")
 	frames(tester)
 	active := state.active()
@@ -128,7 +128,7 @@ func TestTheAppFocusesTheComposerOnOpen(t *testing.T) {
 
 func TestTheRailOpensATabForTheModule(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	if err := tester.Click("设置"); err != nil {
 		t.Fatalf("click 设置: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestTheRailOpensATabForTheModule(t *testing.T) {
 
 func TestTheShellFloatsOnAShadow(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	img := tester.Image()
 	luminance := func(x, y int) int {
 		at := img.PixOffset(x, y)
@@ -171,7 +171,7 @@ func TestTheShellFloatsOnAShadow(t *testing.T) {
 
 func TestTheConversationHeaderStaysQuiet(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	countHeader := regexp.MustCompile(`^[0-9]+ 个会话$`)
 	for _, text := range tester.Texts() {
 		if countHeader.MatchString(text) {
@@ -182,7 +182,7 @@ func TestTheConversationHeaderStaysQuiet(t *testing.T) {
 
 func TestTheThreeColumnsShareOneShellBand(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	listTitle, ok := tester.Find("会话列表标题")
 	if !ok {
 		t.Fatalf("the conversation list header never rendered, texts %q", tester.Texts())
@@ -207,7 +207,7 @@ func TestTheThreeColumnsShareOneShellBand(t *testing.T) {
 
 func TestTheWhiteboardHasTabsAndNoFloatingToolbar(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	for _, gone := range []string{"添加", "搜索", "网格", "聚焦", "重置"} {
 		if tester.HasText(gone) {
 			t.Fatalf("the floating toolbar is gone, %q still shows, texts %q", gone, tester.Texts())
@@ -223,9 +223,9 @@ func TestTheWhiteboardHasTabsAndNoFloatingToolbar(t *testing.T) {
 
 func TestTheComposerFitsTheMinimumWindow(t *testing.T) {
 	state := fourPaneShell(t)
-	frames(ui.NewTester(state.view, 1440, 900))
+	frames(newTester(state.view, 1440, 900))
 	width, height := state.windowFloorWidth(), windowFloorHeight
-	tester := frames(ui.NewTester(state.view, width, height))
+	tester := frames(newTester(state.view, width, height))
 	for _, label := range []string{"轨迹", "13-Graph", "发送", "白板"} {
 		rect, ok := tester.Find(label)
 		if !ok {
@@ -239,7 +239,7 @@ func TestTheComposerFitsTheMinimumWindow(t *testing.T) {
 
 func TestTabsSwitchAndCloseWithoutLosingTheBoard(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	if err := tester.Click("设置"); err != nil {
 		t.Fatalf("open the settings tab: %v", err)
 	}
@@ -278,7 +278,7 @@ func countColor(img *image.RGBA, want ui.Color) int {
 
 func TestTheFunctionRailStaysCompactAndCentered(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	if railWidth > 40 {
 		t.Fatalf("the rail must stay compact, width %.1f", railWidth)
 	}
@@ -296,7 +296,7 @@ func TestTheFunctionRailStaysCompactAndCentered(t *testing.T) {
 
 func TestTheFunctionRailSpacesItsIconsApart(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	previousBottom := float32(-1)
 	for _, label := range []string{"轨迹", "编队", "供应商", "资源", "装配", "设置"} {
 		rect, ok := tester.Find(label)
@@ -314,7 +314,7 @@ func TestTheFunctionRailSpacesItsIconsApart(t *testing.T) {
 
 func TestTheFirstRailIconSharesTheMainAgentCardCenter(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	icon, ok := tester.Find("轨迹")
 	if !ok {
 		t.Fatalf("the rail lost its first icon, texts %q", tester.Texts())
@@ -332,7 +332,7 @@ func TestTheFirstRailIconSharesTheMainAgentCardCenter(t *testing.T) {
 
 func TestTheRailTooltipSitsToTheRight(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	icon, ok := tester.Find("轨迹")
 	if !ok {
 		t.Fatalf("the rail lost its first icon, texts %q", tester.Texts())
@@ -363,7 +363,7 @@ func TestTheRailTooltipSitsToTheRight(t *testing.T) {
 
 func TestTheMainAgentCardLooksSelectedWhenItsConversationIsOpen(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	card, ok := tester.Find("main agent 会话")
 	if !ok {
 		t.Fatalf("the main agent card never rendered, texts %q", tester.Texts())
@@ -384,7 +384,7 @@ func TestTheMainAgentCardLooksSelectedWhenItsConversationIsOpen(t *testing.T) {
 
 func TestTheMainAgentTitleAlignsWithTheChatAndIsLarger(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	title, ok := tester.Find("对话标题名")
 	if !ok {
 		t.Fatalf("the chat title row never rendered, texts %q", tester.Texts())
@@ -404,7 +404,7 @@ func TestTheMainAgentTitleAlignsWithTheChatAndIsLarger(t *testing.T) {
 func TestTheChatTitleStaysEmptyWhileTheConversationLoads(t *testing.T) {
 	state := fourPaneShell(t)
 	state.chat.active = ""
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	if title, ok := tester.Find("对话标题名"); ok {
 		t.Fatalf("the loading title still shows something at %v, texts %q", title, tester.Texts())
 	}
@@ -412,7 +412,7 @@ func TestTheChatTitleStaysEmptyWhileTheConversationLoads(t *testing.T) {
 
 func TestTheTitleBandLinesUpWithTheTrafficLightsAndPadsTheCardEvenly(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := ui.NewTester(state.view, 1440, 900)
+	tester := newTester(state.view, 1440, 900)
 	tester.SetTitleBar(ui.TitleBar{Height: 42, Left: 68})
 	frames(tester)
 	title, ok := tester.Find("对话标题")
@@ -452,7 +452,7 @@ func TestTheTrafficLightsUseTheCodexPosition(t *testing.T) {
 
 func TestTheFunctionRailCentersOnTheRedLightAndHasEvenGaps(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	icon, ok := tester.Find("轨迹")
 	if !ok {
 		t.Fatalf("the rail never rendered, texts %q", tester.Texts())

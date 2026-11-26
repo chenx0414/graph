@@ -30,7 +30,7 @@ func TestDropZoneFollowsTheOuterQuarter(t *testing.T) {
 
 func TestTheDropPreviewFillsTheExactHalfOfTheTarget(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	state.board.drag = &boardDrag{panelID: "context-overview", target: "agent-network", edge: "left"}
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()

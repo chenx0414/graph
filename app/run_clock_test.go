@@ -3,8 +3,6 @@ package main
 import (
 	"testing"
 	"time"
-
-	"github.com/egoist/mygo/ui"
 )
 
 func runClockTool(name, text, state string, at time.Time) transcriptMessage {
@@ -15,7 +13,7 @@ func runClockTool(name, text, state string, at time.Time) transcriptMessage {
 
 func TestTheRunningDurationGrowsLikeAStopwatchWhileTheRunIsActive(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
-	tester := ui.NewTester(state.view, 760, 620)
+	tester := newTester(state.view, 760, 620)
 	now := tester.Now()
 	state.messages = []transcriptMessage{
 		runClockTool("bash", "bash: echo hi", "done", now.Add(-2*time.Second)),
@@ -37,7 +35,7 @@ func TestTheRunningDurationGrowsLikeAStopwatchWhileTheRunIsActive(t *testing.T) 
 
 func TestTheRunningDurationStopsWhenTheRunSettles(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
-	tester := ui.NewTester(state.view, 760, 620)
+	tester := newTester(state.view, 760, 620)
 	now := tester.Now()
 	state.messages = []transcriptMessage{
 		runClockTool("bash", "bash: echo hi", "done", now.Add(-6*time.Second)),
@@ -55,7 +53,7 @@ func TestTheRunningDurationStopsWhenTheRunSettles(t *testing.T) {
 
 func TestTheRunningDurationNeverRunsBackwardsWhenNewWorkArrives(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
-	tester := ui.NewTester(state.view, 760, 620)
+	tester := newTester(state.view, 760, 620)
 	now := tester.Now()
 	first := runClockTool("bash", "bash: echo hi", "running", now.Add(-4*time.Second))
 	first.Data.ToolCallID = "call-a"

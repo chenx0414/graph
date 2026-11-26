@@ -2,8 +2,6 @@ package main
 
 import (
 	"testing"
-
-	"github.com/egoist/mygo/ui"
 )
 
 func TestABackgroundToolNoticeIsNotAUserBubble(t *testing.T) {
@@ -11,7 +9,7 @@ func TestABackgroundToolNoticeIsNotAUserBubble(t *testing.T) {
 		ID: "m1", Role: "user", Kind: "chat", Text: "bash 已经结束（settled），结果在会话的工具调用里；请读它继续。",
 		Data: transcriptMessageData{Source: transcriptMessageSource{Kind: "tool_settled", Tool: "bash"}},
 	}}}
-	tester := ui.NewTester(chat.view, 900, 700)
+	tester := newTester(chat.view, 900, 700)
 	frames(tester)
 	if _, ok := tester.Find("后台任务通知"); !ok {
 		t.Fatalf("a background notice is shown as its own row, texts %q", tester.Texts())

@@ -4,8 +4,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/egoist/mygo/ui"
 )
 
 const pickerBrandModelsFixture = `{"models":[
@@ -42,7 +40,7 @@ func exactText(texts []string, want string) bool {
 
 func TestTheModelPickerShowsBrandIconsInsteadOfLetterTiles(t *testing.T) {
 	state := pickerBrandState(t)
-	tester := frames(ui.NewTester(state.view, 900, 700))
+	tester := frames(newTester(state.view, 900, 700))
 	texts := tester.Texts()
 	if exactText(texts, "C") {
 		t.Fatalf("a provider with a brand icon drops its letter tile, texts %q", texts)

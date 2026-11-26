@@ -5,8 +5,6 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
-
-	"github.com/egoist/mygo/ui"
 )
 
 func chatForLayoutTest(t *testing.T, messages int, questions int) *shellState {
@@ -49,7 +47,7 @@ func TestComposerIsVisibleWhateverTheTranscriptLength(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			state := chatForLayoutTest(t, test.messages, test.questions)
-			tester := ui.NewTester(state.view, test.width, test.height)
+			tester := newTester(state.view, test.width, test.height)
 			for frame := 0; frame < 3; frame++ {
 				tester.Frame()
 			}

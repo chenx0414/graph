@@ -3,8 +3,6 @@ package main
 import (
 	"testing"
 	"time"
-
-	"github.com/egoist/mygo/ui"
 )
 
 // TestTheAnswerClockTicksWhileTheAssistantSpeaks is wish 1 for the answer
@@ -13,7 +11,7 @@ import (
 // instead of waiting for a poll or a new message.
 func TestTheAnswerClockTicksWhileTheAssistantSpeaks(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
-	tester := ui.NewTester(state.view, 760, 620)
+	tester := newTester(state.view, 760, 620)
 	tester.Frame()
 	now := tester.Now()
 	state.messages = []transcriptMessage{
@@ -56,7 +54,7 @@ func TestTheAnswerClockTicksWhileTheAssistantSpeaks(t *testing.T) {
 // answer lands.
 func TestTheAnswerClockFreezesAcrossTheLiveToSettledSwap(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
-	tester := ui.NewTester(state.view, 760, 620)
+	tester := newTester(state.view, 760, 620)
 	tester.Frame()
 	now := tester.Now()
 	user := transcriptMessage{ID: "u1", Role: "user", Kind: "chat", Text: "帮我跑一下测试", State: "delivered",
@@ -91,7 +89,7 @@ func TestAnAnswerFromLongAgoShowsNoStopwatch(t *testing.T) {
 	state.messages = []transcriptMessage{
 		{ID: "a1", Role: "assistant", Kind: "chat", Text: "正在整理结果", State: "streaming", CreatedAt: 1_000_000},
 	}
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	if tester.HasText("用时") {
 		t.Fatalf("a stale timestamp invents no duration, texts %q", tester.Texts())
 	}
@@ -103,7 +101,7 @@ func TestAnAnswerFromLongAgoShowsNoStopwatch(t *testing.T) {
 // time, instead of freezing until the next poll flips the state.
 func TestTheAnswerClockKeepsTickingWhileTheRoundRuns(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
-	tester := ui.NewTester(state.view, 760, 620)
+	tester := newTester(state.view, 760, 620)
 	tester.Frame()
 	now := tester.Now()
 	state.roundMaster = "running"

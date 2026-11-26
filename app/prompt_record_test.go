@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/egoist/mygo/ui"
 )
 
 const promptRecordPayload = `{"taskId":"t1","nodeId":"master","kind":"agent","action":"master",
@@ -40,10 +38,10 @@ func promptRecordShell(t *testing.T, promptPayload string) *shellState {
 	shell.ensureModelMeta()
 	deadline := time.Now().Add(2 * time.Second)
 	for (shell.trajectory.data == nil || shell.modelMeta == nil) && time.Now().Before(deadline) {
-		frames(ui.NewTester(shell.view, 1440, 900))
+		frames(newTester(shell.view, 1440, 900))
 	}
 	shell.openModule("trajectory")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	for shell.promptRecord == nil && time.Now().Before(deadline) {
 		tester.Frame()
 	}
@@ -55,7 +53,7 @@ func promptRecordShell(t *testing.T, promptPayload string) *shellState {
 
 func TestTheContextCardShowsThePromptTheModelActuallyReceived(t *testing.T) {
 	shell := promptRecordShell(t, promptRecordPayload)
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	for _, tab := range []string{"上下文", "System Prompt", "工具声明"} {
 		if !tester.HasText(tab) {
 			t.Fatalf("the context card offers the %q tab, texts %q", tab, tester.Texts())
@@ -79,7 +77,7 @@ func TestTheContextCardShowsThePromptTheModelActuallyReceived(t *testing.T) {
 
 func TestTheToolsTabShowsTheRecordedDeclarations(t *testing.T) {
 	shell := promptRecordShell(t, promptRecordPayload)
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	if err := tester.Click("工具声明"); err != nil {
 		t.Fatalf("open the tools tab: %v", err)
 	}
@@ -94,7 +92,7 @@ func TestTheToolsTabShowsTheRecordedDeclarations(t *testing.T) {
 
 func TestAnUnrecordedPromptSaysSo(t *testing.T) {
 	shell := promptRecordShell(t, promptRecordEmptyPayload)
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	if err := tester.Click("System Prompt"); err != nil {
 		t.Fatalf("open the system prompt tab: %v", err)
 	}
@@ -108,7 +106,7 @@ func TestAnOldNoteDoesNotHideTheRecordedPrompt(t *testing.T) {
 	shell := promptRecordShell(t, `{"taskId":"t1","nodeId":"master","kind":"agent","action":"master",
 	 "recorded":{"operationId":"op-1","at":1700000000000,"text":"PROMPT-WITH-NOTE","tools":null},
 	 "briefing":null,"notes":["该节点没有自己的会话，简报无法找回。"]}`)
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	if err := tester.Click("System Prompt"); err != nil {
 		t.Fatalf("open the system prompt tab: %v", err)
 	}

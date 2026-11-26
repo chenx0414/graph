@@ -43,7 +43,7 @@ func TestTheProvidersPageReadsConfiguredStateFromMagpie(t *testing.T) {
 
 	shell := newShellState(server.URL, "")
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) == 2 })
 
 	if !tester.HasText("已连接") {
@@ -80,7 +80,7 @@ func TestTheProvidersPageKeepsAReadFailureUntilRetry(t *testing.T) {
 
 	shell := newShellState(server.URL, "")
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	providersFrameUntil(t, tester, func() bool { return tester.HasText("读不到 magpie") })
 	if !tester.HasText("读不到 magpie") {
 		t.Fatalf("a failed read stays visible, texts %q", tester.Texts())

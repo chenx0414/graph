@@ -11,7 +11,7 @@ import (
 // explicit trajectory so the test asserts what a user sees in a node session.
 func nodeContextTruthCard(data *conversationTrajectory, model, agentName string, window int64) *ui.Tester {
 	view := buildNodeContextCardData(data, model, agentName, window)
-	return frames(ui.NewTester(func(ctx *ui.Context) {
+	return frames(newTester(func(ctx *ui.Context) {
 		ui.Box(ctx).FillWidth().Height(320).Children(func() {
 			renderNodeContextCard(ctx, view)
 		})

@@ -35,7 +35,7 @@ func TestWorkspaceRefreshShowsTasksAndArtifactsWithoutANewChatMessage(t *testing
 	defer server.Close()
 	state := newShellState(server.URL, "tok")
 	state.selectConversation("c1")
-	tester := ui.NewTester(func(ctx *ui.Context) {
+	tester := newTester(func(ctx *ui.Context) {
 		applyTheme(ctx)
 		ui.Column(ctx).Children(func() {
 			state.panelTasks(ctx)
@@ -64,7 +64,7 @@ func TestWorkspaceRefreshShowsNewFleetResults(t *testing.T) {
 	state.fleet.data, _ = parseFleet([]byte(fleetSampleJSON))
 	state.fleet.conversationID = "g1"
 	state.openModule("fleet")
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	state.refresh()
 	awaitWorkspaceText(t, tester, "1024 个执行者的结果已汇总")
 }
@@ -86,7 +86,7 @@ func TestFleetArtifactOpensTheSelectedVersionOutsideTheCurrentConversation(t *te
 	state.fleet.data, _ = parseFleet([]byte(fleetSampleJSON))
 	state.fleet.conversationID = "g1"
 	state.openModule("fleet")
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	if err := tester.Click("共享产物 docs/spec.md · v2 · 2.0 KB"); err != nil {
 		t.Fatal(err)
 	}

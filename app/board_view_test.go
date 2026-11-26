@@ -13,7 +13,7 @@ import (
 
 func TestTheBoardShowsTheContextOverviewNetworkAndChatCards(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	for _, label := range []string{"当前上下文窗口", "Agent 网络窗口", "跨 Agent 协作窗口"} {
 		if !tester.HasText(label) {
 			t.Fatalf("the default board must present %q, texts %q", label, tester.Texts())
@@ -28,7 +28,7 @@ func TestTheBoardShowsTheContextOverviewNetworkAndChatCards(t *testing.T) {
 
 func TestTheBoardKeepsFixedNonOverlappingPartitions(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	rects := map[string]ui.Rect{}
 	for _, kind := range []string{"context-overview", "agent-network", "fleet-collaboration"} {
 		rect, ok := tester.Find(boardPanelTitle(kind) + "窗口")
@@ -61,7 +61,7 @@ func TestTheBoardKeepsFixedNonOverlappingPartitions(t *testing.T) {
 
 func TestDraggingAPanelBodySwapsItsPartition(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	network := state.board.rects["agent-network"]
 	collaboration := state.board.rects["fleet-collaboration"]
 	if network.H <= 0 || collaboration.H <= 0 {
@@ -84,7 +84,7 @@ func TestDraggingAPanelBodySwapsItsPartition(t *testing.T) {
 
 func TestDraggingToAPartitionEdgeSplitsIt(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	network := state.board.rects["agent-network"]
 	collaboration := state.board.rects["fleet-collaboration"]
 	if network.H <= 0 || collaboration.H <= 0 {
@@ -125,7 +125,7 @@ func TestADividerDragResizesBothPartitions(t *testing.T) {
 		{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "events"}},
 		{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "artifacts"}},
 	}}
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	before, ok := tester.Find(boardPanelTitle("fleet-events") + "窗口")
 	if !ok {
 		t.Fatalf("the events card never rendered, texts %q", tester.Texts())
@@ -216,7 +216,7 @@ func TestLoadingTheBoardDropsTheRemovedPages(t *testing.T) {
 			t.Fatalf("removed panel leaf survived, leaves %v", boardLeafIDs(&state.board.pages[0].Layout))
 		}
 	}
-	frames(ui.NewTester(state.view, 1440, 900))
+	frames(newTester(state.view, 1440, 900))
 }
 
 func TestLoadingAnOldBoardAddsTheTrajectoryAndInsightsCards(t *testing.T) {
@@ -250,7 +250,7 @@ func showTaskListBoard(state *shellState) {
 func TestTheWhiteboardHeaderSlidesOverItsContentWithoutMovingIt(t *testing.T) {
 	state := fourPaneShell(t)
 	showTaskListBoard(state)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	card, ok := tester.Find(boardPanelTitle("tasks") + "窗口")
 	if !ok {
 		t.Fatalf("the tasks card never rendered, texts %q", tester.Texts())
@@ -281,7 +281,7 @@ func TestTheWhiteboardHeaderSlidesOverItsContentWithoutMovingIt(t *testing.T) {
 func TestTheWhiteboardKeepsTheCardScrollWhenThePointerLeaves(t *testing.T) {
 	state := fourPaneShell(t)
 	showTaskListBoard(state)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	card, ok := tester.Find(boardPanelTitle("tasks") + "窗口")
 	if !ok {
 		t.Fatalf("the tasks card never rendered, texts %q", tester.Texts())
@@ -308,7 +308,7 @@ func TestAModulePageShowsItsTitleWithoutACardHeader(t *testing.T) {
 	state := fourPaneShell(t)
 	state.openModule("models")
 
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	title := boardPanelTitle("models")
 	if tester.HasText(title + "窗口") {
 		t.Fatalf("the module page repeats the title in a card header, texts %q", tester.Texts())
@@ -329,7 +329,7 @@ func TestAModulePageShowsItsTitleWithoutACardHeader(t *testing.T) {
 
 func TestTheWhiteboardTakesTheListBackgroundAndLiftsItsCards(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	row, ok := tester.Find("mygo")
 	if !ok {
 		t.Fatalf("the conversation list never rendered, texts %q", tester.Texts())
@@ -370,7 +370,7 @@ func absInt(v int) int {
 
 func TestTheWhiteboardTabIsPinnedAlignedAndLarger(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	tab, ok := tester.Find("标签页 白板")
 	if !ok {
 		t.Fatalf("the whiteboard tab never rendered, texts %q", tester.Texts())
@@ -410,7 +410,7 @@ func TestTheWhiteboardTabIsPinnedAlignedAndLarger(t *testing.T) {
 func TestTheWhiteboardResetsFromItsTabMenu(t *testing.T) {
 	state := fourPaneShell(t)
 	state.board.pages[0].Panels = state.board.pages[0].Panels[:1]
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	if err := tester.RightClick("标签页 白板"); err != nil {
 		t.Fatalf("open the tab menu: %v", err)
 	}
@@ -468,7 +468,7 @@ func TestLoadingPinsTheWhiteboardFirstAndDropsExtraOnes(t *testing.T) {
 
 func TestTheBoardTabBarHasNoBottomRule(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	tab, ok := tester.Find("标签页 白板")
 	if !ok {
 		t.Fatalf("the whiteboard tab never rendered, texts %q", tester.Texts())
@@ -485,7 +485,7 @@ func TestTheBoardTabBarHasNoBottomRule(t *testing.T) {
 
 func TestTheBoardStacksTheContextOverviewAndTheNetwork(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	rects := map[string]ui.Rect{}
 	for _, kind := range []string{"context-overview", "agent-network", "fleet-collaboration"} {
 		rect, ok := tester.Find(boardPanelTitle(kind) + "窗口")

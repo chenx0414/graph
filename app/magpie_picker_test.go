@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/egoist/mygo/ui"
 )
 
 const magpiePickerModelsFixture = `{"models":[
@@ -71,7 +69,7 @@ func TestThePickerFiltersByTheMagpieProvider(t *testing.T) {
 			t.Fatalf("the filter keeps only codex models, got %+v", models)
 		}
 	}
-	tester := frames(ui.NewTester(state.view, 900, 700))
+	tester := frames(newTester(state.view, 900, 700))
 	if !tester.HasText("gpt-6-astra") {
 		t.Fatalf("the picker shows the provider's model, texts %q", tester.Texts())
 	}
@@ -124,7 +122,7 @@ func TestUsingAProviderOpensThePickerOnItsModels(t *testing.T) {
 	shell.chat.active = "c1"
 	shell.chat.loadModels()
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) > 0 })
 	if err := tester.Click("用 ChatGPT 的模型"); err != nil {
 		t.Fatalf("use the codex models: %v", err)
@@ -148,7 +146,7 @@ func TestRefreshingProvidersDropsTheStaleModelList(t *testing.T) {
 	shell.chat.loadModels()
 	shell.modelMeta = map[string]modelMeta{"stale": {id: "stale"}}
 	shell.openModule("providers")
-	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	tester := frames(newTester(shell.view, 1440, 900))
 	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) > 0 })
 	shell.chat.models = []modelChoice{{id: "magpie/codex/stale"}}
 	shell.refreshProviders()

@@ -66,7 +66,7 @@ func TestACardScrolledBetweenBothEndsKeepsBothBands(t *testing.T) {
 
 func TestTheChatTranscriptClearsTheFadeAtItsEnd(t *testing.T) {
 	state := transcriptFadeShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	chat := state.chat
 	if !chat.list.AtEnd() {
 		t.Fatalf("a chat transcript follows its end, at end %v", chat.list.AtEnd())
@@ -91,7 +91,7 @@ func TestTheConversationListClearsTheFadeAtItsTop(t *testing.T) {
 			ID: fmt.Sprintf("c%02d", index), Title: fmt.Sprintf("会话行 %02d", index),
 		})
 	}
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	if band := state.listScroll.mask().Stops[1].At; band != 0 {
 		t.Fatalf("a list resting at its top keeps no fade band there, got %.2f", band)
 	}
@@ -106,7 +106,7 @@ func TestTheConversationListClearsTheFadeAtItsTop(t *testing.T) {
 
 func TestTheChatTranscriptClearsTheFadeWhenScrolledToItsTop(t *testing.T) {
 	state := transcriptFadeShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	chat := state.chat
 	chat.track.Y = 0
 	chat.track.X = 0
@@ -126,7 +126,7 @@ func TestTheChatTranscriptClearsTheFadeWhenScrolledToItsTop(t *testing.T) {
 
 func TestTheWhiteboardCanvasClearsTheFadeOnTheEdgeItRestsOn(t *testing.T) {
 	state := newShellState("http://127.0.0.1:1", "")
-	tester := frames(ui.NewTester(state.view, 1440, 500))
+	tester := frames(newTester(state.view, 1440, 500))
 	canvas := &state.board.viewportScroll
 	if canvas.MaxY <= 0 {
 		t.Fatalf("the whiteboard must scroll at this height, maxY %0.1f", canvas.MaxY)
@@ -181,7 +181,7 @@ func TestTheConversationListRestingAtItsTopKeepsOneSteadyPlace(t *testing.T) {
 			ID: fmt.Sprintf("c%02d", index), Title: fmt.Sprintf("会话行 %02d", index),
 		})
 	}
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	settled := state.listScroll.MaxY
 	for frame := 0; frame < 6; frame++ {
 		tester.Frame()
@@ -193,7 +193,7 @@ func TestTheConversationListRestingAtItsTopKeepsOneSteadyPlace(t *testing.T) {
 
 func TestTheChatTranscriptRestingAtItsEndKeepsOneSteadyPlace(t *testing.T) {
 	state := transcriptFadeShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	chat := state.chat
 	settled := chat.track.MaxY
 	for frame := 0; frame < 6; frame++ {
@@ -234,7 +234,7 @@ func TestShortContentKeepsItsEdgeClearance(t *testing.T) {
 		Text: "短消息", State: "done", CreatedAt: 1700000000000}}
 	chat.status = ""
 	chat.loading = false
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	for name, scroll := range map[string]*edgeScroll{
 		"the chat transcript":   &chat.track,
 		"the conversation list": &state.listScroll,
@@ -288,7 +288,7 @@ func TestACardWhoseRowsFitKeepsItsEdgeClearance(t *testing.T) {
 			})
 			scroll = state.board.scrolls["history"]
 		}
-		tester := frames(ui.NewTester(view, 1440, 900))
+		tester := frames(newTester(view, 1440, 900))
 		if scroll == nil || scroll.MaxY != 0 {
 			t.Fatalf("%d rows fit the card, maxY %0.1f", rows, scroll.MaxY)
 		}
@@ -312,7 +312,7 @@ func TestAnEmptyTranscriptHoldsNoScrollableEdges(t *testing.T) {
 	chat.messages = nil
 	chat.status = ""
 	chat.loading = false
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	if top, bottom := chat.track.insets(); top != fadeEdgeClearance || bottom != fadeEdgeClearance {
 		t.Fatalf("an empty transcript has nothing to scroll: both edges keep their clearance, got (%0.1f, %0.1f)", top, bottom)
 	}
@@ -337,7 +337,7 @@ func TestContentJustUnderOnePageSettlesInsteadOfPopingAScrollbar(t *testing.T) {
 		}
 		chat.status = ""
 		chat.loading = false
-		tester := frames(ui.NewTester(state.view, 1440, 900))
+		tester := frames(newTester(state.view, 1440, 900))
 		settled := chat.track.MaxY
 		top, bottom := chat.track.insets()
 		for frame := 0; frame < 8; frame++ {
@@ -365,7 +365,7 @@ func TestContentThatFillsThePageKeepsTheClearanceThatFits(t *testing.T) {
 		}
 		chat.status = ""
 		chat.loading = false
-		tester := frames(ui.NewTester(state.view, 1440, 900))
+		tester := frames(newTester(state.view, 1440, 900))
 		tester.Frame()
 		top, bottom := chat.track.insets()
 		if chat.track.MaxY == 0 && (top != fadeEdgeClearance || bottom != fadeEdgeClearance) {

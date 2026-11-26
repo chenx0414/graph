@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/egoist/mygo/ui"
 )
 
 var detailFixtures = map[string]string{
@@ -52,7 +50,7 @@ func TestTheResourceDetailListsItsFieldsAndPath(t *testing.T) {
 	state := newResourceState(server.URL, "tok")
 	state.load()
 	state.selectResource("browser-use")
-	tester := ui.NewTester(state.view, 1200, 820)
+	tester := newTester(state.view, 1200, 820)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
@@ -198,7 +196,7 @@ func TestAFieldTheDaemonReportsConfiguredShowsFilled(t *testing.T) {
 	state := newResourceState(server.URL, "tok")
 	state.load()
 	state.selectResource("browser-use")
-	tester := ui.NewTester(state.view, 900, 700)
+	tester := newTester(state.view, 900, 700)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
@@ -217,7 +215,7 @@ func TestClosingTheDetailReturnsToTheLibrary(t *testing.T) {
 	state := newResourceState(server.URL, "tok")
 	state.load()
 	state.selectResource("browser-use")
-	tester := ui.NewTester(state.view, 1200, 820)
+	tester := newTester(state.view, 1200, 820)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
@@ -239,7 +237,7 @@ func TestClickingARowOpensItsDetail(t *testing.T) {
 
 	state := newResourceState(server.URL, "tok")
 	state.load()
-	tester := ui.NewTester(state.view, 1200, 820)
+	tester := newTester(state.view, 1200, 820)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}

@@ -2,14 +2,12 @@ package main
 
 import (
 	"testing"
-
-	"github.com/egoist/mygo/ui"
 )
 
 func TestASingleCardModulePageSitsOnTheWhiteboardBackdrop(t *testing.T) {
 	state := fourPaneShell(t)
 	state.openModule("settings")
-	tester := frames(ui.NewTester(state.view, 1598, 928))
+	tester := frames(newTester(state.view, 1598, 928))
 	rect, ok := state.board.rects["settings"]
 	if !ok || rect.W <= 0 {
 		t.Fatalf("the settings card never laid out, rects %+v", state.board.rects)
@@ -35,7 +33,7 @@ func TestASingleCardModulePageSitsOnTheWhiteboardBackdrop(t *testing.T) {
 func TestTheHoverHeaderKeepsItsExpandAndRemoveActions(t *testing.T) {
 	state := fourPaneShell(t)
 	showTaskListBoard(state)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	card, ok := tester.Find(boardPanelTitle("tasks") + "窗口")
 	if !ok {
 		t.Fatalf("the tasks card never rendered, texts %q", tester.Texts())

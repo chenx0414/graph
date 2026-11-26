@@ -10,8 +10,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/egoist/mygo/ui"
 )
 
 func TestTheConversationListShowsOneConversationPerProject(t *testing.T) {
@@ -70,7 +68,7 @@ func TestTheAppOpensTheMainAgentConversation(t *testing.T) {
 	if state.activeID != "g1" {
 		t.Fatalf("the app opens the main agent conversation, active %q", state.activeID)
 	}
-	tester := frames(ui.NewTester(state.view, 1000, 640))
+	tester := frames(newTester(state.view, 1000, 640))
 	if !tester.HasText("主控在这里") {
 		t.Fatalf("the pane shows the main agent conversation, texts %q", tester.Texts())
 	}
@@ -102,7 +100,7 @@ func TestShellSidebarSwitchesConversation(t *testing.T) {
 	if active := state.active(); active == nil || active.active != "c1" {
 		t.Fatalf("the first project opens first, active %q", state.activeID)
 	}
-	tester := ui.NewTester(state.view, 1000, 640)
+	tester := newTester(state.view, 1000, 640)
 	frames(tester)
 	if !tester.HasText("13-Graph") || !tester.HasText("mygo") {
 		t.Fatalf("the sidebar must show both projects, texts %q", tester.Texts())

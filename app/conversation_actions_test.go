@@ -44,7 +44,7 @@ func TestTheComposerButtonPausesARunningRound(t *testing.T) {
 	if !state.busy() {
 		t.Fatal("a streaming reply means the round is running")
 	}
-	tester := ui.NewTester(state.view, 760, 620)
+	tester := newTester(state.view, 760, 620)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
@@ -99,7 +99,7 @@ func TestTheComposerSendsWhilePausedWhenAPromptWaits(t *testing.T) {
 	state := newChatState(server.URL, "tok")
 	state.open("c1")
 	state.draft = "继续做"
-	tester := ui.NewTester(state.view, 760, 620)
+	tester := newTester(state.view, 760, 620)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
@@ -126,7 +126,7 @@ func TestTheComposerShowsTheReferencePlaceholders(t *testing.T) {
 
 	state := newChatState(server.URL, "tok")
 	state.open("c1")
-	tester := ui.NewTester(state.view, 760, 620)
+	tester := newTester(state.view, 760, 620)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
@@ -159,7 +159,7 @@ func TestQueuedMessagesCanBeCancelled(t *testing.T) {
 	if state.busy() {
 		t.Fatal("a queued message is not a running round")
 	}
-	tester := ui.NewTester(state.view, 760, 620)
+	tester := newTester(state.view, 760, 620)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
@@ -199,7 +199,7 @@ func TestPausedStateComesFromTheConversation(t *testing.T) {
 	if !state.paused {
 		t.Fatal("the conversation says it is paused, so the pane must say so")
 	}
-	tester := ui.NewTester(state.view, 760, 620)
+	tester := newTester(state.view, 760, 620)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
@@ -216,13 +216,13 @@ func TestTheComposerGrowsWithThePrompt(t *testing.T) {
 
 	state := newChatState(server.URL, "tok")
 	state.open("c1")
-	short := frames(ui.NewTester(state.view, 760, 620))
+	short := frames(newTester(state.view, 760, 620))
 	one, ok := short.Find("消息")
 	if !ok {
 		t.Fatalf("the composer input never rendered, texts %q", short.Texts())
 	}
 	state.draft = strings.Repeat("这是一段很长的提示词，用来让输入框换行。", 12)
-	tall := frames(ui.NewTester(state.view, 760, 620))
+	tall := frames(newTester(state.view, 760, 620))
 	many, ok := tall.Find("消息")
 	if !ok {
 		t.Fatalf("the grown composer input never rendered, texts %q", tall.Texts())
@@ -231,7 +231,7 @@ func TestTheComposerGrowsWithThePrompt(t *testing.T) {
 		t.Fatalf("a long prompt must grow the field, one %v many %v", one.H, many.H)
 	}
 	state.draft = ""
-	back := frames(ui.NewTester(state.view, 760, 620))
+	back := frames(newTester(state.view, 760, 620))
 	again, ok := back.Find("消息")
 	if !ok {
 		t.Fatalf("the shrunk composer input never rendered, texts %q", back.Texts())
@@ -257,7 +257,7 @@ func TestTheComposerSendsOnEnterAndBreaksLinesWithShift(t *testing.T) {
 
 	state := newChatState(server.URL, "tok")
 	state.open("c1")
-	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester := frames(newTester(state.view, 760, 620))
 	if err := tester.Click("消息"); err != nil {
 		t.Fatalf("focus the composer field: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestTheModelModuleSwitchesTheConversationModel(t *testing.T) {
 	state.chat = chat
 	state.activeID = "c1"
 	state.board.pages = []boardPage{{ID: "board", Title: boardDefaultTitle, Panels: []boardPanel{{ID: "models", Kind: "models"}}, Layout: boardNode{Kind: "panel", PanelID: "models"}}}
-	tester := ui.NewTester(state.view, 1100, 760)
+	tester := newTester(state.view, 1100, 760)
 	frames(tester)
 	if !tester.HasText("模型配置") || !tester.HasText("deepseek-v4.1-flash") || !tester.HasText("deepseek") {
 		t.Fatalf("the model module must list the choices, texts %q", tester.Texts())

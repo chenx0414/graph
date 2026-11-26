@@ -4,8 +4,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/egoist/mygo/ui"
 )
 
 func emptyModelShell(t *testing.T) *shellState {
@@ -34,7 +32,7 @@ func emptyModelShell(t *testing.T) *shellState {
 func TestAMachineWithoutModelsSaysSoInsteadOfShowingOff(t *testing.T) {
 	state := emptyModelShell(t)
 	state.chat.syncModelTelemetry([]byte(`{"telemetry":{"thinkingLevel":"off"}}`))
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	if tester.HasText("off") {
 		t.Fatalf("an unconfigured machine shows no thinking level, texts %q", tester.Texts())
 	}
@@ -46,7 +44,7 @@ func TestAMachineWithoutModelsSaysSoInsteadOfShowingOff(t *testing.T) {
 func TestThePickerExplainsAnEmptyModelList(t *testing.T) {
 	state := emptyModelShell(t)
 	state.chat.modelPicker.open = true
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	if !tester.HasText("还没有可用的模型") {
 		t.Fatalf("the picker explains why it is empty, texts %q", tester.Texts())
 	}
@@ -58,7 +56,7 @@ func TestThePickerExplainsAnEmptyModelList(t *testing.T) {
 func TestAModelListThatArrivesLateReplacesTheEmptyState(t *testing.T) {
 	state := emptyModelShell(t)
 	state.chat.modelPicker.open = true
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	if !tester.HasText("还没有可用的模型") {
 		t.Fatalf("the picker starts empty, texts %q", tester.Texts())
 	}
@@ -78,7 +76,7 @@ func TestAMachineWithoutModelsPointsAtTheProvidersPage(t *testing.T) {
 	opened := false
 	state.chat.openProviders = func() { opened = true }
 	state.chat.modelPicker.open = true
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	if err := tester.Click("去供应商页添加"); err != nil {
 		t.Fatalf("the empty picker offers a way to add a provider: %v texts %q", err, tester.Texts())
 	}

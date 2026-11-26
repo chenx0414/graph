@@ -10,7 +10,7 @@ import (
 func TestAModulePageShowsItsTitleOnlyOnce(t *testing.T) {
 	state := fourPaneShell(t)
 	state.openModule("models")
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	title := boardPanelTitle("models")
 	count := 0
 	for _, text := range tester.Texts() {
@@ -37,7 +37,7 @@ func TestTheRailNoLongerOffersTheInsightsPage(t *testing.T) {
 		}
 	}
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	if tester.HasText("洞察") {
 		t.Fatalf("the shell still renders an insights entry, texts %q", tester.Texts())
 	}
@@ -68,7 +68,7 @@ func TestTheFleetPageDropsTheTaskCard(t *testing.T) {
 
 func TestTheDefaultBoardShowsTheContextNetworkAndCollaboration(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	for _, label := range []string{"当前上下文窗口", "Agent 网络窗口", "跨 Agent 协作窗口"} {
 		if !tester.HasText(label) {
 			t.Fatalf("the default board must present %q, texts %q", label, tester.Texts())
@@ -155,7 +155,7 @@ func TestTheDefaultFleetCardsKeepTheirInformationAtBothWindowSizes(t *testing.T)
 	for _, size := range [][2]int{{1440, 900}, {1280, 800}} {
 		state := fleetServerShell(t, fleetSampleServer)
 		state.openModule("fleet")
-		tester := frames(ui.NewTester(state.view, size[0], size[1]))
+		tester := frames(newTester(state.view, size[0], size[1]))
 		for attempt := 0; attempt < 20 && state.fleet.data == nil && state.fleet.failed == ""; attempt++ {
 			tester.Frame()
 		}
@@ -194,7 +194,7 @@ func TestTheDefaultFleetCardsKeepTheirInformationAtBothWindowSizes(t *testing.T)
 
 func TestTheDefaultBoardGivesEachCardItsAdmiralShare(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 2000, 1400))
+	tester := frames(newTester(state.view, 2000, 1400))
 	heights := map[string]float32{}
 	for _, kind := range []string{"context-overview", "agent-network", "fleet-collaboration"} {
 		rect, ok := tester.Find(boardPanelTitle(kind) + "窗口")
@@ -220,7 +220,7 @@ func TestTheDefaultBoardGivesEachCardItsAdmiralShare(t *testing.T) {
 func TestTheFleetCollaborationCardFitsItsLanesInsteadOfStretching(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
 	state.openModule("fleet")
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	for attempt := 0; attempt < 20 && state.fleet.data == nil && state.fleet.failed == ""; attempt++ {
 		tester.Frame()
 	}

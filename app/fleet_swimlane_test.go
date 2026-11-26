@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/egoist/mygo/ui"
 )
 
 func swimlaneState(t *testing.T) *shellState {
@@ -19,7 +17,7 @@ func swimlaneState(t *testing.T) *shellState {
 
 func TestTheCollaborationCardShowsOneLanePerAgent(t *testing.T) {
 	state := swimlaneState(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	model := buildFleetSwimlane(state.fleet.data, "", true, true)
 	if len(model.Lanes) != 4 {
 		t.Fatalf("one lane per participating agent, got %+v", model.Lanes)
@@ -33,7 +31,7 @@ func TestTheCollaborationCardShowsOneLanePerAgent(t *testing.T) {
 
 func TestTheCollaborationCardCountsRecordsAndLanes(t *testing.T) {
 	state := swimlaneState(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	if !tester.HasText("3 条协作") {
 		t.Fatalf("the header counts the collaboration records, texts %q", tester.Texts())
 	}
@@ -130,7 +128,7 @@ func TestTheCollaborationCardOpensTheMessageBehindAMark(t *testing.T) {
 	state := newShellState(server.URL, "tok")
 	state.load()
 	state.openModule("fleet")
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	deadline := time.Now().Add(2 * time.Second)
 	for state.fleet.data == nil && state.fleet.failed == "" {
 		if !time.Now().Before(deadline) {
@@ -243,7 +241,7 @@ func TestTheCollaborationCardReachesAMessageOlderThanTheFirstPage(t *testing.T) 
 	state := newShellState(server.URL, "tok")
 	state.load()
 	state.openModule("fleet")
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	deadline := time.Now().Add(2 * time.Second)
 	for state.fleet.data == nil && state.fleet.failed == "" {
 		if !time.Now().Before(deadline) {

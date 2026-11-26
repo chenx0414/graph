@@ -122,7 +122,7 @@ func TestTheFleetPageExplainsAFailedRead(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	})
 	state.openModule("fleet")
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	deadline := time.Now().Add(2 * time.Second)
 	for state.fleet.failed == "" {
 		if !time.Now().Before(deadline) {
@@ -173,7 +173,7 @@ func TestTheFleetNetworkAggregatesAThousandAgents(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
 	state.fleet = fleetState{conversationID: "g1", data: thousandAgentFleet()}
 	state.openModule("fleet")
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	if !tester.HasText("1,000 个 Agent") {
 		t.Fatalf("the network must caption the thousand agents, texts %q", tester.Texts())
 	}
@@ -246,7 +246,7 @@ func TestClickingAGraphUnitOpensItsGraphPage(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
 	state.openModule("fleet")
 	state.openModuleWithScope("agent-network", "fleet")
-	tester := frames(ui.NewTester(state.view, 1880, 900))
+	tester := frames(newTester(state.view, 1880, 900))
 	if err := tester.Click("编队图 实现四栏页面"); err != nil {
 		t.Fatalf("click the graph unit: %v", err)
 	}
@@ -276,7 +276,7 @@ func TestTheAgentPageClosesLikeAModulePage(t *testing.T) {
 	if err := state.openFleetAgentPage(data.Agents[1]); err != nil {
 		t.Fatalf("open the agent page: %v", err)
 	}
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	if err := tester.Click("关闭 13-Graph"); err != nil {
 		t.Fatalf("close the agent page: %v", err)
 	}
@@ -406,7 +406,7 @@ func TestTheFleetNetworkStartsAtTheWorldOrigin(t *testing.T) {
 	state := fleetServerShell(t, fleetSampleServer)
 	state.openModule("fleet")
 	state.openModuleWithScope("agent-network", "fleet")
-	frames(ui.NewTester(state.view, 1440, 900))
+	frames(newTester(state.view, 1440, 900))
 	if state.boardNet.view.x != 0 && state.boardNet.view.zoom == 0 {
 		t.Fatalf("the network canvas starts fitted, view %+v", state.boardNet.view)
 	}
@@ -417,7 +417,7 @@ func TestTheFleetTabResetsFromItsContextMenu(t *testing.T) {
 	state.openModule("fleet")
 	state.board.pages[1].Panels = state.board.pages[1].Panels[:2]
 	state.board.pages[1].Layout = layoutFromPanels(state.board.pages[1].Panels)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	if err := tester.RightClick("标签页 编队"); err != nil {
 		t.Fatalf("open the fleet tab menu: %v", err)
 	}

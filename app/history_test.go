@@ -89,7 +89,7 @@ func TestScrollingUpLoadsOlderHistory(t *testing.T) {
 	server, _ := historyPagingServer(t)
 	state := newChatState(server.URL, "tok")
 	state.open("c1")
-	tester := ui.NewTester(state.view, 700, 500)
+	tester := newTester(state.view, 700, 500)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
@@ -175,7 +175,7 @@ func TestLoadingOlderHistoryKeepsTheReaderInPlace(t *testing.T) {
 
 	state := newChatState(server.URL, "tok")
 	state.open("c1")
-	tester := ui.NewTester(state.view, 700, 500)
+	tester := newTester(state.view, 700, 500)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}

@@ -59,7 +59,7 @@ func TestTheOctopusFloatsOnItsBackground(t *testing.T) {
 			})
 		})
 	}
-	tester := frames(ui.NewTester(view, 120, 80))
+	tester := frames(newTester(view, 120, 80))
 	img := tester.Image()
 	if tile := countColor(img, gwtheme.Light().Background); tile != 0 {
 		t.Fatalf("the octopus carries no tile, %d background pixels", tile)
@@ -98,7 +98,7 @@ func TestTheOctopusFloatsOnItsBackground(t *testing.T) {
 
 func TestTheMainAgentRowCentersItsContent(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	row, ok := tester.Find("main agent 会话")
 	if !ok {
 		t.Fatalf("the main agent row must be named, texts %q", tester.Texts())
@@ -126,7 +126,7 @@ func TestTheMainAgentRowCentersItsContent(t *testing.T) {
 
 func TestTheMainAgentOctopusAnimates(t *testing.T) {
 	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	first := tester.Image()
 	if ink := countColor(first, gwtheme.Light().Foreground); ink < 100 {
 		t.Fatalf("the octopus must be drawn in theme ink, %d ink pixels", ink)

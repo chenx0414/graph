@@ -7,8 +7,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/egoist/mygo/ui"
 )
 
 type mainAgentBootstrap struct {
@@ -58,7 +56,7 @@ func TestClickingMainAgentOnAnEmptyConsoleStartsTheGlobalThread(t *testing.T) {
 	server := bootstrap.server(t)
 	state := newShellState(server.URL, "tok")
 	state.load()
-	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester := frames(newTester(state.view, 1440, 900))
 	if state.supervisorID != "" {
 		t.Fatalf("the fixture starts without a global thread, got %q", state.supervisorID)
 	}
