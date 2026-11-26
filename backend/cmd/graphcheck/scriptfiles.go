@@ -18,7 +18,8 @@ var scriptFileExtensions = []string{".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"
 
 var scriptFileSkippedDirs = map[string]bool{
 	".git": true, "node_modules": true, "dist": true, "build": true,
-	".run": true, // generated run trees are not repository source
+	".run":       true, // generated run trees are not repository source
+	".worktrees": true, // a second checkout of this same repository, not new source
 }
 
 func isScriptFile(path string) bool {

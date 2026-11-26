@@ -110,3 +110,26 @@ func TestAnIgnoredSourceFileIsStillReported(t *testing.T) {
 		t.Fatalf("only the generated run tree is exempt, got %v", offenders)
 	}
 }
+
+// A worktree holds a second checkout of the same repository. Its files are the
+// same files, not new script code, so the scan must not read them as offenders:
+// a worktree would otherwise fail the gate for a file that is already allowed.
+func TestScriptFileScanIgnoresWorktrees(t *testing.T) {
+	root := t.TempDir()
+	worktree := filepath.Join(root, ".worktrees", "ui-single-executor", "backend", "internal", "graph", "embedded", "runtime")
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"module-worker.mjs", "check-resolver.cjs"} {
+		if err := os.WriteFile(filepath.Join(worktree, name), []byte("export {}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	offenders, err := scanScriptFiles(root, nil)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(offenders) != 0 {
+		t.Fatalf("a worktree's copy is not new script code, got %v", offenders)
+	}
+}
