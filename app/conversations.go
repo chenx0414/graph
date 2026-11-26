@@ -142,20 +142,30 @@ func (c *chatState) send() {
 
 func (c *chatState) sendText(text string) {
 	text = stripSpace(text)
-	if text == "" || c.active == "" || c.source == nil {
+	// The send itself runs off the renderer; every field it then clears belongs
+	// to the goroutine that owns the shell.
+	source := readShell(c.window, func() agentChatSource {
+		if text == "" || c.active == "" || c.source == nil {
+			return nil
+		}
+		return c.source
+	})
+	if source == nil {
 		return
 	}
-	if err := c.source.Send(c, text); err != nil {
-		c.failUser("发送失败：" + err.Error())
+	if err := source.Send(c, text); err != nil {
+		onUI(c.window, func() { c.failUser("发送失败：" + err.Error()) })
 		return
 	}
-	if stripSpace(c.draft) == text {
-		c.draft = ""
-	}
-	c.attachments = nil
-	c.focusComposer = true
-	c.status = ""
-	c.problem = ""
+	onUI(c.window, func() {
+		if stripSpace(c.draft) == text {
+			c.draft = ""
+		}
+		c.attachments = nil
+		c.focusComposer = true
+		c.status = ""
+		c.problem = ""
+	})
 	c.refresh()
 	if c.source.Follows() {
 		go c.follow()
