@@ -48,8 +48,16 @@ type uiExecutor struct {
 	once    sync.Once
 	work    chan func()
 	owner   uint64
-	queued  []func()
+	queued  []queuedCall
 	adopted bool
+	gen     uint64
+}
+
+// queuedCall remembers which shell generation posted it. A background load that
+// outlives the shell it started in must not write the one that replaced it.
+type queuedCall struct {
+	gen   uint64
+	apply func()
 }
 
 var shellExecutor = &uiExecutor{}
@@ -63,6 +71,7 @@ func claimShellOwner() {
 	e.mu.Lock()
 	e.owner = currentGoroutine()
 	e.adopted = true
+	e.gen++
 	e.queued = nil
 	e.mu.Unlock()
 }
@@ -75,6 +84,8 @@ func adoptTestOwner() {
 	e.mu.Lock()
 	e.owner = currentGoroutine()
 	e.adopted = true
+	e.gen++
+	e.queued = nil
 	e.mu.Unlock()
 }
 
@@ -86,6 +97,7 @@ func releaseTestOwner() {
 	e.mu.Lock()
 	e.owner = 0
 	e.adopted = false
+	e.gen++
 	e.queued = nil
 	e.mu.Unlock()
 }
@@ -97,12 +109,18 @@ func drainPosted() {
 		e.mu.Lock()
 		pending := e.queued
 		e.queued = nil
+		gen := e.gen
 		e.mu.Unlock()
 		if len(pending) == 0 {
 			return
 		}
-		for _, apply := range pending {
-			apply()
+		for _, call := range pending {
+			// A call posted by a shell that has since been replaced is dropped: it
+			// would write a state that no longer belongs to it.
+			if call.gen != gen {
+				continue
+			}
+			call.apply()
 		}
 	}
 }
@@ -163,7 +181,7 @@ func onUI(window *mygo.Window, apply func()) {
 		// The owner drains these itself, so the write happens on the goroutine
 		// that also reads the state.
 		e.mu.Lock()
-		e.queued = append(e.queued, apply)
+		e.queued = append(e.queued, queuedCall{gen: e.gen, apply: apply})
 		e.mu.Unlock()
 		return
 	}
@@ -198,7 +216,7 @@ func readShell[T any](window *mygo.Window, read func() T) T {
 		// stale is the trap; posting the read itself is the fix.
 		var value T
 		e.mu.Lock()
-		e.queued = append(e.queued, func() { value = read() })
+		e.queued = append(e.queued, queuedCall{gen: e.gen, apply: func() { value = read() }})
 		e.mu.Unlock()
 		drainPosted()
 		return value
