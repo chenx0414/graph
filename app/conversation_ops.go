@@ -16,25 +16,31 @@ func (c *chatState) cancelQueued(messageID string) {
 }
 
 func (c *chatState) setPaused(paused bool) {
-	if c.active == "" {
+	// The button starts this on a bare goroutine; the request stays there and the
+	// paused flag is written where the render reads it.
+	active := readShell(c.window, func() string { return c.active })
+	if active == "" {
 		return
 	}
 	action := "pause"
 	if !paused {
 		action = "resume"
 	}
-	if _, err := c.api.post("/api/conversations/"+c.active+"/"+action, map[string]string{"requestId": requestID("native-" + action)}); err != nil {
-		c.status = "操作失败：" + err.Error()
+	_, err := c.api.post("/api/conversations/"+active+"/"+action, map[string]string{"requestId": requestID("native-" + action)})
+	onUI(c.window, func() {
+		if err != nil {
+			c.status = "操作失败：" + err.Error()
+			c.frame()
+			return
+		}
+		c.paused = paused
+		if paused {
+			c.status = "已暂停：这一轮与队列都会停下，点「继续」接着跑"
+		} else {
+			c.status = "已继续"
+		}
 		c.frame()
-		return
-	}
-	c.paused = paused
-	if paused {
-		c.status = "已暂停：这一轮与队列都会停下，点「继续」接着跑"
-	} else {
-		c.status = "已继续"
-	}
-	c.frame()
+	})
 }
 
 type projectListPayload struct {

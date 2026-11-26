@@ -56,6 +56,7 @@ func TestTheComposerButtonPausesARunningRound(t *testing.T) {
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for state.status == "" && time.Now().Before(deadline) {
+		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
 	if !contains(posted["/api/conversations/c1/pause"], "requestId") {
@@ -75,6 +76,7 @@ func TestTheComposerButtonPausesARunningRound(t *testing.T) {
 	}
 	deadline = time.Now().Add(2 * time.Second)
 	for state.paused && time.Now().Before(deadline) {
+		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
 	if !contains(posted["/api/conversations/c1/resume"], "requestId") || state.paused {
@@ -181,6 +183,7 @@ func TestQueuedMessagesCanBeCancelled(t *testing.T) {
 	}
 	deadline = time.Now().Add(2 * time.Second)
 	for state.status == "" && time.Now().Before(deadline) {
+		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
 	if state.status != "已撤销排队消息" {
