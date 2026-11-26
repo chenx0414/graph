@@ -13,12 +13,15 @@ import (
 
 func TestTheComposerButtonPausesARunningRound(t *testing.T) {
 	posted := map[string]string{}
+	var postedMu sync.Mutex
 	paused := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" {
 			payload := make([]byte, 2048)
 			read, _ := r.Body.Read(payload)
+			postedMu.Lock()
 			posted[r.URL.Path] = string(payload[:read])
+			postedMu.Unlock()
 			switch {
 			case strings.HasSuffix(r.URL.Path, "/pause"):
 				paused = true
@@ -60,7 +63,11 @@ func TestTheComposerButtonPausesARunningRound(t *testing.T) {
 		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
-	if !contains(posted["/api/conversations/c1/pause"], "requestId") {
+	postedMu.Lock()
+	pauseBody := posted["/api/conversations/c1/pause"]
+	resumeBody := posted["/api/conversations/c1/resume"]
+	postedMu.Unlock()
+	if !contains(pauseBody, "requestId") {
 		t.Fatalf("暂停必须打 pause 路由并带 requestId，posts %v", posted)
 	}
 	if !state.paused || !contains(state.status, "已暂停") {
@@ -80,18 +87,21 @@ func TestTheComposerButtonPausesARunningRound(t *testing.T) {
 		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
-	if !contains(posted["/api/conversations/c1/resume"], "requestId") || state.paused {
+	postedMu.Lock()
+	resumeBody = posted["/api/conversations/c1/resume"]
+	postedMu.Unlock()
+	if !contains(resumeBody, "requestId") || state.paused {
 		t.Fatalf("继续必须打 resume 路由，posts %v paused %v", posted, state.paused)
 	}
 }
 
 func TestTheComposerSendsWhilePausedWhenAPromptWaits(t *testing.T) {
-	posted := ""
+	box := &postBox{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" && r.URL.Path == "/api/conversations/c1/messages" {
 			payload := make([]byte, 2048)
 			read, _ := r.Body.Read(payload)
-			posted = string(payload[:read])
+			box.set(string(payload[:read]))
 			w.Write([]byte(`{}`))
 			return
 		}
@@ -113,9 +123,7 @@ func TestTheComposerSendsWhilePausedWhenAPromptWaits(t *testing.T) {
 		t.Fatalf("click 发送: %v", err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for posted == "" && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
+	posted := box.wait(t, deadline)
 	if !contains(posted, "继续做") {
 		t.Fatalf("the waiting prompt must be sent, body %q", posted)
 	}
@@ -141,13 +149,13 @@ func TestTheComposerShowsTheReferencePlaceholders(t *testing.T) {
 }
 
 func TestQueuedMessagesCanBeCancelled(t *testing.T) {
-	posted := ""
+	box := &postBox{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "POST" && r.URL.Path == "/api/conversations/c1/messages/m9/cancel":
 			payload := make([]byte, 2048)
 			read, _ := r.Body.Read(payload)
-			posted = string(payload[:read])
+			box.set(string(payload[:read]))
 			w.Write([]byte(`{"cancelled":true}`))
 		case r.URL.Path == "/api/conversations/c1":
 			w.Write([]byte(`{"messages":[{"id":"m9","role":"user","state":"queued","text":"等下一轮再说"}]}`))
@@ -176,9 +184,7 @@ func TestQueuedMessagesCanBeCancelled(t *testing.T) {
 		t.Fatalf("click 撤销这条排队消息: %v", err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for posted == "" && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
+	posted := box.wait(t, deadline)
 	if !contains(posted, "requestId") {
 		t.Fatalf("撤销必须带 requestId，提交体 %q", posted)
 	}
@@ -358,5 +364,34 @@ func TestShortModelName(t *testing.T) {
 		if got := shortModel(id); got != want {
 			t.Fatalf("shortModel(%q) = %q, want %q", id, got, want)
 		}
+	}
+}
+
+// postBox carries a request body from the test server's goroutine to the test.
+type postBox struct {
+	mu   sync.Mutex
+	body string
+}
+
+func (b *postBox) set(body string) {
+	b.mu.Lock()
+	b.body = body
+	b.mu.Unlock()
+}
+
+func (b *postBox) get() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.body
+}
+
+func (b *postBox) wait(t *testing.T, deadline time.Time) string {
+	t.Helper()
+	for {
+		if body := b.get(); body != "" || !time.Now().Before(deadline) {
+			return body
+		}
+		waitForUI()
+		time.Sleep(time.Millisecond)
 	}
 }
