@@ -65,6 +65,7 @@ func TestPollKeepsLoadedHistoryAndTakesTheNewestText(t *testing.T) {
 	state.ensureHistory()
 	deadline := time.Now().Add(2 * time.Second)
 	for len(state.messages) < 260 && time.Now().Before(deadline) {
+		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
 	if len(state.messages) != 260 {

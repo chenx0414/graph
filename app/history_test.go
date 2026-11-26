@@ -68,6 +68,7 @@ func TestReachingTheTopFetchesOlderHistory(t *testing.T) {
 	state.ensureHistory()
 	deadline := time.Now().Add(2 * time.Second)
 	for len(state.messages) < 260 && time.Now().Before(deadline) {
+		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
 	if len(state.messages) != 260 || state.oldestSeq != 1 || !state.noMoreHistory {
@@ -102,6 +103,7 @@ func TestScrollingUpLoadsOlderHistory(t *testing.T) {
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for len(state.messages) < 260 && time.Now().Before(deadline) {
+		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
 	if len(state.messages) != 260 {
@@ -146,6 +148,7 @@ func TestFilteredMessagesDoNotEndTheHistory(t *testing.T) {
 	state.ensureHistory()
 	deadline := time.Now().Add(2 * time.Second)
 	for len(state.messages) < 210 && time.Now().Before(deadline) {
+		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
 	if len(state.messages) != 210 || requests.Load() != 1 {
@@ -185,6 +188,7 @@ func TestLoadingOlderHistoryKeepsTheReaderInPlace(t *testing.T) {
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for len(state.messages) < 400 && time.Now().Before(deadline) {
+		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
 	for frame := 0; frame < 4; frame++ {
@@ -212,6 +216,7 @@ func TestLoadingOlderHistoryKeepsTheReaderInPlace(t *testing.T) {
 	}
 	deadline = time.Now().Add(2 * time.Second)
 	for requests.Load() < 2 && time.Now().Before(deadline) {
+		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
 	if requests.Load() != 2 {
@@ -232,6 +237,7 @@ func TestRefreshingKeepsTheHistoryAlreadyLoaded(t *testing.T) {
 	state.ensureHistory()
 	deadline := time.Now().Add(2 * time.Second)
 	for len(state.messages) < 260 && time.Now().Before(deadline) {
+		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
 	state.refresh()

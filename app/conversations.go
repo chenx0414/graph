@@ -144,15 +144,12 @@ func (c *chatState) sendText(text string) {
 	text = stripSpace(text)
 	// The send itself runs off the renderer; every field it then clears belongs
 	// to the goroutine that owns the shell.
-	source := readShell(c.window, func() agentChatSource {
-		if text == "" || c.active == "" || c.source == nil {
-			return nil
-		}
-		return c.source
-	})
-	if source == nil {
+	// The source is set when the chat is installed and does not change under a
+	// send, so reading the pair here is safe; the fields cleared below are not.
+	if text == "" || c.active == "" || c.source == nil {
 		return
 	}
+	source := c.source
 	if err := source.Send(c, text); err != nil {
 		onUI(c.window, func() { c.failUser("发送失败：" + err.Error()) })
 		return

@@ -41,6 +41,7 @@ func TestWhiteboardContextRefreshesWhenTheChatChanges(t *testing.T) {
 	shell.ensureTrajectory()
 	deadline := time.Now().Add(2 * time.Second)
 	for (shell.trajectory.data == nil || shell.trajectory.data.Totals.Context.LastTokens != 100) && time.Now().Before(deadline) {
+		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
 	if shell.trajectory.data == nil {
@@ -51,6 +52,7 @@ func TestWhiteboardContextRefreshesWhenTheChatChanges(t *testing.T) {
 		t.Fatal("the new turn is a chat change")
 	}
 	for shell.trajectory.data.Totals.Context.LastTokens != 240 && time.Now().Before(deadline) {
+		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
 	if got := shell.trajectory.data.Totals.Context.LastTokens; got != 240 {

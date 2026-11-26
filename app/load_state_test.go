@@ -12,6 +12,7 @@ func waitFor(t *testing.T, label string, done func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
+		waitForUI()
 		if done() {
 			return
 		}

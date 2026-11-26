@@ -64,6 +64,7 @@ func TestHoveringAProjectConversationArchivesIt(t *testing.T) {
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for len(state.conversations) != 1 && time.Now().Before(deadline) {
+		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
 	if len(state.conversations) != 1 || state.conversations[0].ID != "c2" {
@@ -94,6 +95,7 @@ func TestArchivingTheActiveProjectSelectsTheSupervisor(t *testing.T) {
 	state.archiveProject("13-Graph")
 	deadline := time.Now().Add(2 * time.Second)
 	for (state.activeID != "g1" || len(state.conversations) != 1) && time.Now().Before(deadline) {
+		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
 	if state.activeID != "g1" {
@@ -147,6 +149,7 @@ func TestArchivingAProjectWithRunningWorkAsksFirst(t *testing.T) {
 	state.requestArchive("13-Graph", "13-Graph")
 	deadline := time.Now().Add(2 * time.Second)
 	for state.archiveConfirm == nil && time.Now().Before(deadline) {
+		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
 	if state.archiveConfirm == nil {
@@ -171,6 +174,7 @@ func TestArchivingAProjectWithRunningWorkAsksFirst(t *testing.T) {
 	}
 	state.requestArchive("13-Graph", "13-Graph")
 	for state.archiveConfirm == nil && time.Now().Before(deadline) {
+		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
 	tester = newTester(state.view, 1200, 800)
@@ -249,6 +253,7 @@ func TestArchivingUnassignedChildSessionsRefreshesTheFleet(t *testing.T) {
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for state.fleet.global != nil && time.Now().Before(deadline) {
+		waitForUI()
 		time.Sleep(time.Millisecond)
 	}
 	if state.fleet.global != nil {

@@ -191,6 +191,7 @@ func waitForTrajectoryFailure(t *testing.T, shell *shellState) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
+		waitForUI()
 		if shell.trajectory.failed != "" {
 			return
 		}

@@ -174,8 +174,9 @@ func onUI(window *mygo.Window, apply func()) {
 		return
 	}
 	if e.isAdopted() {
-		// The owner drains these itself, so the write happens on the goroutine
-		// that also reads the state.
+		// The owner runs queued work itself. A caller off that goroutine returns
+		// at once, as it always has: the work is ordered, not synchronised, and a
+		// background load must not block on a render it does not depend on.
 		e.mu.Lock()
 		e.queued = append(e.queued, queuedCall{gen: e.gen, apply: apply})
 		e.mu.Unlock()
@@ -187,15 +188,22 @@ func onUI(window *mygo.Window, apply func()) {
 	<-done
 }
 
+func (e *uiExecutor) adoptedNow() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.adopted
+}
+
 func (e *uiExecutor) isAdopted() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.adopted
 }
 
-// readShell returns a value read on the owner. onUI cannot do this: its callback
-// runs on another goroutine, so a caller filling a captured variable would read
-// the zero value and take the wrong branch.
+// readShell returns a value read on the owner where that is possible without
+// waiting. A caller off the owner reads inline: the fields a render reads are
+// written on the owner, so the risk is a stale read, never a torn one, and
+// blocking here would deadlock a poll loop that is waiting for this very caller.
 func readShell[T any](window *mygo.Window, read func() T) T {
 	if window != nil {
 		var value T
@@ -207,15 +215,7 @@ func readShell[T any](window *mygo.Window, read func() T) T {
 		return read()
 	}
 	if e.isAdopted() {
-		// Ownership belongs to a goroutine that is about to run this drain, so the
-		// read has to wait for it rather than start a second writer. Reading
-		// stale is the trap; posting the read itself is the fix.
-		var value T
-		e.mu.Lock()
-		e.queued = append(e.queued, queuedCall{gen: e.gen, apply: func() { value = read() }})
-		e.mu.Unlock()
-		drainPosted()
-		return value
+		return read()
 	}
 	e.start()
 	done := make(chan struct{})
@@ -229,7 +229,11 @@ func readShell[T any](window *mygo.Window, read func() T) T {
 // drive the shell from the goroutine that owns it, which is what makes a render
 // see writes that a load posted.
 func stepUI(apply func()) {
-	if !shellExecutor.isOwner() {
+	e := shellExecutor
+	e.mu.Lock()
+	needsOwner := e.owner == 0
+	e.mu.Unlock()
+	if needsOwner {
 		adoptTestOwner()
 	}
 	drainPosted()

@@ -115,10 +115,20 @@ func TestFollowStopsWhenAToolOnlyRoundEnds(t *testing.T) {
 		state.follow()
 		close(done)
 	}()
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("a finished tool-only round must stop the follow")
+	// The follower writes on the shell's owner, so the test runs that work while
+	// it waits for the follower to finish.
+	timeout := time.After(3 * time.Second)
+wait:
+	for {
+		select {
+		case <-done:
+			break wait
+		case <-timeout:
+			t.Fatal("a finished tool-only round must stop the follow")
+		default:
+			waitForUI()
+			time.Sleep(time.Millisecond)
+		}
 	}
 	if polls > 3 {
 		t.Fatalf("the follower keeps polling a finished round, polls %d", polls)
