@@ -202,52 +202,72 @@ func (s *assemblyState) compile() {
 }
 
 func (s *assemblyState) saveDescription() {
-	if s.selected == "" {
+	// Called from a click on a bare goroutine: the request stays there, the status
+	// and the editing flag are written where the page reads them.
+	selected := readShell(s.window, func() string { return s.selected })
+	description := readShell(s.window, func() string { return strings.TrimSpace(s.draftDescription) })
+	blank := selected == "" || description == ""
+	if blank {
+		onUI(s.window, func() {
+			if selected == "" {
+				return
+			}
+			s.status = "描述不能为空"
+			s.frame()
+		})
 		return
 	}
-	description := strings.TrimSpace(s.draftDescription)
-	if description == "" {
-		s.status = "描述不能为空"
+	_, err := s.api.post("/api/catalog/combinations/"+selected+"/description", map[string]any{"description": description})
+	onUI(s.window, func() {
+		if err != nil {
+			s.status = "保存失败：" + err.Error()
+			s.frame()
+			return
+		}
+		s.status = ""
+		s.editingDescription = false
+		s.load()
 		s.frame()
-		return
-	}
-	if _, err := s.api.post("/api/catalog/combinations/"+s.selected+"/description", map[string]any{"description": description}); err != nil {
-		s.status = "保存失败：" + err.Error()
-		s.frame()
-		return
-	}
-	s.status = ""
-	s.editingDescription = false
-	s.load()
-	s.frame()
+	})
 }
 
 func (s *assemblyState) deleteAssembly(id string) {
-	row := s.assembly(id)
+	// The two-step confirmation is state the page reads, and the delete runs on a
+	// bare goroutine, so the decision is taken on the shell's writer and only the
+	// request happens off it.
+	row := readShell(s.window, func() *assemblyRow { return s.assembly(id) })
+	armed := readShell(s.window, func() bool { return s.deleteArmed == id })
 	if row == nil {
 		return
 	}
 	if row.mode == "main" {
-		s.status = "主 Agent 装配不能删除"
-		s.frame()
+		onUI(s.window, func() {
+			s.status = "主 Agent 装配不能删除"
+			s.frame()
+		})
 		return
 	}
-	if s.deleteArmed != id {
-		s.deleteArmed = id
+	if !armed {
+		onUI(s.window, func() {
+			s.deleteArmed = id
+			s.status = ""
+			s.frame()
+		})
+		return
+	}
+	_, err := s.api.delete("/api/catalog/combinations/" + id)
+	onUI(s.window, func() {
+		if err != nil {
+			s.status = "删除失败：" + err.Error()
+			s.frame()
+			return
+		}
+		s.deleteArmed = ""
+		s.selected = ""
 		s.status = ""
+		s.load()
 		s.frame()
-		return
-	}
-	if _, err := s.api.delete("/api/catalog/combinations/" + id); err != nil {
-		s.status = "删除失败：" + err.Error()
-		s.frame()
-		return
-	}
-	s.deleteArmed = ""
-	s.selected = ""
-	s.status = ""
-	s.load()
-	s.frame()
+	})
 }
 
 func (s *assemblyState) duplicateAssembly(id string) {
@@ -265,33 +285,39 @@ func (s *assemblyState) duplicateAssembly(id string) {
 }
 
 func (s *assemblyState) createAssembly() {
-	id := strings.TrimSpace(s.editorID)
-	name := strings.TrimSpace(s.editorName)
-	description := strings.TrimSpace(s.editorDescription)
+	// The editor fields and the result are shell state; only the request runs off
+	// the writer.
+	id := readShell(s.window, func() string { return strings.TrimSpace(s.editorID) })
+	name := readShell(s.window, func() string { return strings.TrimSpace(s.editorName) })
+	description := readShell(s.window, func() string { return strings.TrimSpace(s.editorDescription) })
 	if id == "" || name == "" || description == "" {
-		s.status = "id、名称与描述都要填"
-		s.frame()
+		onUI(s.window, func() {
+			s.status = "id、名称与描述都要填"
+			s.frame()
+		})
 		return
 	}
 	combination := map[string]any{
 		"id": id, "name": name, "description": description, "review": false, "tags": []string{}, "resources": []assemblyResource{},
 	}
-	if source := s.editorSource(); source != nil {
+	if source := readShell(s.window, func() *assemblyRow { return s.editorSource() }); source != nil {
 		combination["resources"] = source.resources
 		combination["tags"] = source.tags
 		combination["review"] = source.review
 	}
 	payload, err := s.api.post("/api/catalog/combinations", map[string]any{"combination": combination})
-	if err != nil {
-		s.status = "新建失败：" + err.Error()
+	onUI(s.window, func() {
+		if err != nil {
+			s.status = "新建失败：" + err.Error()
+			s.frame()
+			return
+		}
+		s.saveLabel = savedDefinitionVersion(payload)
+		s.editorOpen = false
+		s.status = ""
+		s.load()
 		s.frame()
-		return
-	}
-	s.saveLabel = savedDefinitionVersion(payload)
-	s.editorOpen = false
-	s.status = ""
-	s.load()
-	s.frame()
+	})
 }
 
 func (s *assemblyState) editorSource() *assemblyRow {

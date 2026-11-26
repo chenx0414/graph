@@ -51,14 +51,17 @@ func (s *assemblyState) saveCombination(row assemblyRow, resources []assemblyRes
 	if row.mode != "" {
 		combination["mode"] = row.mode
 	}
-	if _, err := s.api.post("/api/catalog/combinations", map[string]any{"combination": combination}); err != nil {
-		s.status = "保存资源失败：" + err.Error()
+	_, err := s.api.post("/api/catalog/combinations", map[string]any{"combination": combination})
+	onUI(s.window, func() {
+		if err != nil {
+			s.status = "保存资源失败：" + err.Error()
+			s.frame()
+			return
+		}
+		s.status = ""
+		s.load()
 		s.frame()
-		return
-	}
-	s.status = ""
-	s.load()
-	s.frame()
+	})
 }
 
 func (s *assemblyState) addResource(row assemblyRow, capability assemblyCapability) {
@@ -73,7 +76,7 @@ func (s *assemblyState) addResource(row assemblyRow, capability assemblyCapabili
 	})
 	s.resourcePickerOpen = false
 	s.resourceQuery = ""
-	go s.saveCombination(row, resources)
+	s.saveCombination(row, resources)
 }
 
 func (s *assemblyState) removeResource(row assemblyRow, resourceID string) {
@@ -83,7 +86,7 @@ func (s *assemblyState) removeResource(row assemblyRow, resourceID string) {
 			resources = append(resources, member)
 		}
 	}
-	go s.saveCombination(row, resources)
+	s.saveCombination(row, resources)
 }
 
 func (s *assemblyState) resourceCandidates(row assemblyRow) []assemblyCapability {
