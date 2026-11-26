@@ -125,8 +125,7 @@ func (source *conversationChatSource) Refresh(c *chatState) (bool, error) {
 			source.version = version
 		}
 	}
-	var newest int64
-	onUI(c.window, func() { newest = newestMessageSeq(c.messages) })
+	newest := readShell(c.window, func() int64 { return newestMessageSeq(c.messages) })
 	// A transcript with a reply still in flight is read whole: a settled answer
 	// can move a message the console already counted, and the version alone is
 	// not worth trusting until nothing is running any more.

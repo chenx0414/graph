@@ -42,16 +42,18 @@ func (s *shellState) ensureModelMeta() {
 	s.modelMetaLoading = true
 	go func() {
 		payload, err := s.api.get("/api/settings")
-		if err == nil {
-			s.modelMeta = parseModelMeta(payload)
-			s.modelMetaResolved = nil
-			s.modelMetaMiss = nil
-		}
-		s.modelMetaError = ""
-		if err != nil {
-			s.modelMetaError = err.Error()
-		}
-		s.modelMetaLoading = false
+		onUI(s.window, func() {
+			if err == nil {
+				s.modelMeta = parseModelMeta(payload)
+				s.modelMetaResolved = nil
+				s.modelMetaMiss = nil
+			}
+			s.modelMetaError = ""
+			if err != nil {
+				s.modelMetaError = err.Error()
+			}
+			s.modelMetaLoading = false
+		})
 		s.frame()
 	}()
 }

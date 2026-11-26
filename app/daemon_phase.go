@@ -3,12 +3,12 @@ package main
 type daemonPhase string
 
 const (
-	daemonStopped    daemonPhase = "stopped"
-	daemonStarting   daemonPhase = "starting"
-	daemonLaunchd daemonPhase = "supervised"
-	daemonOwned      daemonPhase = "owned"
-	daemonAdopted    daemonPhase = "adopted"
-	daemonStopping   daemonPhase = "stopping"
+	daemonStopped  daemonPhase = "stopped"
+	daemonStarting daemonPhase = "starting"
+	daemonLaunchd  daemonPhase = "supervised"
+	daemonOwned    daemonPhase = "owned"
+	daemonAdopted  daemonPhase = "adopted"
+	daemonStopping daemonPhase = "stopping"
 )
 
 type daemonEvent string

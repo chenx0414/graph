@@ -22,11 +22,11 @@ func transcriptFingerprint(messages []transcriptMessage) string {
 }
 
 func (c *chatState) poll() bool {
-	var source agentChatSource
-	onUI(c.window, func() {
+	source := readShell(c.window, func() agentChatSource {
 		if c.active != "" && c.api.address != "" {
-			source = c.source
+			return c.source
 		}
+		return nil
 	})
 	if source == nil {
 		return false

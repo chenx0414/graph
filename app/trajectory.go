@@ -243,18 +243,20 @@ func (s *shellState) startTrajectory(path string, keepSelection bool) {
 		} else if err := json.Unmarshal(payload, &data); err != nil {
 			failure = "轨迹格式不对"
 		}
-		if state.settle(generation, data, failure) && data != nil {
-			if keepSelection {
-				if state.selected < 0 {
-					state.selected = 0
-				}
-				if state.selected >= len(data.Requests) {
+		onUI(s.window, func() {
+			if state.settle(generation, data, failure) && data != nil {
+				if keepSelection {
+					if state.selected < 0 {
+						state.selected = 0
+					}
+					if state.selected >= len(data.Requests) {
+						state.selected = len(data.Requests) - 1
+					}
+				} else {
 					state.selected = len(data.Requests) - 1
 				}
-			} else {
-				state.selected = len(data.Requests) - 1
 			}
-		}
+		})
 		s.frame()
 	}()
 }

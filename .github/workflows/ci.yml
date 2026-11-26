@@ -234,6 +234,37 @@ jobs:
 
   # 分支保护只要求这一个 check。它总是运行：判据 job 说“只改文档”时上面三个 job
   # 是 skipped，这里把 skipped 当通过；任何一个 job 红，这里红并点名。
+  # The race detector on the window module, kept out of `test` because it is
+  # slower than the shard budget and because a race is a different verdict from a
+  # failed assertion: it fails even when every test passes.
+  #
+  # A race in the app is a shell state touched from two goroutines, so it only
+  # shows up with this detector on. It named 900+ reports while the suite was
+  # green, which is exactly the kind of defect a green suite hides.
+  app-race:
+    name: app race detector
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: app/go.sum
+      - name: go -C app test -race
+        run: go -C app test -race -count=1 ./...
+      - name: 失败时保留日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-race-log
+          path: |
+            app/**/*.log
+          if-no-files-found: ignore
+
   ci-required:
     name: ci-required
     needs: [changes, lint, build, test]

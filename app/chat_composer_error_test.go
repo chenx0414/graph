@@ -23,7 +23,7 @@ func (source *failingChatSource) Load(c *chatState) error {
 	source.failures++
 	return errors.New("Get \"http://127.0.0.1:57970/api/conversations/c1\": connection refused")
 }
-func (source *failingChatSource) Refresh(c *chatState) (bool, error) { return false, source.Load(c) }
+func (source *failingChatSource) Refresh(c *chatState) (bool, error)   { return false, source.Load(c) }
 func (source *failingChatSource) Send(c *chatState, text string) error { return nil }
 func (source *failingChatSource) LoadOlder(c *chatState, before int64) ([]transcriptMessage, int64, bool, error) {
 	return nil, 0, true, nil

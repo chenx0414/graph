@@ -42,10 +42,17 @@ func fourPaneShell(t *testing.T) *shellState {
 	return state
 }
 
+// frames renders a view for a test on the goroutine that owns shell state.
+//
+// Rendering reads the same fields a background load writes, so it has to happen
+// where those writes happen: the executor. A test that rendered from its own
+// goroutine reported the package's races even when every write was posted.
 func frames(tester *ui.Tester) *ui.Tester {
-	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
-	}
+	stepUI(func() {
+		for frame := 0; frame < 3; frame++ {
+			tester.Frame()
+		}
+	})
 	return tester
 }
 
