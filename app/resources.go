@@ -384,13 +384,16 @@ func (s *resourceState) openDirectory() {
 		})
 		return
 	}
-	if err := openPath(root); err != nil {
-		s.status = "打不开能力目录：" + err.Error()
+	err := openPath(root)
+	onUI(s.window, func() {
+		if err != nil {
+			s.status = "打不开能力目录：" + err.Error()
+			s.frame()
+			return
+		}
+		s.status = ""
 		s.frame()
-		return
-	}
-	s.status = ""
-	s.frame()
+	})
 }
 
 func (s *resourceState) frame() {
