@@ -10,6 +10,15 @@
 #   3. `harness`：`graphcheck harness` 单独跑，失败时把判决与日志一起留下。
 #
 # 每项都上传日志（不只是失败时）：慢层的结果要能事后回看趋势。
+#
+# 第四层 `ui`：真的把界面驱动一遍。这一层在 2026-11-26 之前不存在，于是
+# `verification/skills/verify-graph` 的 30 多条 journey 没有任何人或机器在跑，
+# `index.json` 的 verifiedAt 停在 11-17，而之后两周的界面改动都没有断言判死——
+# 一个已经删掉的页面（洞察页）能同时活在 scenario、ledger 和 Feature Map 里。
+#
+# 它只跑被点名的 journey，不跑 `--all`：F-15-tray 与 controls-tray 需要 macOS
+# 辅助功能权限，评价里天生是环境红；把它们放进 nightly 只会让这层长期变红，
+# 真回归就淹在里面。待这三条场景修好后，再把它们加进名单。
 
 name: nightly
 
@@ -110,3 +119,68 @@ jobs:
             backend/internal/harness/testdata/**
             state/**/*.log
           if-no-files-found: ignore
+
+  # 界面门禁：真的把 journey 跑一遍。选中的是当前实绿的 26 条；
+  # F-15-tray、controls-tray 需要辅助功能权限（环境红），
+  # controls-context-tabs、controls-fleet、controls-model-picker 的断言面已过期（见 store 里的 friction）。
+  ui:
+    name: 界面 journey（verify-graph）
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: |
+            backend/go.sum
+            app/go.sum
+            verification/go.sum
+      - name: 先确认这台机器有窗口能力（权限不足与产品失败不是同一条答案）
+        run: go -C verification run ./cmd/verify-graph doctor || echo "::warning::doctor 报环境不足，下面的 window lane journey 会因此失败"
+      - name: 跑被点名的 journey
+        run: |
+          set -eu
+          go -C verification run ./cmd/verify-graph verify \
+            --journey F-02-nav \
+            --journey F-03-conversations \
+            --journey F-04-conversation \
+            --journey F-05-composer \
+            --journey F-06 \
+            --journey F-07 \
+            --journey F-08 \
+            --journey F-10 \
+            --journey F-11 \
+            --journey F-12 \
+            --journey F-13 \
+            --journey F-14 \
+            --journey F-16-empty-and-error \
+            --journey shell-workspace \
+            --journey ctl-board \
+            --journey ctl-resources \
+            --journey ctl-settings \
+            --journey rail-assemblies \
+            --journey rail-capabilities \
+            --journey rail-fleet \
+            --journey rail-providers \
+            --journey rail-settings \
+            --journey rail-trajectory \
+            --journey controls-composer \
+            --journey controls-fleet-filters \
+            --journey controls-main-agent
+      - name: 控件覆盖审计（每条 covered 都要有真跑过的证据）
+        if: always()
+        run: go -C verification run ./cmd/verify-graph cover audit
+      - name: 保留证据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-ui
+          path: |
+            verification/evidence/**
+            verification/controls/COVERAGE.generated.md
+          if-no-files-found: ignore
+      - name: 收尾（不留孤立守护进程）
+        if: always()
+        run: go -C verification run ./cmd/verify-graph cleanup --orphans || true
