@@ -46,14 +46,6 @@
     {
       "lane": "window",
       "run": "6473fb09",
-      "feature": "F-09",
-      "page": "F-09",
-      "evidence": "/Users/macmini/workspace/13-Graph/verification/evidence/6473fb09/F-09",
-      "controls": 27
-    },
-    {
-      "lane": "window",
-      "run": "6473fb09",
       "feature": "F-10",
       "page": "F-10",
       "evidence": "/Users/macmini/workspace/13-Graph/verification/evidence/6473fb09/F-10",
@@ -202,32 +194,6 @@
       "role": "row",
       "page": "F-08",
       "feature": "F-08"
-    },
-    {
-      "name": "30 天",
-      "role": "button",
-      "page": "F-09",
-      "feature": "F-09",
-      "note": "stable AX name after the 2026-11-17 accessibility fix; the dot was visible text, AccessSelected carries the state"
-    },
-    {
-      "name": "7 天",
-      "role": "button",
-      "page": "F-09",
-      "feature": "F-09",
-      "note": "stable AX name after the 2026-11-17 accessibility fix; the selected dot is AccessSelected, not part of the name"
-    },
-    {
-      "name": "verify",
-      "role": "button",
-      "page": "F-09",
-      "feature": "F-09"
-    },
-    {
-      "name": "verify",
-      "role": "row",
-      "page": "F-09",
-      "feature": "F-09"
     },
     {
       "name": "verify",
@@ -555,12 +521,6 @@
       "feature": "F-02"
     },
     {
-      "name": "洞察",
-      "role": "button",
-      "page": "rail",
-      "feature": "F-02"
-    },
-    {
       "name": "编队",
       "role": "button",
       "page": "rail",
@@ -664,12 +624,6 @@
     },
     {
       "name": "标签页 供应商",
-      "role": "button",
-      "page": "tabbar",
-      "feature": "F-02"
-    },
-    {
-      "name": "标签页 洞察概览",
       "role": "button",
       "page": "tabbar",
       "feature": "F-02"

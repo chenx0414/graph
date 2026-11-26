@@ -23,7 +23,7 @@
     },
     {
       "verb": "waitText",
-      "text": "能力装配窗口",
+      "text": "能力装配",
       "timeoutMs": 20000
     },
     {

@@ -5,22 +5,73 @@
   "width": 1440,
   "height": 900,
   "steps": [
-    {"verb": "waitText", "text": "主区域卡片", "timeoutMs": 20000},
-    {"verb": "assertText", "text": "会话列表标题"},
-    {"verb": "assertText", "text": "对话标题"},
-    {"verb": "assertText", "text": "白板标题"},
-    {"verb": "assertText", "text": "轨迹"},
-    {"verb": "assertText", "text": "洞察"},
-    {"verb": "assertText", "text": "编队"},
-    {"verb": "assertText", "text": "供应商"},
-    {"verb": "assertText", "text": "资源"},
-    {"verb": "assertText", "text": "装配"},
-    {"verb": "assertText", "text": "设置"},
-    {"verb": "screenshot", "path": "workspace.png"}
+    {
+      "verb": "waitText",
+      "text": "主区域卡片",
+      "timeoutMs": 20000
+    },
+    {
+      "verb": "assertText",
+      "text": "会话列表标题"
+    },
+    {
+      "verb": "assertText",
+      "text": "对话标题"
+    },
+    {
+      "verb": "assertText",
+      "text": "白板标题"
+    },
+    {
+      "verb": "assertText",
+      "text": "轨迹"
+    },
+    {
+      "verb": "assertText",
+      "text": "编队"
+    },
+    {
+      "verb": "assertText",
+      "text": "供应商"
+    },
+    {
+      "verb": "assertText",
+      "text": "资源"
+    },
+    {
+      "verb": "assertText",
+      "text": "装配"
+    },
+    {
+      "verb": "assertText",
+      "text": "设置"
+    },
+    {
+      "verb": "screenshot",
+      "path": "workspace.png"
+    }
   ],
   "checks": [
-    {"id": "workspace.health", "method": "GET", "path": "/api/health", "expectStatus": 200, "expect": {"ok": true}},
-    {"id": "workspace.startup-is-isolated", "method": "GET", "path": "/api/startup", "expectStatus": 200},
-    {"id": "workspace.conversations-readable", "method": "GET", "path": "/api/conversations", "expectStatus": 200}
+    {
+      "id": "workspace.health",
+      "method": "GET",
+      "path": "/api/health",
+      "expectStatus": 200,
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "id": "workspace.startup-is-isolated",
+      "method": "GET",
+      "path": "/api/startup",
+      "expectStatus": 200
+    },
+    {
+      "id": "workspace.conversations-readable",
+      "method": "GET",
+      "path": "/api/conversations",
+      "expectStatus": 200
+    }
   ]
 }

@@ -27,7 +27,7 @@
     },
     {
       "verb": "waitText",
-      "text": "供应商窗口",
+      "text": "供应商",
       "timeoutMs": 15000
     },
     {

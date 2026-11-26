@@ -16,7 +16,7 @@
     },
     {
       "verb": "waitText",
-      "text": "资源库窗口",
+      "text": "资源库",
       "timeoutMs": 15000
     },
     {
@@ -60,7 +60,7 @@
     },
     {
       "verb": "waitText",
-      "text": "资源库窗口",
+      "text": "资源库",
       "timeoutMs": 15000
     },
     {

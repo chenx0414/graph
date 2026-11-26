@@ -51,54 +51,6 @@
       "note": "derived from a green journey; kept by cover derive"
     },
     {
-      "name": "30 天",
-      "role": "button",
-      "page": "F-09",
-      "action": "click",
-      "journey": "F-09",
-      "step": 6,
-      "lanes": [
-        "window"
-      ],
-      "note": "derived from a green journey; kept by cover derive"
-    },
-    {
-      "name": "7 天",
-      "role": "button",
-      "page": "F-09",
-      "action": "click",
-      "journey": "F-09",
-      "step": 8,
-      "lanes": [
-        "window"
-      ],
-      "note": "derived from a green journey; kept by cover derive"
-    },
-    {
-      "name": "verify",
-      "role": "button",
-      "page": "F-09",
-      "action": "click",
-      "journey": "F-04-conversation",
-      "step": 2,
-      "lanes": [
-        "window"
-      ],
-      "note": "derived from a green journey; kept by cover derive"
-    },
-    {
-      "name": "verify",
-      "role": "row",
-      "page": "F-09",
-      "action": "click",
-      "journey": "F-04-conversation",
-      "step": 2,
-      "lanes": [
-        "window"
-      ],
-      "note": "derived from a green journey; kept by cover derive"
-    },
-    {
       "name": "verify",
       "role": "button",
       "page": "F-10",
@@ -680,19 +632,6 @@
       "page": "rail",
       "action": "click",
       "journey": "F-02-nav",
-      "step": 16,
-      "lanes": [
-        "headless"
-      ],
-      "note": "derived from a green journey; kept by cover derive"
-    },
-    {
-      "name": "洞察",
-      "role": "button",
-      "page": "rail",
-      "action": "click",
-      "journey": "F-02-nav",
-      "step": 11,
       "lanes": [
         "headless"
       ],
@@ -704,7 +643,6 @@
       "page": "rail",
       "action": "click",
       "journey": "F-02-nav",
-      "step": 24,
       "lanes": [
         "headless"
       ],
@@ -716,7 +654,6 @@
       "page": "rail",
       "action": "click",
       "journey": "F-02-nav",
-      "step": 20,
       "lanes": [
         "headless"
       ],
@@ -728,7 +665,6 @@
       "page": "rail",
       "action": "click",
       "journey": "F-02-nav",
-      "step": 22,
       "lanes": [
         "headless"
       ],
@@ -740,7 +676,6 @@
       "page": "rail",
       "action": "click",
       "journey": "F-02-nav",
-      "step": 18,
       "lanes": [
         "headless"
       ],
@@ -752,7 +687,6 @@
       "page": "rail",
       "action": "click",
       "journey": "F-02-nav",
-      "step": 27,
       "lanes": [
         "headless"
       ],
@@ -872,19 +806,6 @@
       "page": "tabbar",
       "action": "click",
       "journey": "F-02-nav",
-      "step": 39,
-      "lanes": [
-        "headless"
-      ],
-      "note": "derived from a green journey; kept by cover derive"
-    },
-    {
-      "name": "标签页 洞察概览",
-      "role": "button",
-      "page": "tabbar",
-      "action": "click",
-      "journey": "F-02-nav",
-      "step": 33,
       "lanes": [
         "headless"
       ],
@@ -896,7 +817,6 @@
       "page": "tabbar",
       "action": "click",
       "journey": "F-02-nav",
-      "step": 2,
       "lanes": [
         "headless"
       ],
@@ -908,7 +828,6 @@
       "page": "tabbar",
       "action": "click",
       "journey": "F-02-nav",
-      "step": 37,
       "lanes": [
         "headless"
       ],
@@ -920,7 +839,6 @@
       "page": "tabbar",
       "action": "click",
       "journey": "F-02-nav",
-      "step": 43,
       "lanes": [
         "headless"
       ],
@@ -932,7 +850,6 @@
       "page": "tabbar",
       "action": "click",
       "journey": "F-02-nav",
-      "step": 41,
       "lanes": [
         "headless"
       ],
@@ -944,7 +861,6 @@
       "page": "tabbar",
       "action": "click",
       "journey": "F-02-nav",
-      "step": 35,
       "lanes": [
         "headless"
       ],
@@ -956,7 +872,6 @@
       "page": "tabbar",
       "action": "click",
       "journey": "F-02-nav",
-      "step": 45,
       "lanes": [
         "headless"
       ],

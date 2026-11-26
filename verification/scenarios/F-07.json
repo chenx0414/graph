@@ -1,17 +1,46 @@
 {
   "id": "F-07",
   "feature": "F-07",
-  "description": "白板：默认页签存在，点侧栏开新页签，页签切换与面板移除都反映在界面上。",
+  "description": "白板：默认页签存在，点侧栏开新页签，页签切换反映在界面上。",
   "steps": [
-    { "verb": "waitText", "text": "标签页 白板", "timeoutMs": 20000 },
-    { "verb": "click", "name": "洞察" },
-    { "verb": "waitText", "text": "标签页 洞察概览", "timeoutMs": 15000 },
-    { "verb": "screenshot", "path": "board-insights-tab.png" },
-    { "verb": "click", "name": "标签页 白板" },
-    { "verb": "waitText", "text": "当前上下文窗口", "timeoutMs": 15000 },
-    { "verb": "screenshot", "path": "board-default-tab.png" }
+    {
+      "verb": "waitText",
+      "text": "标签页 白板",
+      "timeoutMs": 20000
+    },
+    {
+      "verb": "click",
+      "name": "轨迹"
+    },
+    {
+      "verb": "waitText",
+      "text": "标签页 轨迹量化",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "screenshot",
+      "path": "board-trajectory-tab.png"
+    },
+    {
+      "verb": "click",
+      "name": "标签页 白板"
+    },
+    {
+      "verb": "waitText",
+      "text": "当前上下文窗口",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "screenshot",
+      "path": "board-default-tab.png"
+    }
   ],
   "checks": [
-    { "id": "board.settings", "method": "GET", "path": "/api/settings", "expectStatus": 200 }
+    {
+      "id": "board.settings",
+      "method": "GET",
+      "path": "/api/settings",
+      "expectStatus": 200
+    }
   ]
 }

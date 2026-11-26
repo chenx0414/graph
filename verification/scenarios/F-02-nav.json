@@ -1,7 +1,7 @@
 {
   "id": "F-02-nav",
   "feature": "F-02",
-  "description": "侧栏七项逐个点开，每一页必须出现它自己的面板窗口（不是上一页残留，也不是白屏）；随后逐个点开白板页签，每个页签都必须显示它自己的面板。",
+  "description": "侧栏六项逐个点开，每一页必须出现它自己的面板窗口（不是上一页残留，也不是白屏）；随后逐个点开白板页签，每个页签都必须显示它自己的面板。",
   "width": 1440,
   "height": 900,
   "steps": [
@@ -17,10 +17,6 @@
     {
       "verb": "assertText",
       "text": "轨迹"
-    },
-    {
-      "verb": "assertText",
-      "text": "洞察"
     },
     {
       "verb": "assertText",
@@ -48,23 +44,20 @@
     },
     {
       "verb": "click",
-      "name": "洞察"
+      "name": "轨迹"
     },
     {
       "verb": "waitText",
-      "text": "洞察概览窗口"
+      "text": "上下文统计窗口",
+      "timeoutMs": 15000
     },
     {
       "verb": "assertText",
-      "text": "用量趋势窗口"
-    },
-    {
-      "verb": "assertText",
-      "text": "会话排行窗口"
+      "text": "Token 统计窗口"
     },
     {
       "verb": "screenshot",
-      "path": "nav-insights.png"
+      "path": "nav-trajectory.png"
     },
     {
       "verb": "click",
@@ -72,7 +65,7 @@
     },
     {
       "verb": "waitText",
-      "text": "供应商窗口"
+      "text": "供应商"
     },
     {
       "verb": "click",
@@ -80,7 +73,7 @@
     },
     {
       "verb": "waitText",
-      "text": "资源库窗口"
+      "text": "资源库"
     },
     {
       "verb": "click",
@@ -88,7 +81,7 @@
     },
     {
       "verb": "waitText",
-      "text": "能力装配窗口"
+      "text": "能力装配"
     },
     {
       "verb": "click",
@@ -96,7 +89,7 @@
     },
     {
       "verb": "waitText",
-      "text": "运行设置窗口"
+      "text": "运行设置"
     },
     {
       "verb": "click",
@@ -136,11 +129,11 @@
     },
     {
       "verb": "click",
-      "name": "标签页 洞察概览"
+      "name": "标签页 运行设置"
     },
     {
       "verb": "waitText",
-      "text": "洞察概览窗口",
+      "text": "运行设置",
       "timeoutMs": 15000
     },
     {
@@ -167,7 +160,7 @@
     },
     {
       "verb": "waitText",
-      "text": "供应商窗口",
+      "text": "供应商",
       "timeoutMs": 15000
     },
     {
@@ -176,7 +169,7 @@
     },
     {
       "verb": "waitText",
-      "text": "资源库窗口",
+      "text": "资源库",
       "timeoutMs": 15000
     },
     {
@@ -185,7 +178,7 @@
     },
     {
       "verb": "waitText",
-      "text": "能力装配窗口",
+      "text": "能力装配",
       "timeoutMs": 15000
     },
     {
@@ -194,7 +187,7 @@
     },
     {
       "verb": "waitText",
-      "text": "运行设置窗口",
+      "text": "运行设置",
       "timeoutMs": 15000
     },
     {

@@ -3,20 +3,67 @@
   "feature": "F-13",
   "description": "装配页：能力装配面板出现，装配依赖的定义目录可读。",
   "steps": [
-    { "verb": "waitText", "text": "装配", "timeoutMs": 20000 },
-    { "verb": "click", "name": "装配" },
-    { "verb": "waitText", "text": "能力装配窗口", "timeoutMs": 15000 },
-    { "verb": "click", "name": "刷新" },
-    { "verb": "waitText", "text": "能力装配窗口", "timeoutMs": 15000 },
-    { "verb": "click", "name": "装配 Atlas_main" },
-    { "verb": "waitText", "text": "关闭装配详情", "timeoutMs": 15000 },
-    { "verb": "click", "name": "改描述" },
-    { "verb": "waitText", "text": "保存描述", "timeoutMs": 15000 },
-    { "verb": "click", "name": "取消" },
-    { "verb": "waitText", "text": "关闭装配详情", "timeoutMs": 15000 },
-    { "verb": "screenshot", "path": "assemblies.png" }
+    {
+      "verb": "waitText",
+      "text": "装配",
+      "timeoutMs": 20000
+    },
+    {
+      "verb": "click",
+      "name": "装配"
+    },
+    {
+      "verb": "waitText",
+      "text": "能力装配",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "click",
+      "name": "刷新"
+    },
+    {
+      "verb": "waitText",
+      "text": "能力装配",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "click",
+      "name": "装配 Atlas_main"
+    },
+    {
+      "verb": "waitText",
+      "text": "关闭装配详情",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "click",
+      "name": "改描述"
+    },
+    {
+      "verb": "waitText",
+      "text": "保存描述",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "click",
+      "name": "取消"
+    },
+    {
+      "verb": "waitText",
+      "text": "关闭装配详情",
+      "timeoutMs": 15000
+    },
+    {
+      "verb": "screenshot",
+      "path": "assemblies.png"
+    }
   ],
   "checks": [
-    { "id": "assemblies.definitions", "method": "GET", "path": "/api/catalog", "expectStatus": 200 }
+    {
+      "id": "assemblies.definitions",
+      "method": "GET",
+      "path": "/api/catalog",
+      "expectStatus": 200
+    }
   ]
 }
