@@ -185,7 +185,11 @@ func (s *shellState) conversationList(ctx *ui.Context) {
 			opts := kit.SidebarItemOpts{Selected: selected}
 			if !selected {
 				id := conversation.ID
-				opts.OnClick = func() { go s.selectConversation(id) }
+				opts.OnClick = func() {
+					// Switching writes the chat the pane renders, so it happens
+					// where that state is owned rather than on a bare goroutine.
+					onUI(s.window, func() { s.selectConversation(id) })
+				}
 			}
 			stack := ui.Box(ctx).FillWidth()
 			stack.Children(func() {
