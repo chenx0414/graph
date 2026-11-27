@@ -434,7 +434,7 @@ func coverDerive(p paths, flags flags) int {
 	if existing, err := controls.ReadLedger(ledgerPath); err == nil {
 		ledger = existing
 	}
-	witnesses, unresolved, _ := controls.Derive(inventory, scenarioDir(p), p.EvidenceRoot)
+	witnesses, unresolved, _ := controls.Derive(inventory, scenarioDir(p), p.EvidenceRoot, ledger.EvidenceRuns)
 	if flags.has("refresh") {
 		// --refresh only drops entries derive itself wrote; a human witness or
 		// an exclusion is never touched. This is how a renamed journey stops

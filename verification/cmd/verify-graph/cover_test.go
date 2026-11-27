@@ -129,7 +129,8 @@ func TestCoverAuditTurnsRedThenGreenWhenAControlGetsAWitness(t *testing.T) {
 		t.Fatalf("a missing ledger exited %d, want 1", code)
 	}
 	writeTestJSON(t, filepath.Join(root, "controls", "ledger.json"), controls.Ledger{
-		Schema: 1,
+		Schema:       1,
+		EvidenceRuns: []string{"run1"},
 		Witnesses: []controls.Witness{
 			{Name: "洞察", Role: "button", Page: "rail", Action: "click", Journey: "F-02-nav"},
 		},
@@ -184,7 +185,8 @@ func TestCoverDeriveRefreshReplacesOnlyEntriesItWrote(t *testing.T) {
 	manual := controls.Witness{Name: "按钮 B", Role: "button", Page: "page", Action: "click", Journey: "gone", Note: "hand-written; must survive refresh"}
 	stale := controls.Witness{Name: "按钮 A", Role: "button", Page: "page", Action: "click", Journey: "controls-old",
 		Note: "derived from a green journey; kept by cover derive"}
-	writeTestJSON(t, filepath.Join(root, "controls", "ledger.json"), controls.Ledger{Schema: 1, Witnesses: []controls.Witness{manual, stale}})
+	writeTestJSON(t, filepath.Join(root, "controls", "ledger.json"),
+		controls.Ledger{Schema: 1, EvidenceRuns: []string{"run"}, Witnesses: []controls.Witness{manual, stale}})
 
 	if code := coverDerive(p, parseFlags([]string{"--refresh"})); code != 0 {
 		t.Fatalf("cover derive --refresh exited %d", code)

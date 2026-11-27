@@ -14,7 +14,7 @@ import (
 // for a step that drives the control, then runs the same proof the audit runs
 // (action step, later assertion, green recorded evidence, right lane). Anything
 // it cannot prove stays unresolved for a human to drive or to mark blocked.
-func Derive(inventory Inventory, scenarioDir, evidenceRoot string) ([]Witness, []string, []Problem) {
+func Derive(inventory Inventory, scenarioDir, evidenceRoot string, runs []string) ([]Witness, []string, []Problem) {
 	scenarios := []Scenario{}
 	entries, err := os.ReadDir(scenarioDir)
 	if err != nil {
@@ -57,7 +57,7 @@ func Derive(inventory Inventory, scenarioDir, evidenceRoot string) ([]Witness, [
 					Name: control.Name, Role: control.Role, Page: control.Page,
 					Action: action, Journey: scenario.ID, Step: index + 1,
 				}
-				proof := proveWitness(control, candidate, scenarioDir, evidenceRoot)
+				proof := proveWitness(control, candidate, scenarioDir, evidenceRoot, runs)
 				if !proof.OK {
 					reasons = append(reasons, proof.Reason)
 					continue

@@ -28,12 +28,16 @@ func writeJSON(t *testing.T, path string, value any) {
 type fixture struct {
 	scenarios string
 	evidence  string
+	// runs names what the fixture wrote; the audit reads only runs a ledger named.
+	runs []string
 }
 
 func newFixture(t *testing.T) fixture {
 	t.Helper()
 	root := t.TempDir()
-	f := fixture{scenarios: filepath.Join(root, "scenarios"), evidence: filepath.Join(root, "evidence")}
+	// runs is the evidence the fixture writes, named the way a ledger names it: the
+	// audit reads only runs a ledger names, so a fixture has to say which.
+	f := fixture{scenarios: filepath.Join(root, "scenarios"), evidence: filepath.Join(root, "evidence"), runs: []string{"run-green", "run-red"}}
 	writeJSON(t, filepath.Join(f.scenarios, "F-02-nav.json"), Scenario{
 		ID: "F-02-nav", Feature: "F-02",
 		Steps: []Step{
@@ -140,6 +144,11 @@ func TestNormalizeDropsControlsWithoutIdentity(t *testing.T) {
 
 func runAudit(t *testing.T, f fixture, controls []Control, ledger Ledger) Report {
 	t.Helper()
+	if len(ledger.EvidenceRuns) == 0 {
+		// The fixture's runs stand in for what a real ledger names; a test that
+		// wants a different scope sets EvidenceRuns itself.
+		ledger.EvidenceRuns = f.runs
+	}
 	inventoryPath := filepath.Join(t.TempDir(), "inventory.json")
 	if err := WriteInventory(inventoryPath, Inventory{Controls: controls}); err != nil {
 		t.Fatal(err)
@@ -361,7 +370,7 @@ func TestDeriveKeepsOnlyJourneysThatReallyProveTheControl(t *testing.T) {
 		button("设置", "rail", "F-02"), // no journey clicks it
 		{Name: "消息", Role: "textfield", Page: "composer", Feature: "F-05"},
 	}})
-	witnesses, unresolved, problems := Derive(inventory, f.scenarios, f.evidence)
+	witnesses, unresolved, problems := Derive(inventory, f.scenarios, f.evidence, f.runs)
 	if len(witnesses) != 2 {
 		t.Fatalf("witnesses = %+v; unresolved = %v", witnesses, unresolved)
 	}
@@ -399,7 +408,7 @@ func TestDeriveRefusesARedJourney(t *testing.T) {
 		{Index: 2, Verb: "waitText", OK: false},
 	})
 	inventory := Normalize(Inventory{Controls: []Control{{Name: "红色按钮", Role: "button", Page: "rail", Feature: "F-97"}}})
-	witnesses, unresolved, _ := Derive(inventory, f.scenarios, f.evidence)
+	witnesses, unresolved, _ := Derive(inventory, f.scenarios, f.evidence, f.runs)
 	if len(witnesses) != 0 || len(unresolved) != 1 {
 		t.Fatalf("a red run must not become a witness: %+v %v", witnesses, unresolved)
 	}
@@ -422,7 +431,8 @@ func TestAWindowOnlyWitnessSkipsTheHeadlessRunThatSortedFirst(t *testing.T) {
 	})
 	report := runAudit(t, f,
 		[]Control{{Name: "打开 Graph", Role: "menuitem", Page: "tray", Feature: "F-15"}},
-		Ledger{Witnesses: []Witness{{Name: "打开 Graph", Role: "menuitem", Page: "tray", Action: "click", Journey: "F-15-tray"}}})
+		Ledger{EvidenceRuns: []string{"run-a-headless", "run-b-window"},
+			Witnesses: []Witness{{Name: "打开 Graph", Role: "menuitem", Page: "tray", Action: "click", Journey: "F-15-tray"}}})
 	if !report.OK() || report.Conclusions[0].Status != "covered" {
 		t.Fatalf("the window run must be found after the headless one is rejected: %+v", report)
 	}
@@ -446,8 +456,9 @@ func TestACanonicalShellControlFindsEvidenceUnderTheJourneyFeature(t *testing.T)
 	})
 	control := button("main agent 会话", "shell", "F-07")
 	report := runAudit(t, f, []Control{control},
-		Ledger{Witnesses: []Witness{{Name: control.Name, Role: control.Role, Page: control.Page,
-			Action: "click", Journey: "controls-shell"}}})
+		Ledger{EvidenceRuns: []string{"run-shell"},
+			Witnesses: []Witness{{Name: control.Name, Role: control.Role, Page: control.Page,
+				Action: "click", Journey: "controls-shell"}}})
 	if !report.OK() || report.Conclusions[0].Status != "covered" {
 		t.Fatalf("a control in the shell is proven by the journey that clicked it, not only by the page it was captured on: %+v", report)
 	}

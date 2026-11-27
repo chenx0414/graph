@@ -1,9 +1,0 @@
-[
-  {
-    "id": "assemblies.definitions",
-    "ok": true,
-    "expected": "status 200",
-    "actual": "status 200",
-    "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-cleanup/verification/evidence/f88c4f30/F-13/check-01.json"
-  }
-]

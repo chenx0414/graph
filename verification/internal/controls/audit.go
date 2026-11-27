@@ -56,7 +56,7 @@ func Audit(inventoryPath, ledgerPath, scenarioDir, evidenceRoot string, inventor
 		switch {
 		case len(witnessIndexes) == 1:
 			witness := ledger.Witnesses[witnessIndexes[0]]
-			proof := proveWitness(control, witness, scenarioDir, evidenceRoot)
+			proof := proveWitness(control, witness, scenarioDir, evidenceRoot, ledger.EvidenceRuns)
 			conclusion.Action = witness.Action
 			conclusion.Journey = witness.Journey
 			conclusion.Step = proof.Step
@@ -158,7 +158,7 @@ type proof struct {
 // proveWitness turns a claim into a fact: the journey must contain the action
 // step, a later assertion must observe a visible result, and the recorded run
 // must show that step passed in a lane that can prove this control.
-func proveWitness(control Control, witness Witness, scenarioDir, evidenceRoot string) proof {
+func proveWitness(control Control, witness Witness, scenarioDir, evidenceRoot string, runs []string) proof {
 	journey := cleanJourney(witness.Journey)
 	if journey == "" {
 		return proof{Reason: "the witness names no journey", Next: "set witness.journey to a file under verification/scenarios"}
@@ -176,7 +176,7 @@ func proveWitness(control Control, witness Witness, scenarioDir, evidenceRoot st
 		return proof{Reason: assertionErr.Error(), Next: fmt.Sprintf("add an assertion after step %d in %s that observes the visible result of %q", actionIndex, filepath.Base(scenarioPath), control.Name)}
 	}
 	required := requiredLanes(control, witness)
-	evidence, evidenceErr := findEvidence(evidenceRoot, control, witness, actionIndex, required, firstNonEmpty(scenario.Feature, scenario.ID))
+	evidence, evidenceErr := findEvidence(evidenceRoot, runs, control, witness, actionIndex, required, firstNonEmpty(scenario.Feature, scenario.ID))
 	if evidenceErr != nil {
 		return proof{Reason: evidenceErr.Error(), Next: witness.EvidenceHint(control)}
 	}
@@ -336,7 +336,7 @@ type evidenceProof struct {
 	Lane string
 }
 
-func findEvidence(evidenceRoot string, control Control, witness Witness, actionIndex int, required []string, journeyFeature string) (evidenceProof, error) {
+func findEvidence(evidenceRoot string, runs []string, control Control, witness Witness, actionIndex int, required []string, journeyFeature string) (evidenceProof, error) {
 	candidates := []string{}
 	add := func(path string) {
 		for _, existing := range candidates {
@@ -362,14 +362,13 @@ func findEvidence(evidenceRoot string, control Control, witness Witness, actionI
 		add(filepath.Join(evidenceRoot, item))
 	}
 	if len(candidates) == 0 {
-		matches, _ := filepath.Glob(filepath.Join(evidenceRoot, "*", featureFor(control)))
-		for _, match := range matches {
-			add(match)
-		}
-		if journeyFeature != "" {
-			matches, _ := filepath.Glob(filepath.Join(evidenceRoot, "*", journeyFeature))
-			for _, match := range matches {
-				add(match)
+		// Only the runs this ledger names may prove a control. Reading the whole
+		// evidence tree let an old run decide a verdict, so the tree could never be
+		// cleaned without turning the audit red.
+		for _, run := range runs {
+			add(filepath.Join(evidenceRoot, run, featureFor(control)))
+			if journeyFeature != "" {
+				add(filepath.Join(evidenceRoot, run, journeyFeature))
 			}
 		}
 	}

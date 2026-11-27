@@ -96,7 +96,11 @@ type Exclusion struct {
 
 // Ledger is the hand-maintained side: witnesses and exclusions.
 type Ledger struct {
-	Schema        int         `json:"schema"`
+	Schema int `json:"schema"`
+	// EvidenceRuns names the runs this ledger's witnesses were proven by. The audit
+	// reads only these, so an old run left on disk cannot decide whether a control
+	// passes — and deleting one cannot turn the audit red.
+	EvidenceRuns  []string    `json:"evidenceRuns,omitempty"`
 	Witnesses     []Witness   `json:"witnesses,omitempty"`
 	NotApplicable []Exclusion `json:"notApplicable,omitempty"`
 	Blocked       []Exclusion `json:"blocked,omitempty"`

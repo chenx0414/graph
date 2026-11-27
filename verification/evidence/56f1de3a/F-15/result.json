@@ -1,7 +1,0 @@
-{
-  "_graph": "graph:allow-large-file: generated journey evidence kept verbatim; generated data, not source",
-  "error": "cannot open the run's window for its shell surface: app binary not found at /Users/macmini/workspace/13-Graph/.worktrees/c-evidence-cleanup/dist/app/mac-arm64/Graph.app/Contents/MacOS/Graph (build it with: go -C backend run ./cmd/graphbuild app): stat /Users/macmini/workspace/13-Graph/.worktrees/c-evidence-cleanup/dist/app/mac-arm64/Graph.app/Contents/MacOS/Graph: no such file or directory",
-  "lane": "surface",
-  "ok": false,
-  "steps": null
-}
