@@ -165,3 +165,34 @@ func TestActivitySourceIsIdleWithoutAConsole(t *testing.T) {
 		t.Fatal("a shell with no console has no work in flight")
 	}
 }
+
+// The watcher polls the same file repeatedly. A deferred reload has to survive that
+// repetition: if the watcher advanced its stamp while waiting, the next poll would
+// compare the new stamp with the file it already read, see no change, and the new
+// binary would never run.
+func TestTheWatcherKeepsSeeingABuildItIsHoldingBack(t *testing.T) {
+	busy := &fakeBusy{}
+	relaunch := &fakeRelaunch{}
+	gate := newReloadGate(busy, relaunch.exec)
+
+	before := fileStamp{Size: 1, Inode: 1}
+	after := fileStamp{Size: 2, Inode: 2}
+
+	busy.active.Store(true)
+	for poll := 0; poll < 3; poll++ {
+		if gate.consider("/tmp/Graph", before, after) {
+			t.Fatalf("poll %d replaced the process while work was running", poll)
+		}
+	}
+	if got := relaunch.execs.Load(); got != 0 {
+		t.Fatalf("nothing may run while the operation is active, got %d", got)
+	}
+
+	busy.active.Store(false)
+	if !gate.consider("/tmp/Graph", before, after) {
+		t.Fatal("the reload must still see the build it was holding back")
+	}
+	if got := relaunch.execs.Load(); got != 1 {
+		t.Fatalf("the held-back build must run once, got %d", got)
+	}
+}

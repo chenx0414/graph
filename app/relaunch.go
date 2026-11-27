@@ -67,8 +67,10 @@ func (s *shell) watchBuild(path string) {
 			return
 		}
 		if gate.pending() {
+			// The stamp is deliberately not advanced: the gate has to keep seeing
+			// the build it is holding back, or it would conclude nothing changed and
+			// the new binary would never run.
 			log.Printf("[app] %s changed but work is in flight; reload is deferred", path)
-			stamp = next
 		}
 	}
 }
