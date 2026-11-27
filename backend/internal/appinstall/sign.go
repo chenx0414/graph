@@ -156,6 +156,16 @@ func EnsureIdentity() (Identity, error) {
 	return identity, nil
 }
 
+// SignPackagedApp signs a bundle that was just packaged. The packaged copy is
+// what someone installs by hand, so it carries the stable identity too.
+func SignPackagedApp(bundle string) (string, error) {
+	binary, err := bundleExecutable(bundle)
+	if err != nil {
+		return "", err
+	}
+	return InstallBundleSigning(bundle, binary)
+}
+
 // ResetIdentity replaces the signing keychain. It is the explicit repair: the new
 // certificate is a different identity, so the user grants permission once more.
 func ResetIdentity() (Identity, error) {

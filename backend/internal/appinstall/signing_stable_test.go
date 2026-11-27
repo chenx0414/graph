@@ -185,3 +185,28 @@ func TestInstallRefusesToFallBackToAnAdHocSignature(t *testing.T) {
 		t.Fatalf("the bundle was signed instead of refusing: %s", strings.TrimSpace(string(out)))
 	}
 }
+
+// The packaged bundle is what someone copies into place when they skip the
+// installer. If it is not signed with the stable identity, that copy runs as a
+// different app and the permission the user granted does not apply to it.
+func TestAPackagedBundleCarriesTheStableSignature(t *testing.T) {
+	requireTooling(t)
+	signingFixture(t)
+	scratch := t.TempDir()
+	bundle := filepath.Join(scratch, "Graph.app")
+	if err := os.MkdirAll(filepath.Join(bundle, "Contents", "MacOS"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	executable := filepath.Join(bundle, "Contents", "MacOS", "Graph")
+	machoBinary(t, executable)
+	requirement, err := SignPackagedApp(bundle)
+	if err != nil {
+		t.Fatalf("sign the packaged bundle: %v", err)
+	}
+	if !SignatureIsStable(requirement) {
+		t.Fatalf("the packaged bundle must carry a certificate requirement, got %q", requirement)
+	}
+	if out, err := exec.Command("codesign", "--verify", "--strict", "--deep", bundle).CombinedOutput(); err != nil {
+		t.Fatalf("the packaged bundle must verify: %v: %s", err, out)
+	}
+}

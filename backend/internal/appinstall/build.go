@@ -87,6 +87,13 @@ func PackageApp(root string, printer func(string)) error {
 	if err != nil {
 		return err
 	}
+	// Sign what we packaged. A bundle copied straight into place bypasses the
+	// installer, and an unsigned one would be ad-hoc signed by the system — a
+	// different identity, and the user's permission would not reach it.
+	requirement, err := SignPackagedApp(bundle)
+	if err != nil {
+		return err
+	}
 	total, err := directorySize(bundle)
 	if err != nil {
 		return err
@@ -94,6 +101,7 @@ func PackageApp(root string, printer func(string)) error {
 	if printer != nil {
 		printer(fmt.Sprintf("[app-mygo] %s", bundle))
 		printer(fmt.Sprintf("[app-mygo] shell binary %.1f MiB, bundle %.1f MiB", float64(info.Size())/(1024*1024), float64(total)/(1024*1024)))
+		printer(fmt.Sprintf("[app-mygo] signed with %s: %s", SigningIdentity, requirement))
 	}
 	return nil
 }
