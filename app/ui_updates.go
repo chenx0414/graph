@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"testing"
 
 	"github.com/egoist/mygo"
 )
@@ -63,11 +64,14 @@ var shellExecutor = &uiExecutor{}
 func claimShellOwner() {
 	e := shellExecutor
 	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.owner = currentGoroutine()
-	e.adopted = true
 	e.gen++
 	e.queued = nil
-	e.mu.Unlock()
+	// Only a test drives the queued work itself. Anywhere else — a daemon, the
+	// headless lane, a real window — nobody runs it, so claiming ownership must
+	// not promise that someone will.
+	e.adopted = testing.Testing()
 }
 
 func adoptTestOwner() {

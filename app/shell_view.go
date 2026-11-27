@@ -8,6 +8,10 @@ import (
 
 func (s *shellState) view(ctx *ui.Context) {
 	s.updates.drain()
+	// A frame is where the shell's queued writes run when there is no window to
+	// hand them to: the headless lane renders in this process, and nothing else
+	// would ever run them.
+	drainPosted()
 	applyTheme(ctx)
 	t := gwtheme.Of(ctx)
 	shell := ui.Row(ctx).Fill().Background(pageBackdrop(t))
