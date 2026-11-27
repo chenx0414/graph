@@ -35,8 +35,6 @@ type shell struct {
 	consoleMu  sync.Mutex
 }
 
-// consoleURL reads the daemon address the reload gate polls. The console moves
-// when the daemon restarts, so the gate reads it rather than copying it once.
 func (s *shell) consoleURL() string {
 	s.consoleMu.Lock()
 	defer s.consoleMu.Unlock()
@@ -89,8 +87,18 @@ func (s *shell) ensureDaemon() string {
 		s.daemon.adopt(info.PID)
 		return info.URL
 	}
-	if err := s.daemon.start(); err != nil {
-		log.Printf("[app] cannot start %s: %v", stableDaemonPath(s.paths), err)
+	// start() runs the same bootout/bootstrap plan, so the gate decides here too.
+	started := false
+	s.reloadGate().run(func() error {
+		if err := s.daemon.start(); err != nil {
+			log.Printf("[app] cannot start %s: %v", stableDaemonPath(s.paths), err)
+			return err
+		}
+		started = true
+		return nil
+	})
+	if !started {
+		return ""
 	}
 	for attempt := 0; attempt < 160; attempt++ {
 		if info, ok := s.paths.ReadConsole(); ok && s.paths.Reachable(info.URL) {

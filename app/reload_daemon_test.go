@@ -169,3 +169,26 @@ func TestAFreshShellAsksTheDaemonItHasNotReadYet(t *testing.T) {
 		t.Fatal("a shell with no address yet must still see the work in flight")
 	}
 }
+
+// ensureDaemon has a second branch: when no console answers it starts a daemon.
+// start() runs the same launchctl plan — bootout, bootstrap — so it ends a running
+// operation just as a restart does. The probe measured the daemon replaced from
+// 157 to 1040 while an operation was dispatched, and this branch is where that
+// came from.
+func TestEnsureDaemonDoesNotStartWhileWorkRuns(t *testing.T) {
+	stateDir := t.TempDir()
+
+	busy := &fakeBusy{}
+	busy.active.Store(true)
+	daemon := &countingDaemon{}
+	shell := &shell{paths: Paths{StateDir: stateDir}, daemon: daemon}
+	shell.gate = newReloadGate(busy, func(string) error { return nil })
+
+	shell.ensureDaemon()
+	if got := daemon.starts.Load(); got != 0 {
+		t.Fatalf("ensureDaemon started a daemon %d time(s) while work was running", got)
+	}
+	if !shell.gate.pending() {
+		t.Fatal("the start must stay armed so the daemon comes up once work settles")
+	}
+}

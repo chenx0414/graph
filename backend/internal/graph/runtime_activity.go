@@ -5,7 +5,8 @@ func (runtime *TaskRuntime) ActiveOperationCount() int {
 		return 0
 	}
 	row, ok := graphDBRow(runtime.store.Db, `SELECT COUNT(*) AS n FROM operations
-        WHERE state='intent' OR (worker_active=1 AND state IN ('prepared','dispatched','running'))`)
+        WHERE settled_at IS NULL
+          AND state IN ('intent','prepared','dispatched','running','failed')`)
 	if !ok {
 		return 0
 	}
