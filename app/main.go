@@ -32,6 +32,21 @@ type shell struct {
 	restarting atomic.Bool
 	gateOnce   sync.Once
 	gate       *reloadGate
+	consoleMu  sync.Mutex
+}
+
+// consoleURL reads the daemon address the reload gate polls. The console moves
+// when the daemon restarts, so the gate reads it rather than copying it once.
+func (s *shell) consoleURL() string {
+	s.consoleMu.Lock()
+	defer s.consoleMu.Unlock()
+	return s.console
+}
+
+func (s *shell) setConsole(url string) {
+	s.consoleMu.Lock()
+	s.console = url
+	s.consoleMu.Unlock()
 }
 
 func (s *shell) watchTasks() {
@@ -170,7 +185,7 @@ func main() {
 	paths := DefaultPaths()
 	s := &shell{paths: paths, daemon: newDaemon(paths)}
 	mygo.App.WhenReady(func() {
-		s.console = s.ensureDaemon()
+		s.setConsole(s.ensureDaemon())
 		if s.console == "" {
 			log.Fatal("[app] the daemon did not come up")
 		}

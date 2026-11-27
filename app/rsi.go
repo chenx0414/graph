@@ -127,7 +127,7 @@ func (s *shell) pollRsi() {
 	}
 	s.rsiTried = id
 	if info, ok := s.paths.ReadConsole(); ok {
-		s.console = info.URL
+		s.setConsole(info.URL)
 	}
 	confirmed := ackRestart(s.console, appToken(s.paths.StateDir), id)
 	s.restarting.Store(false)

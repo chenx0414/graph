@@ -142,7 +142,7 @@ func TestActivitySourceReadsTheDaemonsCount(t *testing.T) {
 		}))
 		address := server.URL
 		activity := daemonActivity{
-			console: &address,
+			console: func() string { return address },
 			token:   func() string { return "tok" },
 			client:  func(a, tok string) apiClient { return newAPIClient(a, tok) },
 		}

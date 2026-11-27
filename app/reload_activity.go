@@ -6,7 +6,7 @@ import (
 )
 
 type daemonActivity struct {
-	console *string
+	console func() string
 	token   func() string
 	client  func(address, token string) apiClient
 }
@@ -14,7 +14,7 @@ type daemonActivity struct {
 func (a daemonActivity) HasActiveOperation() bool {
 	address := ""
 	if a.console != nil {
-		address = *a.console
+		address = a.console()
 	}
 	if address == "" {
 		// Nothing can be running if nothing answers.
@@ -36,7 +36,7 @@ func (a daemonActivity) HasActiveOperation() bool {
 func (s *shell) reloadGate() *reloadGate {
 	s.gateOnce.Do(func() {
 		activity := daemonActivity{
-			console: &s.console,
+			console: s.consoleURL,
 			token:   func() string { return appToken(s.paths.StateDir) },
 			client:  func(address, token string) apiClient { return newAPIClient(address, token) },
 		}
