@@ -8,7 +8,7 @@
   "surface": {
     "backend/internal/graph/runtime_agent_context.go": "cd3e19814ae57c733cd07fe09c425aec55f1f2be8443ac4de55d10504e1fd860",
     "backend/internal/graph/runtime_agent_tool_definitions.go": "4bba658319c66cbba595a9ca31cbfc2e7941da687b734483cc48edf8454a82bc",
-    "backend/internal/graph/runtime_agent_tools.go": "d8c7649baeb3d322cf8afba30fe779820e836c144911c9ea6dd9f5103a0b3e6e",
+    "backend/internal/graph/runtime_agent_tools.go": "6322e52b81b57eff5ae149a515f3c4b374e000dcc370f95cd5464a62d48ef671",
     "backend/internal/graph/runtime_pi_native_tools.go": "dc2e6afc230da7b142706cbf298cfbad4def273392318c3cd1bfae07a7e3f1db",
     "backend/internal/graph/runtime_pig_native_tools.go": "25f0d7e7b84575663de9dbecdfb39b91b76b94ad57eb02e8303f1dbbd806b2a5",
     "backend/internal/harness/cases.go": "a750a30e41060ba1a7ba0bd6cba914215ade52eb0a7cc95f9006998d852194b1",
@@ -16,5 +16,5 @@
     "backend/internal/harness/provider.go": "90778e9de704a1c41bb969a4a10c916804475479ad392eb5190d04493cd38c75",
     "backend/internal/harness/run.go": "8736a717959fd10a86dc04ce3bad28f2e7c615f94bf83621de9f15cee2f63386"
   },
-  "updatedAt": "2026-11-21T06:40:04.017363Z"
+  "updatedAt": "2026-11-27T05:45:56.348148Z"
 }
