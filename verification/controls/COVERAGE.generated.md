@@ -4,7 +4,7 @@
 - controls: **73/88 covered**, 12 not-applicable, 3 blocked
 - journeys cited: **17**
 - lanes proven: headless, surface
-- audit: /Users/macmini/workspace/13-Graph/.worktrees/c-evidence-cleanup/verification/controls/inventory.json / /Users/macmini/workspace/13-Graph/.worktrees/c-evidence-cleanup/verification/controls/ledger.json
+- audit: /Users/macmini/workspace/13-Graph/verification/controls/inventory.json / /Users/macmini/workspace/13-Graph/verification/controls/ledger.json
 
 ## Controls
 

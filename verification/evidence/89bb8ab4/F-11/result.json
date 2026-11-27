@@ -1,0 +1,116 @@
+{
+  "_graph": "graph:allow-large-file: generated journey evidence kept verbatim; generated data, not source",
+  "access": [
+    {
+      "focusable": true,
+      "name": "查找供应商",
+      "role": "any",
+      "value": "zzz-no-provider"
+    }
+  ],
+  "frames": [
+    "/Users/macmini/workspace/13-Graph/verification/evidence/89bb8ab4/F-11/providers.png"
+  ],
+  "ok": true,
+  "steps": [
+    {
+      "detail": "visible: 供应商",
+      "index": 1,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 2,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 供应商",
+      "index": 3,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "detail": "visible: 刷新供应商",
+      "index": 4,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 5,
+      "ok": true,
+      "verb": "type"
+    },
+    {
+      "detail": "exposed as any with value \"zzz-no-provider\"",
+      "index": 6,
+      "ok": true,
+      "verb": "assertAccess"
+    },
+    {
+      "index": 7,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: Magpie（扩展）",
+      "index": 8,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 9,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 读不到 magpie",
+      "index": 10,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/89bb8ab4/F-11/providers.png",
+      "index": 11,
+      "ok": true,
+      "verb": "screenshot"
+    }
+  ],
+  "texts": [
+    "轨迹",
+    "编队",
+    "供应商",
+    "资源",
+    "装配",
+    "设置",
+    "会话列表标题",
+    "对话标题",
+    "白板标题",
+    "标签页 白板",
+    "白板",
+    "标签页 供应商",
+    "供应商",
+    "关闭 供应商",
+    "主区域卡片",
+    "main agent 会话",
+    "章鱼",
+    "main agent 名称",
+    "Main Agent",
+    "还没有项目会话。",
+    "从左侧选择一个项目",
+    "模型",
+    "/",
+    "供应商",
+    "查找供应商",
+    "刷新供应商",
+    "本机供应商写进 graph.config.json · Magpie 是可选的扩展",
+    "本机供应商",
+    "还没有本机供应商。点右上角「添加供应商」开始。",
+    "添加供应商",
+    "添加供应商",
+    "Magpie（扩展）",
+    "读不到 magpie：服务端拒绝：读不到 magpie 的配置目录 …fication/.run/89bb8ab4/home/.config/magpie",
+    "重试供应商",
+    "重试供应商"
+  ]
+}

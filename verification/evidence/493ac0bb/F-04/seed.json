@@ -1,0 +1,19 @@
+{
+  "outcome": {
+    "projectId": "verify",
+    "conversationId": "5ea4cff4-63ce-482a-9712-d0d79b8bd661",
+    "taskId": "fdcf6350-d696-46a2-896d-aa77a6b5b776",
+    "assistantText": "已就绪。这条回答来自验证用的替身模型，不消耗真实额度。",
+    "messages": 2,
+    "inputTokens": 40,
+    "outputTokens": 10,
+    "elapsedMs": 309,
+    "turns": 1
+  },
+  "prompt": {
+    "prompt": "请用一句话说明你已就绪。",
+    "expect": "已就绪。这条回答来自验证用的替身模型，不消耗真实额度。",
+    "requestId": "vg-f04-turn",
+    "projectId": "verify"
+  }
+}
