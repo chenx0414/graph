@@ -75,6 +75,12 @@ func run(command string, args ...string) (string, error) {
 	return string(output), nil
 }
 
+// IdentityPresent reports whether the keychain holds a code-signing identity for
+// this app. It deliberately does not ask for *valid* identities: a self-signed
+// certificate is not trusted by the system, and codesign signs with it anyway —
+// what TCC reads is the certificate requirement, not the trust setting. Asking
+// for validity here made a perfectly usable identity look absent, and the absent
+// branch replaced the certificate, which is the app identity macOS knows.
 func IdentityPresent() bool {
 	if _, err := os.Stat(KeychainPath()); err != nil {
 		return false
