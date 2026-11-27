@@ -102,6 +102,9 @@ func parseInstall(root string, args []string) (appinstall.InstallOptions, error)
 	if options.Dest == "" {
 		options.Dest = appinstall.DefaultDest()
 	}
+	if options.StateDir == "" {
+		options.StateDir = appinstall.DefaultStateDir()
+	}
 	return options, nil
 }
 

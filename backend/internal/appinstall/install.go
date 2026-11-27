@@ -14,6 +14,7 @@ const (
 	ExitUsage      = 2
 	ExitStale      = 3
 	ExitSignFailed = 4
+	ExitDeferred   = 5
 )
 
 type ExitError struct {
@@ -34,10 +35,11 @@ func ExitCode(err error) int {
 }
 
 type InstallOptions struct {
-	Root   string
-	Bundle string
-	Dest   string
-	DryRun bool
+	Root     string
+	Bundle   string
+	Dest     string
+	DryRun   bool
+	StateDir string
 }
 
 func DefaultBundle(root string) string {
@@ -46,6 +48,11 @@ func DefaultBundle(root string) string {
 
 func DefaultDest() string {
 	return "/Applications/Graph.app"
+}
+
+func DefaultStateDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, "Library", "Application Support", "Graph", "state")
 }
 
 func NewestSource(directory string) (string, int64) {
@@ -138,6 +145,9 @@ func Install(options InstallOptions) (string, error) {
 	}
 	if options.DryRun {
 		return fmt.Sprintf("would install %s -> %s", bundle, dest), nil
+	}
+	if err := preflightInstall(options); err != nil {
+		return "", err
 	}
 	previous := dest + ".previous"
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
