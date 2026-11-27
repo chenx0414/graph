@@ -165,13 +165,8 @@ func (app *GraphApp) serveHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, appHealth{OK: true})
 }
 
-// activityRoute is under /api/app/ on purpose: that prefix is where guard accepts
-// the app bridge token, and the app process holds no console session.
 const activityRoute = "/api/app/activity"
 
-// appActivity is what the app's reload gate reads. A build must not replace the
-// process while an operation is in flight, and the UI cannot tell: it can look
-// idle while work is dispatched.
 type appActivity struct {
 	Active int `json:"active"`
 }

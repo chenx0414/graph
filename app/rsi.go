@@ -90,8 +90,6 @@ func ackRestart(address, token, id string) bool {
 	return false
 }
 
-// errDaemonRestartRefused reports that the daemon did not come back; the caller
-// leaves the gate armed so the next poll tries again.
 var errDaemonRestartRefused = errors.New("the daemon refused the restart")
 
 func (s *shell) watchRsi() {
@@ -113,9 +111,7 @@ func (s *shell) pollRsi() {
 		return
 	}
 	s.restarting.Store(true)
-	// An RSI change replaces the daemon, which ends whatever operation is running.
-	// The gate holds it until the work settles, so the change lands afterwards
-	// instead of cutting a live turn.
+	// The gate holds the restart until no operation is running.
 	applied := false
 	s.reloadGate().run(func() error {
 		restarted, _ := s.daemon.restart(true)

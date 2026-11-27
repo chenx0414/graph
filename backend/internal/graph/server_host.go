@@ -38,18 +38,16 @@ type AppRsiService struct {
 }
 
 type AppOptions struct {
-	Origin       string
-	Startup      *StartupInfo
-	StartupInfo  func() StartupInfo
-	ConfigStore  *ConfigStore
-	ConfigEnv    map[string]*string
-	ConfigTest   func(modelId string) any
-	AppServices  *AppServices
-	Usage        UsageService
-	AgentContext *AgentContextLibrary
-	Ready        func() bool
-	// ActiveOperations answers how much work is in flight. The app's reload gate
-	// asks it before replacing a process, so a build cannot end a live turn.
+	Origin           string
+	Startup          *StartupInfo
+	StartupInfo      func() StartupInfo
+	ConfigStore      *ConfigStore
+	ConfigEnv        map[string]*string
+	ConfigTest       func(modelId string) any
+	AppServices      *AppServices
+	Usage            UsageService
+	AgentContext     *AgentContextLibrary
+	Ready            func() bool
 	ActiveOperations func() int
 }
 
@@ -125,9 +123,7 @@ func OpenGraphServer(options GraphServerOptions) *GraphHost {
 		Origin: origin, Startup: options.Startup, StartupInfo: options.StartupInfo,
 		ConfigStore: options.ConfigStore, ConfigEnv: options.ConfigEnv, ConfigTest: options.ConfigTest,
 		AppServices: options.AppServices, Usage: options.Usage, AgentContext: agentContext,
-		Ready: options.Ready,
-		// The app's reload gate reads this: a build must not replace a process
-		// while an operation is in flight.
+		Ready:            options.Ready,
 		ActiveOperations: runtime.ActiveOperationCount,
 	})
 	requested := 0

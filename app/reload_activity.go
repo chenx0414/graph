@@ -5,9 +5,6 @@ import (
 	"time"
 )
 
-// daemonActivity asks the daemon how much work is in flight. It is the durable
-// answer: an operation stays dispatched even when the console looks idle, so a
-// build that looked at the UI would still cut a live turn.
 type daemonActivity struct {
 	console *string
 	token   func() string
@@ -20,9 +17,7 @@ func (a daemonActivity) HasActiveOperation() bool {
 		address = *a.console
 	}
 	if address == "" {
-		// Without a console there is nothing that could be running: a daemon that
-		// is not reachable has no operations, and waiting for it would hang a build
-		// forever.
+		// Nothing can be running if nothing answers.
 		return false
 	}
 	payload, err := a.client(address, a.token()).get("/api/app/activity")
@@ -38,8 +33,6 @@ func (a daemonActivity) HasActiveOperation() bool {
 	return body.Active > 0
 }
 
-// reloadGate returns the shell's one gate. Every replacing path asks the same
-// object, so a reload held back by one caller is still armed for the next.
 func (s *shell) reloadGate() *reloadGate {
 	s.gateOnce.Do(func() {
 		activity := daemonActivity{
@@ -52,6 +45,4 @@ func (s *shell) reloadGate() *reloadGate {
 	return s.gate
 }
 
-// reloadPollInterval is how often a held-back reload looks again. A settled
-// operation is noticed within one tick.
 const reloadPollInterval = 5 * time.Second
