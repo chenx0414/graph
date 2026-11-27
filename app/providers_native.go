@@ -143,7 +143,7 @@ func (s *shellState) loadProviders() {
 		return
 	}
 	go func() {
-		nativeRows, document, revision, nativeErr := s.fetchNativeProviders(api)
+		nativeRows, document, revision, platforms, nativeErr := s.fetchNativeProviders(api)
 		payload, magpieErr := api.get("/api/providers/magpie")
 		var entries []providerEntry
 		var enabled map[string]bool
@@ -158,6 +158,9 @@ func (s *shellState) loadProviders() {
 			s.providers.loading = false
 			s.providers.attempted = true
 			s.providers.native = nativeRows
+			if len(platforms) > 0 {
+				s.providers.platforms = platforms
+			}
 			if nativeErr == nil {
 				s.providers.document = document
 				s.providers.revision = revision
@@ -179,25 +182,28 @@ func (s *shellState) loadProviders() {
 	}()
 }
 
-func (s *shellState) fetchNativeProviders(api apiClient) ([]nativeProviderRow, map[string]any, int, error) {
+func (s *shellState) fetchNativeProviders(api apiClient) ([]nativeProviderRow, map[string]any, int, []platformPreset, error) {
 	configPayload, err := api.get("/api/config")
 	if err != nil {
 		if isNotFound(err) {
-			return nil, nil, 0, nil
+			return nil, nil, 0, nil, nil
 		}
-		return nil, nil, 0, err
+		return nil, nil, 0, nil, err
 	}
 	rows, document, revision, err := parseNativeProviders(configPayload)
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, nil, 0, nil, err
 	}
+	// The platforms belong on the shell's writer, so this read returns them
+	// instead of storing them from the worker goroutine.
+	var platforms []platformPreset
 	if catalogPayload, catalogErr := api.get("/api/providers"); catalogErr == nil {
 		var catalog platformCatalogPayload
 		if json.Unmarshal(catalogPayload, &catalog) == nil {
-			s.providers.platforms = catalog.Platforms
+			platforms = catalog.Platforms
 		}
 	}
-	return rows, document, revision, nil
+	return rows, document, revision, platforms, nil
 }
 
 func (s *shellState) nativeProviderModel(id string) *nativeProviderRow {
