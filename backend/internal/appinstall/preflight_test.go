@@ -106,3 +106,26 @@ func TestPreflightAllowsAnInstallWithNoState(t *testing.T) {
 		t.Fatalf("a state directory with no database must install: %v", err)
 	}
 }
+
+// A dry run answers the same question: promising an install that would then be
+// refused is worse than refusing it up front.
+func TestADryRunAlsoDefersWhileWorkRuns(t *testing.T) {
+	stateDir := t.TempDir()
+	seedState(t, stateDir, [][3]any{{"dispatched", nil}})
+
+	bundle := filepath.Join(t.TempDir(), "Graph.app")
+	if err := os.MkdirAll(filepath.Join(bundle, "Contents", "MacOS"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundle, "Contents", "Info.plist"), []byte("<plist/>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Install(InstallOptions{StateDir: stateDir, Bundle: bundle, DryRun: true})
+	if err == nil {
+		t.Fatal("a dry run must report the deferral too")
+	}
+	var exit *ExitError
+	if !asExitError(err, &exit) || exit.Code != ExitDeferred {
+		t.Fatalf("the dry run must defer, got %v", err)
+	}
+}

@@ -99,6 +99,9 @@ func parseInstall(root string, args []string) (appinstall.InstallOptions, error)
 	if options.Bundle == "" {
 		options.Bundle = appinstall.DefaultBundle(options.Root)
 	}
+	if stateDir := flagValue(args, "state-dir"); stateDir != "" {
+		options.StateDir = stateDir
+	}
 	if options.Dest == "" {
 		options.Dest = appinstall.DefaultDest()
 	}

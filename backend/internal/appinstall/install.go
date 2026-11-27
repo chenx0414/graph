@@ -143,11 +143,11 @@ func Install(options InstallOptions) (string, error) {
 	if _, err := os.Stat(filepath.Join(bundle, "Contents", "Info.plist")); err != nil {
 		return "", &ExitError{Code: ExitSignFailed, Message: fmt.Sprintf("%s is not an application bundle (no Contents/Info.plist); refusing to install it", bundle)}
 	}
-	if options.DryRun {
-		return fmt.Sprintf("would install %s -> %s", bundle, dest), nil
-	}
 	if err := preflightInstall(options); err != nil {
 		return "", err
+	}
+	if options.DryRun {
+		return fmt.Sprintf("would install %s -> %s", bundle, dest), nil
 	}
 	previous := dest + ".previous"
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
