@@ -9,8 +9,6 @@ import (
 	"testing"
 )
 
-// signingFixture puts the signing directory under the test's temp home, so a test
-// never touches the identity the installed app uses.
 func signingFixture(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
@@ -18,8 +16,6 @@ func signingFixture(t *testing.T) string {
 	return filepath.Join(home, ".graph", "signing")
 }
 
-// machoBinary compiles a real Mach-O executable. A shell script is not one:
-// codesign reads its host requirement instead of the one we set.
 func machoBinary(t *testing.T, path string) {
 	t.Helper()
 	source := filepath.Join(t.TempDir(), "main.go")
@@ -32,9 +28,6 @@ func machoBinary(t *testing.T, path string) {
 	}
 }
 
-// makeKeychainWithoutIdentity creates an unlocked keychain that holds no
-// code-signing identity, which is what a signing setup looks like when its
-// certificate is missing or unusable.
 func makeKeychainWithoutIdentity(t *testing.T, directory string) error {
 	t.Helper()
 	path := filepath.Join(directory, "graph-signing.keychain-db")
@@ -54,8 +47,6 @@ func makeKeychainWithoutIdentity(t *testing.T, directory string) error {
 	return nil
 }
 
-// requireTooling skips only when the host genuinely lacks the tools: an
-// assertion that silently passes without codesign proves nothing.
 func requireTooling(t *testing.T) {
 	t.Helper()
 	for _, tool := range []string{"codesign", "security", "openssl"} {
@@ -65,9 +56,7 @@ func requireTooling(t *testing.T) {
 	}
 }
 
-// The identity a signature names must be a certificate, not a content hash: TCC
-// grants permission to a certificate requirement and revokes it when the cdhash
-// changes, which is every rebuild.
+// A rebuild must not change what the signature names.
 func TestAStableIdentitySignsWithACertificateRequirement(t *testing.T) {
 	requireTooling(t)
 	signingFixture(t)
@@ -90,8 +79,7 @@ func TestAStableIdentitySignsWithACertificateRequirement(t *testing.T) {
 	}
 }
 
-// A second install must reuse the identity: a rebuilt app that reuses nothing
-// forces the user to grant permission again.
+// A second install reuses the identity.
 func TestTwoInstallsReuseTheSameIdentity(t *testing.T) {
 	requireTooling(t)
 	signingFixture(t)
@@ -116,9 +104,7 @@ func TestTwoInstallsReuseTheSameIdentity(t *testing.T) {
 	}
 }
 
-// An identity that exists but cannot sign must be reported, never silently
-// repaired: deleting the keychain replaces the certificate and takes the user's
-// permission with it.
+// An unusable identity is reported, never replaced.
 func TestAnUnusableIdentityIsReportedNotReplaced(t *testing.T) {
 	requireTooling(t)
 	directory := signingFixture(t)
@@ -147,9 +133,7 @@ func TestAnUnusableIdentityIsReportedNotReplaced(t *testing.T) {
 	}
 }
 
-// The install path must fail loudly when the stable identity is unavailable.
-// Falling back to an ad-hoc signature is what shipped: the app ran, and the
-// permission it had been granted no longer applied to it.
+// Installing refuses an ad-hoc signature.
 func TestInstallRefusesToFallBackToAnAdHocSignature(t *testing.T) {
 	requireTooling(t)
 	directory := signingFixture(t)
@@ -176,19 +160,14 @@ func TestInstallRefusesToFallBackToAnAdHocSignature(t *testing.T) {
 	if !strings.Contains(err.Error(), "identity") && !strings.Contains(err.Error(), SigningIdentity) {
 		t.Fatalf("the error must name what to fix, got %v", err)
 	}
-	// The fallback signed the bundle with a throwaway identity. The bundle itself
-	// must still be unsigned, which is what "the install did nothing" looks like:
-	// the executable inside it carries the ad-hoc signature the Go toolchain put
-	// there, and that one is not the installer's doing.
+	// The fallback signed the bundle; it must still be unsigned instead.
 	if err := exec.Command("codesign", "--verify", bundle).Run(); err == nil {
 		out, _ := exec.Command("codesign", "-dvv", bundle).CombinedOutput()
 		t.Fatalf("the bundle was signed instead of refusing: %s", strings.TrimSpace(string(out)))
 	}
 }
 
-// The packaged bundle is what someone copies into place when they skip the
-// installer. If it is not signed with the stable identity, that copy runs as a
-// different app and the permission the user granted does not apply to it.
+// The packaged bundle carries the stable signature too.
 func TestAPackagedBundleCarriesTheStableSignature(t *testing.T) {
 	requireTooling(t)
 	signingFixture(t)

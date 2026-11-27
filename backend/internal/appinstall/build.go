@@ -87,9 +87,7 @@ func PackageApp(root string, printer func(string)) error {
 	if err != nil {
 		return err
 	}
-	// Sign what we packaged. A bundle copied straight into place bypasses the
-	// installer, and an unsigned one would be ad-hoc signed by the system — a
-	// different identity, and the user's permission would not reach it.
+	// A hand-copied bundle bypasses Install, so the packaged one is signed too.
 	requirement, err := SignPackagedApp(bundle)
 	if err != nil {
 		return err

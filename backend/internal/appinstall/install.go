@@ -172,9 +172,7 @@ func Install(options InstallOptions) (string, error) {
 	return message, nil
 }
 
-// A copy that produced no executable is not an install: the caller would
-// otherwise report an app that cannot start. Checked before signing, so the
-// failure names the copy instead of a codesign error on an empty bundle.
+// A copy with no executable is not an install; checked before signing.
 func verifyInstalled(dest string) error {
 	executable, err := bundleExecutable(dest)
 	if err != nil {
@@ -197,10 +195,7 @@ func signInstalled(dest string) error {
 	}
 	requirement, err := InstallBundleSigning(dest, binary)
 	if err != nil {
-		// No ad-hoc fallback. An ad-hoc signature runs, but macOS keys the
-		// permission on a content hash, so the grant is void the moment anything
-		// is rebuilt and the user has to authorise the app again. Failing here
-		// leaves the previous, still-authorised bundle in place.
+		// No ad-hoc fallback: its grant is void at the next rebuild.
 		return fmt.Errorf("%w\n\n%s", err,
 			"the app was not installed: signing it with a throwaway identity would make macOS "+
 				"ask for Accessibility and Screen Recording again after every rebuild")

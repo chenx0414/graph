@@ -75,12 +75,7 @@ func run(command string, args ...string) (string, error) {
 	return string(output), nil
 }
 
-// IdentityPresent reports whether the keychain holds a code-signing identity for
-// this app. It deliberately does not ask for *valid* identities: a self-signed
-// certificate is not trusted by the system, and codesign signs with it anyway —
-// what TCC reads is the certificate requirement, not the trust setting. Asking
-// for validity here made a perfectly usable identity look absent, and the absent
-// branch replaced the certificate, which is the app identity macOS knows.
+// IdentityPresent asks for a usable identity, not a *valid* one.
 func IdentityPresent() bool {
 	if _, err := os.Stat(KeychainPath()); err != nil {
 		return false
@@ -89,15 +84,8 @@ func IdentityPresent() bool {
 	return err == nil && strings.Contains(output, SigningIdentity)
 }
 
-// ErrIdentityUnusable means the signing keychain exists but cannot sign. The
-// installer reports it and stops rather than replacing the certificate: the
-// replacement is a different identity, and every permission granted to the old
-// one stops applying to the app.
 var ErrIdentityUnusable = errors.New("the signing identity exists but cannot sign")
 
-// EnsureIdentity returns the signing identity, creating it once when there is
-// no keychain at all. An existing keychain that cannot sign is an error, and
-// ResetIdentity is the explicit way to rebuild it.
 func EnsureIdentity() (Identity, error) {
 	identity := Identity{Name: SigningIdentity, Keychain: KeychainPath()}
 	if IdentityPresent() {
@@ -156,8 +144,6 @@ func EnsureIdentity() (Identity, error) {
 	return identity, nil
 }
 
-// SignPackagedApp signs a bundle that was just packaged. The packaged copy is
-// what someone installs by hand, so it carries the stable identity too.
 func SignPackagedApp(bundle string) (string, error) {
 	binary, err := bundleExecutable(bundle)
 	if err != nil {
@@ -166,8 +152,6 @@ func SignPackagedApp(bundle string) (string, error) {
 	return InstallBundleSigning(bundle, binary)
 }
 
-// ResetIdentity replaces the signing keychain. It is the explicit repair: the new
-// certificate is a different identity, so the user grants permission once more.
 func ResetIdentity() (Identity, error) {
 	if err := os.Remove(KeychainPath()); err != nil && !os.IsNotExist(err) {
 		return Identity{}, err
@@ -236,7 +220,5 @@ func InstallBundleSigning(bundle, binary string) (string, error) {
 	if _, err := run("codesign", "--verify", "--strict", "--deep", bundle); err != nil {
 		return "", err
 	}
-	// TCC grants permission to the app bundle, so the requirement that matters is
-	// the bundle's, not the inner executable's.
 	return DesignatedRequirement(bundle)
 }
