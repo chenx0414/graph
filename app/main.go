@@ -69,7 +69,18 @@ func (s *shell) watchTasks() {
 func (s *shell) ensureDaemon() string {
 	if info, ok := s.paths.ReadConsole(); ok && s.paths.Reachable(info.URL) {
 		if result := s.daemon.refresh(); result.restart {
-			if restarted, _ := s.daemon.restart(result.reload); restarted {
+			// A stale daemon ends the operation that is running, so the gate
+			// decides. When work is in flight the restart is held back and the
+			// old daemon keeps serving; the next call takes the new one.
+			restarted := false
+			s.reloadGate().run(func() error {
+				if ok, _ := s.daemon.restart(result.reload); !ok {
+					return errDaemonRestartRefused
+				}
+				restarted = true
+				return nil
+			})
+			if restarted {
 				if fresh, ok := s.paths.ReadConsole(); ok {
 					return fresh.URL
 				}
