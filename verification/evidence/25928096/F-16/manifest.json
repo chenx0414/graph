@@ -1,0 +1,40 @@
+{
+  "createdAt": "2026-11-27T10:31:05Z",
+  "files": [
+    {
+      "bytes": 772,
+      "path": "assertions.json",
+      "sha256": "7b4d59dbeabb8ee4204d3a53396aed3692bab89892c1c11af5b637127a624d94"
+    },
+    {
+      "bytes": 313,
+      "path": "check-01.json",
+      "sha256": "a4404ee9c8638338dcd4524866c78dee795447e79c745cf1f6ae80dfa060f54c"
+    },
+    {
+      "bytes": 648,
+      "path": "check-02.json",
+      "sha256": "72af639e2002556753852e1bc569995d3403c187c92542be40b682485c8c077b"
+    },
+    {
+      "bytes": 2557,
+      "path": "check-03.json",
+      "sha256": "07f567a95c430655e673c56c05d52c5d6a85bde2557a9ec7fdcacc0c866f1cf8"
+    },
+    {
+      "bytes": 112209,
+      "path": "fleet-page.png",
+      "sha256": "84c5d3e19f47ab200fe683d4d1c0e331085527860a0e3f059f68dcf5102fb404"
+    },
+    {
+      "bytes": 77554,
+      "path": "resources-page.png",
+      "sha256": "1ce5dde2ff4f0bd4ff928d6c745265d7d182406bf8ed0c7ede60e9d481fe766d"
+    },
+    {
+      "bytes": 2970,
+      "path": "result.json",
+      "sha256": "f03e2c967ca280f015992fb4e058b8d9e7d3b35d9ecb34ee72b9bd09abadb4e5"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "outcome": {
+    "projectId": "verify",
+    "conversationId": "0e66e93b-49ad-408a-86f2-707b8f4fdd05",
+    "taskId": "73072529-2471-4739-bb7b-a400a3ee9187",
+    "assistantText": "已就绪。这条回答来自验证用的替身模型，不消耗真实额度。",
+    "messages": 2,
+    "inputTokens": 40,
+    "outputTokens": 10,
+    "elapsedMs": 153,
+    "turns": 1
+  },
+  "prompt": {
+    "prompt": "请用一句话说明你已就绪。",
+    "expect": "已就绪。这条回答来自验证用的替身模型，不消耗真实额度。",
+    "requestId": "vg-fleet-filters",
+    "projectId": "verify"
+  }
+}

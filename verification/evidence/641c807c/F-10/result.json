@@ -1,0 +1,269 @@
+{
+  "_graph": "graph:allow-large-file: generated journey evidence kept verbatim; generated data, not source",
+  "frames": [
+    "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/641c807c/F-10/fleet-filters.png"
+  ],
+  "ok": true,
+  "steps": [
+    {
+      "detail": "visible: 白板标题",
+      "index": 1,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 2,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 已就绪。这条回答来自验证用的替身模型，不消耗真实额度。",
+      "index": 3,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 4,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 编队总览窗口",
+      "index": 5,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "detail": "skipped: 只看 verify is not on screen",
+      "index": 6,
+      "ok": true,
+      "skipped": true,
+      "verb": "clickIf"
+    },
+    {
+      "detail": "visible: 编队范围",
+      "index": 7,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "detail": "skipped: 只看 全部 is not on screen",
+      "index": 8,
+      "ok": true,
+      "skipped": true,
+      "verb": "clickIf"
+    },
+    {
+      "detail": "visible: 编队范围",
+      "index": 9,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 10,
+      "ok": true,
+      "verb": "clickIf"
+    },
+    {
+      "detail": "visible: 编队范围",
+      "index": 11,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 12,
+      "ok": true,
+      "verb": "clickIf"
+    },
+    {
+      "index": 13,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "index": 14,
+      "ok": true,
+      "verb": "clickIf"
+    },
+    {
+      "index": 15,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "index": 16,
+      "ok": true,
+      "verb": "clickIf"
+    },
+    {
+      "index": 17,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "index": 18,
+      "ok": true,
+      "verb": "clickIf"
+    },
+    {
+      "index": 19,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "index": 20,
+      "ok": true,
+      "verb": "clickIf"
+    },
+    {
+      "index": 21,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "index": 22,
+      "ok": true,
+      "verb": "clickIf"
+    },
+    {
+      "index": 23,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "index": 24,
+      "ok": true,
+      "verb": "clickIf"
+    },
+    {
+      "detail": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/641c807c/F-10/fleet-filters.png",
+      "index": 25,
+      "ok": true,
+      "verb": "screenshot"
+    }
+  ],
+  "texts": [
+    "轨迹",
+    "编队",
+    "供应商",
+    "资源",
+    "装配",
+    "设置",
+    "会话列表标题",
+    "对话标题",
+    "对话标题名",
+    "白板标题",
+    "标签页 白板",
+    "白板",
+    "标签页 编队",
+    "编队",
+    "关闭 编队",
+    "主区域卡片",
+    "main agent 会话",
+    "章鱼",
+    "main agent 名称",
+    "Main Agent",
+    "verify",
+    "verify",
+    "请用一句话说明你已就绪。",
+    "18:32",
+    "复制",
+    "已就绪。这条回答来自验证用的替身模型，不消耗真实额度。",
+    "18:32",
+    "复制",
+    "赞",
+    "踩",
+    "朗读",
+    "更多",
+    "消息",
+    "附件",
+    "模型",
+    "seed off",
+    "语音",
+    "发送",
+    "编队总览窗口",
+    "1",
+    "Agent 数",
+    "0",
+    "运行中",
+    "0",
+    "工作项",
+    "2",
+    "消息数",
+    "50",
+    "Tokens",
+    "$0",
+    "成本",
+    "编队范围 · 共 1 个 Agent · 1 个项目分组",
+    "浏览历史图",
+    "历史图",
+    "刷新编队",
+    "刷新",
+    "调整分区",
+    "Agent 网络窗口",
+    "编队还没有可展示的 Agent。",
+    "调整分区",
+    "跨 Agent 协作窗口",
+    "跨 Agent 协作",
+    "0 条协作 · 0 条泳道",
+    "没有匹配的协作事件。",
+    "调整分区",
+    "事件检查窗口",
+    "筛选 全部",
+    "全部",
+    "筛选 委派",
+    "委派",
+    "筛选 派生",
+    "派生",
+    "筛选 投递",
+    "投递",
+    "筛选 结果",
+    "结果",
+    "筛选 问题",
+    "问题",
+    "筛选 其他",
+    "其他",
+    "operation.result",
+    "11-27 18:32",
+    "verify · operation.result",
+    "message.created",
+    "11-27 18:32",
+    "verify · 已就绪。这条回答来自验证用的替身模型，不消耗真实额度。",
+    "provider.transport",
+    "11-27 18:32",
+    "verify · provider.transport",
+    "provider.transport",
+    "11-27 18:32",
+    "verify · provider.transport",
+    "provider.request_profile",
+    "11-27 18:32",
+    "verify · provider.request_profile",
+    "operation.dispatched",
+    "11-27 18:32",
+    "verify · operation.dispatched",
+    "operation.intent",
+    "11-27 18:32",
+    "verify · operation.intent",
+    "message.updated",
+    "11-27 18:32",
+    "verify · 请用一句话说明你已就绪。",
+    "context.handoff_frozen",
+    "11-27 18:32",
+    "verify · context.handoff_frozen",
+    "context.mode_selected",
+    "11-27 18:32",
+    "verify · context.mode_selected",
+    "context.requested",
+    "11-27 18:32",
+    "verify · context.requested",
+    "message.created",
+    "11-27 18:32",
+    "verify · 请用一句话说明你已就绪。",
+    "conversation.created",
+    "11-27 18:32",
+    "verify · conversation.created",
+    "调整分区",
+    "共享产物窗口",
+    "还没有共享产物。"
+  ]
+}

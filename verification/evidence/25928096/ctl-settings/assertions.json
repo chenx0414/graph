@@ -1,0 +1,16 @@
+[
+  {
+    "id": "ctl-settings.thread",
+    "ok": true,
+    "expected": "status 200",
+    "actual": "status 200",
+    "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/ctl-settings/prepare-01.json"
+  },
+  {
+    "id": "ctl-settings.settings",
+    "ok": true,
+    "expected": "status 200",
+    "actual": "status 200",
+    "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/ctl-settings/check-01.json"
+  }
+]

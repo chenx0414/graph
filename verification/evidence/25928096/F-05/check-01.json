@@ -1,0 +1,42 @@
+{
+  "_graph": "graph:allow-large-file: raw daemon response kept as evidence; generated data, not source",
+  "body": [
+    {
+      "anchorTaskId": "23e18a64-e4f9-4ea6-aaa1-340d24376276",
+      "archivedAt": null,
+      "createdAt": 1795775430980,
+      "id": "cfe0d5c7-2493-470d-a21f-5607d7e2c20a",
+      "openQuestions": 0,
+      "projectArchivedAt": null,
+      "projectId": null,
+      "role": "global",
+      "status": "chatting",
+      "suspendedQuestions": 0,
+      "taskCount": 0,
+      "title": "Main",
+      "updatedAt": 1795775430980
+    },
+    {
+      "anchorTaskId": "cb807a5d-1cfa-48fc-853c-8f9c2163372d",
+      "archivedAt": null,
+      "createdAt": 1795775430980,
+      "id": "0b66895a-b113-4726-be55-d81c0c7a6649",
+      "openQuestions": 0,
+      "projectArchivedAt": null,
+      "projectId": "verify",
+      "role": "project",
+      "status": "chatting",
+      "suspendedQuestions": 0,
+      "taskCount": 0,
+      "title": "verify",
+      "updatedAt": 1795775430980
+    }
+  ],
+  "request": {
+    "method": "GET",
+    "path": "/api/conversations",
+    "expectStatus": 200,
+    "id": "check.no-extra-message"
+  },
+  "status": 200
+}

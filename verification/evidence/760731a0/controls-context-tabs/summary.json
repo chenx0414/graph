@@ -1,0 +1,15 @@
+{
+  "commit": "59dbe6474c84f4940fb642c5ff1a6615dafd3216",
+  "endedAt": "2026-11-27T10:32:31Z",
+  "error": "",
+  "failed": 0,
+  "feature": "controls-context-tabs",
+  "lane": "headless",
+  "ok": true,
+  "passed": 2,
+  "run": "760731a0",
+  "scenario": "controls-context-tabs",
+  "skippedSteps": 0,
+  "startedAt": "2026-11-27T10:32:29Z",
+  "steps": 14
+}

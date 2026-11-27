@@ -1,0 +1,15 @@
+{
+  "commit": "59dbe6474c84f4940fb642c5ff1a6615dafd3216",
+  "endedAt": "2026-11-27T10:31:37Z",
+  "error": "",
+  "failed": 0,
+  "feature": "shell-workspace",
+  "lane": "headless",
+  "ok": true,
+  "passed": 3,
+  "run": "25928096",
+  "scenario": "shell-workspace",
+  "skippedSteps": 0,
+  "startedAt": "2026-11-27T10:30:26Z",
+  "steps": 11
+}

@@ -1,0 +1,9 @@
+[
+  {
+    "id": "ctl-resources.catalog",
+    "ok": true,
+    "expected": "status 200",
+    "actual": "status 200",
+    "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/ctl-resources/check-01.json"
+  }
+]

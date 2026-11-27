@@ -24,7 +24,7 @@
       "journey": "F-04-conversation",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-07"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-07"
     },
     {
       "id": "ctl-2d08817765",
@@ -47,7 +47,7 @@
       "journey": "F-04-conversation",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-07"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-07"
     },
     {
       "id": "ctl-2e1f3bbe84",
@@ -61,7 +61,7 @@
       "journey": "F-04-conversation",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-08"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-08"
     },
     {
       "id": "ctl-a077d2fad2",
@@ -75,7 +75,7 @@
       "journey": "F-04-conversation",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-08"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-08"
     },
     {
       "id": "ctl-9086848b26",
@@ -89,7 +89,7 @@
       "journey": "F-04-conversation",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-10"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/641c807c/F-10"
     },
     {
       "id": "ctl-6555706e9b",
@@ -103,7 +103,7 @@
       "journey": "F-10",
       "step": 5,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-10"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/641c807c/F-10"
     },
     {
       "id": "ctl-a9ad8dc6a4",
@@ -117,7 +117,7 @@
       "journey": "controls-fleet-filters",
       "step": 6,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-10"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-10"
     },
     {
       "id": "ctl-8f9b160276",
@@ -145,7 +145,7 @@
       "journey": "controls-fleet-filters",
       "step": 10,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-10"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/641c807c/F-10"
     },
     {
       "id": "ctl-0ac69b53ac",
@@ -159,7 +159,7 @@
       "journey": "controls-fleet-filters",
       "step": 22,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/02c670af/F-10"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/641c807c/F-10"
     },
     {
       "id": "ctl-93ea415ff4",
@@ -173,7 +173,7 @@
       "journey": "controls-fleet-filters",
       "step": 12,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-10"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/641c807c/F-10"
     },
     {
       "id": "ctl-9a39e47a8b",
@@ -187,7 +187,7 @@
       "journey": "controls-fleet-filters",
       "step": 16,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/02c670af/F-10"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/641c807c/F-10"
     },
     {
       "id": "ctl-6ae030c0a4",
@@ -201,7 +201,7 @@
       "journey": "controls-fleet-filters",
       "step": 14,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/02c670af/F-10"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/641c807c/F-10"
     },
     {
       "id": "ctl-fe3d473af1",
@@ -215,7 +215,7 @@
       "journey": "controls-fleet-filters",
       "step": 18,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/02c670af/F-10"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/641c807c/F-10"
     },
     {
       "id": "ctl-9b265b8261",
@@ -229,7 +229,7 @@
       "journey": "controls-fleet-filters",
       "step": 20,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/02c670af/F-10"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/641c807c/F-10"
     },
     {
       "id": "ctl-1fc2c45492",
@@ -243,7 +243,7 @@
       "journey": "F-04-conversation",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-10"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/641c807c/F-10"
     },
     {
       "id": "ctl-d27a3704b8",
@@ -257,7 +257,7 @@
       "journey": "F-04-conversation",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-11"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-11"
     },
     {
       "id": "ctl-58d8c42216",
@@ -271,7 +271,7 @@
       "journey": "F-11",
       "step": 7,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-11"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-11"
     },
     {
       "id": "ctl-53cf46b508",
@@ -294,7 +294,7 @@
       "journey": "F-11",
       "step": 9,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-11"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-11"
     },
     {
       "id": "ctl-ee422e6a7a",
@@ -308,7 +308,7 @@
       "journey": "F-04-conversation",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-11"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-11"
     },
     {
       "id": "ctl-82e2d65020",
@@ -322,7 +322,7 @@
       "journey": "F-11",
       "step": 5,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-11"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-11"
     },
     {
       "id": "ctl-850cd1fe69",
@@ -336,7 +336,7 @@
       "journey": "F-04-conversation",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-12"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-12"
     },
     {
       "id": "ctl-bb9403728b",
@@ -350,7 +350,7 @@
       "journey": "ctl-resources",
       "step": 17,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/ctl-resources"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/ctl-resources"
     },
     {
       "id": "ctl-1613b3d2de",
@@ -364,7 +364,7 @@
       "journey": "ctl-resources",
       "step": 19,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/ctl-resources"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/ctl-resources"
     },
     {
       "id": "ctl-780c8995bc",
@@ -378,7 +378,7 @@
       "journey": "ctl-resources",
       "step": 21,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/ctl-resources"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/ctl-resources"
     },
     {
       "id": "ctl-5556f04622",
@@ -392,7 +392,7 @@
       "journey": "ctl-resources",
       "step": 13,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/ctl-resources"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/ctl-resources"
     },
     {
       "id": "ctl-758f53668d",
@@ -406,7 +406,7 @@
       "journey": "ctl-resources",
       "step": 15,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/ctl-resources"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/ctl-resources"
     },
     {
       "id": "ctl-2d00a7e951",
@@ -420,7 +420,7 @@
       "journey": "F-12",
       "step": 5,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-12"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-12"
     },
     {
       "id": "ctl-43052c1f69",
@@ -443,7 +443,7 @@
       "journey": "F-04-conversation",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-12"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-12"
     },
     {
       "id": "ctl-0c8b5d3121",
@@ -457,7 +457,7 @@
       "journey": "F-12",
       "step": 7,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-12"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-12"
     },
     {
       "id": "ctl-49f062c61f",
@@ -471,7 +471,7 @@
       "journey": "F-04-conversation",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-13"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-13"
     },
     {
       "id": "ctl-fda566c733",
@@ -485,7 +485,7 @@
       "journey": "F-13",
       "step": 4,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-13"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-13"
     },
     {
       "id": "ctl-8a55b6927e",
@@ -508,7 +508,7 @@
       "journey": "F-13",
       "step": 6,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-13"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-13"
     },
     {
       "id": "ctl-91792f6da8",
@@ -522,7 +522,7 @@
       "journey": "F-04-conversation",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-13"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-13"
     },
     {
       "id": "ctl-24a7c6087c",
@@ -536,7 +536,7 @@
       "journey": "F-04-conversation",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-14"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-14"
     },
     {
       "id": "ctl-f5271cb8ea",
@@ -550,7 +550,7 @@
       "journey": "ctl-settings",
       "step": 6,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-14"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-14"
     },
     {
       "id": "ctl-875b5cabef",
@@ -564,7 +564,7 @@
       "journey": "F-14",
       "step": 9,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-14"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-14"
     },
     {
       "id": "ctl-5324ebd6a3",
@@ -578,7 +578,7 @@
       "journey": "F-14",
       "step": 5,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-14"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-14"
     },
     {
       "id": "ctl-8dc918c9ae",
@@ -592,7 +592,7 @@
       "journey": "F-04-conversation",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-14"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-14"
     },
     {
       "id": "ctl-ea3c9ec786",
@@ -606,7 +606,7 @@
       "journey": "F-04-conversation",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-16"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-16"
     },
     {
       "id": "ctl-a49b122981",
@@ -629,7 +629,7 @@
       "journey": "F-04-conversation",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-16"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-16"
     },
     {
       "id": "ctl-553bd384f5",
@@ -643,7 +643,7 @@
       "journey": "ctl-board",
       "step": 11,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/ctl-board"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/ctl-board"
     },
     {
       "id": "ctl-8e2172b534",
@@ -657,7 +657,7 @@
       "journey": "ctl-board",
       "step": 13,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/ctl-board"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/ctl-board"
     },
     {
       "id": "ctl-978f129312",
@@ -671,7 +671,7 @@
       "journey": "ctl-board",
       "step": 15,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/ctl-board"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/ctl-board"
     },
     {
       "id": "ctl-fabe743eaf",
@@ -685,7 +685,7 @@
       "journey": "controls-composer",
       "step": 13,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/02c670af/F-05"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/668f3ff7/F-05"
     },
     {
       "id": "ctl-14991d3171",
@@ -699,7 +699,7 @@
       "journey": "controls-composer",
       "step": 5,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-07"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/668f3ff7/F-05"
     },
     {
       "id": "ctl-507fccba05",
@@ -722,7 +722,7 @@
       "journey": "F-05-composer",
       "step": 5,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-05"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/668f3ff7/F-05"
     },
     {
       "id": "ctl-f644863bc5",
@@ -736,7 +736,7 @@
       "journey": "F-06",
       "step": 4,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-07"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-07"
     },
     {
       "id": "ctl-8e3738cfd8",
@@ -750,7 +750,7 @@
       "journey": "controls-context-tabs",
       "step": 6,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-07"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/760731a0/controls-context-tabs"
     },
     {
       "id": "ctl-090b37e810",
@@ -764,7 +764,7 @@
       "journey": "F-06",
       "step": 7,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-07"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-07"
     },
     {
       "id": "ctl-4d5dccea54",
@@ -798,7 +798,7 @@
       "journey": "F-02-nav",
       "step": 14,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-02"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-02"
     },
     {
       "id": "ctl-0e51b0dee2",
@@ -812,7 +812,7 @@
       "journey": "F-02-nav",
       "step": 22,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-02"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-02"
     },
     {
       "id": "ctl-3d61d484a4",
@@ -826,7 +826,7 @@
       "journey": "F-02-nav",
       "step": 18,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-02"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-02"
     },
     {
       "id": "ctl-048bad9f42",
@@ -840,7 +840,7 @@
       "journey": "F-02-nav",
       "step": 20,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-02"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-02"
     },
     {
       "id": "ctl-7c9cf1a8b0",
@@ -854,7 +854,7 @@
       "journey": "F-02-nav",
       "step": 16,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-02"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-02"
     },
     {
       "id": "ctl-d1bad8187a",
@@ -868,7 +868,7 @@
       "journey": "F-02-nav",
       "step": 10,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-02"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-02"
     },
     {
       "id": "ctl-9fd102ed12",
@@ -882,7 +882,7 @@
       "journey": "F-04-conversation",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/rail-fleet"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/rail-fleet"
     },
     {
       "id": "ctl-edc12a5e81",
@@ -905,7 +905,7 @@
       "journey": "F-04-conversation",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/rail-fleet"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/rail-fleet"
     },
     {
       "id": "ctl-0a888afdb2",
@@ -919,7 +919,7 @@
       "journey": "F-04-conversation",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/rail-settings"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/rail-settings"
     },
     {
       "id": "ctl-633bfb9af4",
@@ -933,7 +933,7 @@
       "journey": "ctl-settings",
       "step": 6,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/rail-settings"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/rail-settings"
     },
     {
       "id": "ctl-1c486c0b6d",
@@ -956,7 +956,7 @@
       "journey": "F-14",
       "step": 5,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/rail-settings"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/rail-settings"
     },
     {
       "id": "ctl-fc579767f6",
@@ -970,7 +970,7 @@
       "journey": "F-04-conversation",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/rail-settings"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/rail-settings"
     },
     {
       "id": "ctl-921fb543eb",
@@ -984,7 +984,7 @@
       "journey": "controls-main-agent",
       "step": 3,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-02"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-02"
     },
     {
       "id": "ctl-a58b538009",
@@ -998,7 +998,7 @@
       "journey": "F-04-conversation",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/shell-workspace"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/shell-workspace"
     },
     {
       "id": "ctl-8129ad33de",
@@ -1021,7 +1021,7 @@
       "journey": "F-04-conversation",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/shell-workspace"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/shell-workspace"
     },
     {
       "id": "ctl-6b70c7cd5e",
@@ -1035,7 +1035,7 @@
       "journey": "F-02-nav",
       "step": 37,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-02"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-02"
     },
     {
       "id": "ctl-bb26629847",
@@ -1049,7 +1049,7 @@
       "journey": "F-02-nav",
       "step": 2,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-02"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-02"
     },
     {
       "id": "ctl-2710ee975f",
@@ -1063,7 +1063,7 @@
       "journey": "F-02-nav",
       "step": 35,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-02"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-02"
     },
     {
       "id": "ctl-78bd06f82d",
@@ -1077,7 +1077,7 @@
       "journey": "F-02-nav",
       "step": 41,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-02"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-02"
     },
     {
       "id": "ctl-b3f1ff5bc0",
@@ -1091,7 +1091,7 @@
       "journey": "F-02-nav",
       "step": 39,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-02"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-02"
     },
     {
       "id": "ctl-74f49dfd82",
@@ -1105,7 +1105,7 @@
       "journey": "F-02-nav",
       "step": 33,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-02"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-02"
     },
     {
       "id": "ctl-a3b6081da2",
@@ -1119,7 +1119,7 @@
       "journey": "F-02-nav",
       "step": 31,
       "lane": "headless",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-02"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-02"
     },
     {
       "id": "ctl-64a982e1b9",
@@ -1133,7 +1133,7 @@
       "journey": "controls-tray",
       "step": 5,
       "lane": "surface",
-      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/240cc14b/F-15"
+      "evidence": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope/verification/evidence/25928096/F-15"
     },
     {
       "id": "ctl-cd9b5788d3",
@@ -1173,78 +1173,5 @@
       "reason": "macOS 原生窗口按钮；最小化后截图与真实窗口断言都不可见"
     }
   ],
-  "problems": [
-    {
-      "code": "stale-evidence",
-      "detail": "page \"F-07\": its evidence was recorded 2026-11-17T10:58:56Z, but app/board_panels.go changed 239h3m58s later; rerun the journey that covers it"
-    },
-    {
-      "code": "stale-evidence",
-      "detail": "page \"F-08\": its evidence was recorded 2026-11-17T10:58:56Z, but app/trajectory_context_overview.go changed 239h3m58s later; rerun the journey that covers it"
-    },
-    {
-      "code": "stale-evidence",
-      "detail": "page \"F-10\": its evidence was recorded 2026-11-17T10:58:59Z, but app/fleet_page.go changed 239h3m55s later; rerun the journey that covers it"
-    },
-    {
-      "code": "stale-evidence",
-      "detail": "page \"F-11\": its evidence was recorded 2026-11-17T10:58:56Z, but app/providers_state.go changed 239h3m58s later; rerun the journey that covers it"
-    },
-    {
-      "code": "stale-evidence",
-      "detail": "page \"F-12\": its evidence was recorded 2026-11-17T10:58:56Z, but app/resources_page.go changed 239h3m58s later; rerun the journey that covers it"
-    },
-    {
-      "code": "stale-evidence",
-      "detail": "page \"F-13\": its evidence was recorded 2026-11-17T10:58:56Z, but app/assemblies_resources.go changed 239h3m58s later; rerun the journey that covers it"
-    },
-    {
-      "code": "stale-evidence",
-      "detail": "page \"F-14\": its evidence was recorded 2026-11-17T10:58:56Z, but app/settings.go changed 239h3m58s later; rerun the journey that covers it"
-    },
-    {
-      "code": "stale-evidence",
-      "detail": "page \"F-16\": its evidence was recorded 2026-11-17T10:58:56Z, but app/skeleton_pages.go changed 239h3m58s later; rerun the journey that covers it"
-    },
-    {
-      "code": "stale-evidence",
-      "detail": "page \"board\": its evidence was recorded 2026-11-26T19:13:17Z, but app/board_width.go changed 14h49m37s later; rerun the journey that covers it"
-    },
-    {
-      "code": "stale-evidence",
-      "detail": "page \"composer\": its evidence was recorded 2026-11-17T10:58:58Z, but app/conversations.go changed 239h3m56s later; rerun the journey that covers it"
-    },
-    {
-      "code": "stale-evidence",
-      "detail": "page \"context\": its evidence was recorded 2026-11-17T10:46:02Z, but app/prompt_record.go changed 239h16m52s later; rerun the journey that covers it"
-    },
-    {
-      "code": "stale-evidence",
-      "detail": "page \"rail\": its evidence was recorded 2026-11-27T05:39:49Z, but app/shell_view.go changed 4h23m5s later; rerun the journey that covers it"
-    },
-    {
-      "code": "stale-evidence",
-      "detail": "page \"rail-fleet\": its evidence was recorded 2026-11-17T10:58:56Z, but app/fleet_page.go changed 239h3m58s later; rerun the journey that covers it"
-    },
-    {
-      "code": "stale-evidence",
-      "detail": "page \"rail-settings\": its evidence was recorded 2026-11-26T19:10:37Z, but app/settings.go changed 14h52m17s later; rerun the journey that covers it"
-    },
-    {
-      "code": "stale-evidence",
-      "detail": "page \"shell\": its evidence was recorded 2026-11-27T05:39:49Z, but app/shell_view.go changed 4h23m5s later; rerun the journey that covers it"
-    },
-    {
-      "code": "stale-evidence",
-      "detail": "page \"shell-workspace\": its evidence was recorded 2026-11-17T10:58:56Z, but app/shell_view.go changed 239h3m58s later; rerun the journey that covers it"
-    },
-    {
-      "code": "stale-evidence",
-      "detail": "page \"tabbar\": its evidence was recorded 2026-11-27T05:39:49Z, but app/board.go changed 4h23m5s later; rerun the journey that covers it"
-    },
-    {
-      "code": "stale-evidence",
-      "detail": "page \"tray\": its evidence was recorded 2026-11-17T10:46:29Z, but app/tasks.go changed 239h16m25s later; rerun the journey that covers it"
-    }
-  ]
+  "problems": []
 }

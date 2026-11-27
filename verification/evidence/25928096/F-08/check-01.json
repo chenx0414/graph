@@ -1,0 +1,71 @@
+{
+  "_graph": "graph:allow-large-file: raw daemon response kept as evidence; generated data, not source",
+  "body": {
+    "days": [
+      {
+        "cacheHitRate": 0,
+        "cost": 0,
+        "date": "2026-11-21",
+        "requests": 0,
+        "tokens": 0
+      },
+      {
+        "cacheHitRate": 0,
+        "cost": 0,
+        "date": "2026-11-22",
+        "requests": 0,
+        "tokens": 0
+      },
+      {
+        "cacheHitRate": 0,
+        "cost": 0,
+        "date": "2026-11-23",
+        "requests": 0,
+        "tokens": 0
+      },
+      {
+        "cacheHitRate": 0,
+        "cost": 0,
+        "date": "2026-11-24",
+        "requests": 0,
+        "tokens": 0
+      },
+      {
+        "cacheHitRate": 0,
+        "cost": 0,
+        "date": "2026-11-25",
+        "requests": 0,
+        "tokens": 0
+      },
+      {
+        "cacheHitRate": 0,
+        "cost": 0,
+        "date": "2026-11-26",
+        "requests": 0,
+        "tokens": 0
+      },
+      {
+        "cacheHitRate": 0,
+        "cost": 0,
+        "date": "2026-11-27",
+        "requests": 0,
+        "tokens": 0
+      }
+    ],
+    "sessions": null,
+    "totals": {
+      "cacheHitRate": 0,
+      "cost": 0,
+      "requests": 0,
+      "sessions": 0,
+      "tokens": 0
+    }
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/trajectory/insights",
+    "expectStatus": 200,
+    "id": "trajectory.insights"
+  },
+  "status": 200
+}

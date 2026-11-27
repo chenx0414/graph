@@ -1,0 +1,20 @@
+{
+  "_graph": "graph:allow-large-file: raw daemon response kept as evidence; generated data, not source",
+  "body": {
+    "conversationId": "0b66895a-b113-4726-be55-d81c0c7a6649",
+    "projectId": "verify",
+    "role": "project",
+    "taskId": "cb807a5d-1cfa-48fc-853c-8f9c2163372d"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/projects/verify/thread",
+    "body": {
+      "requestId": "vg-controls-model-thread",
+      "text": "controls-model-picker 准备：建立项目会话"
+    },
+    "expectStatus": 200,
+    "id": "controls-model-picker.thread"
+  },
+  "status": 200
+}

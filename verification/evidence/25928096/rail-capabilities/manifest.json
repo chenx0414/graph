@@ -1,0 +1,20 @@
+{
+  "createdAt": "2026-11-27T10:31:30Z",
+  "files": [
+    {
+      "bytes": 2,
+      "path": "assertions.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "bytes": 76652,
+      "path": "rail-capabilities.png",
+      "sha256": "9c402e4b2ae522eee9a1ce383b3da6a53b675db753693e4a67bf050a7d01ec44"
+    },
+    {
+      "bytes": 2787,
+      "path": "result.json",
+      "sha256": "2c79ffff9bb6546a2142d6b32c7a8bb6523266f60dec1f6758b3409a7f5f1b51"
+    }
+  ]
+}

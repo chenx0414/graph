@@ -1,0 +1,20 @@
+{
+  "createdAt": "2026-11-27T10:31:32Z",
+  "files": [
+    {
+      "bytes": 2,
+      "path": "assertions.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "bytes": 111286,
+      "path": "rail-fleet.png",
+      "sha256": "fad2ee286630510052726bc62ab50c813ac999a979eab5d76f31d36cf322d88f"
+    },
+    {
+      "bytes": 2420,
+      "path": "result.json",
+      "sha256": "200beb64854a3a94e630568643e4fa24814b23baa7b1f8ad2b1191e376fce245"
+    }
+  ]
+}

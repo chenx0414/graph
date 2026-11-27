@@ -1,0 +1,15 @@
+{
+  "commit": "59dbe6474c84f4940fb642c5ff1a6615dafd3216",
+  "endedAt": "2026-11-27T10:32:20Z",
+  "error": "",
+  "failed": 0,
+  "feature": "F-10",
+  "lane": "headless",
+  "ok": true,
+  "passed": 1,
+  "run": "641c807c",
+  "scenario": "controls-fleet-filters",
+  "skippedSteps": 2,
+  "startedAt": "2026-11-27T10:32:18Z",
+  "steps": 25
+}

@@ -1,0 +1,19 @@
+{
+  "outcome": {
+    "projectId": "verify",
+    "conversationId": "d2ab809b-a716-47ef-b70a-8eddb6dfb857",
+    "taskId": "2555154b-e488-49c6-91fe-ce090b186701",
+    "assistantText": "已就绪。这条回答来自验证用的替身模型，不消耗真实额度。",
+    "messages": 2,
+    "inputTokens": 40,
+    "outputTokens": 10,
+    "elapsedMs": 155,
+    "turns": 1
+  },
+  "prompt": {
+    "prompt": "请用一句话说明你已就绪。",
+    "expect": "已就绪。这条回答来自验证用的替身模型，不消耗真实额度。",
+    "requestId": "vg-controls-composer",
+    "projectId": "verify"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "createdAt": "2026-11-27T10:31:33Z",
+  "files": [
+    {
+      "bytes": 2,
+      "path": "assertions.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "bytes": 90399,
+      "path": "rail-providers.png",
+      "sha256": "18130f2f4f62b54658db538b785fa0aad5bca9f01015684ee19395ea1ea03bf7"
+    },
+    {
+      "bytes": 2778,
+      "path": "result.json",
+      "sha256": "42448b84134f6d78e56badf1fd58fea446f1a239420795ff384880dc4718bab7"
+    }
+  ]
+}

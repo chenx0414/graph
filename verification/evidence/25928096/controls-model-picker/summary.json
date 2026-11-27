@@ -1,0 +1,15 @@
+{
+  "commit": "59dbe6474c84f4940fb642c5ff1a6615dafd3216",
+  "endedAt": "2026-11-27T10:31:07Z",
+  "error": "",
+  "failed": 0,
+  "feature": "controls-model-picker",
+  "lane": "headless",
+  "ok": true,
+  "passed": 1,
+  "run": "25928096",
+  "scenario": "controls-model-picker",
+  "skippedSteps": 0,
+  "startedAt": "2026-11-27T10:30:26Z",
+  "steps": 10
+}

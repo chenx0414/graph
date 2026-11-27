@@ -1,0 +1,16 @@
+{
+  "_graph": "graph:allow-large-file: raw daemon response kept as evidence; generated data, not source",
+  "body": {
+    "ok": true
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/health",
+    "expectStatus": 200,
+    "expect": {
+      "ok": true
+    },
+    "id": "workspace.health"
+  },
+  "status": 200
+}

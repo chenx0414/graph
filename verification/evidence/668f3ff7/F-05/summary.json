@@ -1,0 +1,15 @@
+{
+  "commit": "59dbe6474c84f4940fb642c5ff1a6615dafd3216",
+  "endedAt": "2026-11-27T10:32:26Z",
+  "error": "",
+  "failed": 0,
+  "feature": "F-05",
+  "lane": "headless",
+  "ok": true,
+  "passed": 3,
+  "run": "668f3ff7",
+  "scenario": "controls-composer",
+  "skippedSteps": 0,
+  "startedAt": "2026-11-27T10:32:24Z",
+  "steps": 16
+}

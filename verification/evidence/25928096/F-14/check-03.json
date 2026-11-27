@@ -1,0 +1,26 @@
+{
+  "_graph": "graph:allow-large-file: raw daemon response kept as evidence; generated data, not source",
+  "body": {
+    "configured": false,
+    "effectiveRevision": 0,
+    "enabledModelCount": 0,
+    "mode": "view",
+    "modelCount": 0,
+    "source": {
+      "branch": "c-evidence-scope",
+      "commit": "59dbe6474c84f4940fb642c5ff1a6615dafd3216",
+      "dirty": true,
+      "root": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-scope"
+    }
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/startup",
+    "expectStatus": 200,
+    "expect": {
+      "mode": "view"
+    },
+    "id": "settings.startup"
+  },
+  "status": 200
+}
