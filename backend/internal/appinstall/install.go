@@ -197,11 +197,13 @@ func signInstalled(dest string) error {
 	}
 	requirement, err := InstallBundleSigning(dest, binary)
 	if err != nil {
-		fallback := exec.Command("codesign", "--force", "--sign", "-", dest)
-		if output, fallbackErr := fallback.CombinedOutput(); fallbackErr != nil {
-			return fmt.Errorf("%v; the ad-hoc fallback failed too: %s", err, strings.TrimSpace(string(output)))
-		}
-		return nil
+		// No ad-hoc fallback. An ad-hoc signature runs, but macOS keys the
+		// permission on a content hash, so the grant is void the moment anything
+		// is rebuilt and the user has to authorise the app again. Failing here
+		// leaves the previous, still-authorised bundle in place.
+		return fmt.Errorf("%w\n\n%s", err,
+			"the app was not installed: signing it with a throwaway identity would make macOS "+
+				"ask for Accessibility and Screen Recording again after every rebuild")
 	}
 	fmt.Printf("signed with %s: %s\n", SigningIdentity, requirement)
 	return nil

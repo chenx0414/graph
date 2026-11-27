@@ -83,10 +83,25 @@ func IdentityPresent() bool {
 	return err == nil && strings.Contains(output, SigningIdentity)
 }
 
+// ErrIdentityUnusable means the signing keychain exists but cannot sign. The
+// installer reports it and stops rather than replacing the certificate: the
+// replacement is a different identity, and every permission granted to the old
+// one stops applying to the app.
+var ErrIdentityUnusable = errors.New("the signing identity exists but cannot sign")
+
+// EnsureIdentity returns the signing identity, creating it once when there is
+// no keychain at all. An existing keychain that cannot sign is an error, and
+// ResetIdentity is the explicit way to rebuild it.
 func EnsureIdentity() (Identity, error) {
 	identity := Identity{Name: SigningIdentity, Keychain: KeychainPath()}
 	if IdentityPresent() {
 		return identity, nil
+	}
+	if _, err := os.Stat(KeychainPath()); err == nil {
+		return Identity{}, fmt.Errorf("%w: %s at %s does not list a valid %q identity. "+
+			"Repair it in Keychain Access, or run with --repair-signing to replace it. "+
+			"Replacing it changes the certificate, so macOS asks for Accessibility and "+
+			"Screen Recording again", ErrIdentityUnusable, KeychainPath(), KeychainPath(), SigningIdentity)
 	}
 	if err := os.MkdirAll(SigningDirectory(), 0o700); err != nil {
 		return Identity{}, err
@@ -115,7 +130,6 @@ func EnsureIdentity() (Identity, error) {
 		"-passout", "pass:"+password, "-name", SigningIdentity); err != nil {
 		return Identity{}, err
 	}
-	_ = os.Remove(KeychainPath())
 	for _, step := range [][]string{
 		{"create-keychain", "-p", password, KeychainPath()},
 		{"set-keychain-settings", KeychainPath()},
@@ -134,6 +148,15 @@ func EnsureIdentity() (Identity, error) {
 		return Identity{}, fmt.Errorf("%s could not be imported into %s", SigningIdentity, KeychainPath())
 	}
 	return identity, nil
+}
+
+// ResetIdentity replaces the signing keychain. It is the explicit repair: the new
+// certificate is a different identity, so the user grants permission once more.
+func ResetIdentity() (Identity, error) {
+	if err := os.Remove(KeychainPath()); err != nil && !os.IsNotExist(err) {
+		return Identity{}, err
+	}
+	return EnsureIdentity()
 }
 
 type SignOptions struct {
@@ -197,5 +220,7 @@ func InstallBundleSigning(bundle, binary string) (string, error) {
 	if _, err := run("codesign", "--verify", "--strict", "--deep", bundle); err != nil {
 		return "", err
 	}
-	return DesignatedRequirement(binary)
+	// TCC grants permission to the app bundle, so the requirement that matters is
+	// the bundle's, not the inner executable's.
+	return DesignatedRequirement(bundle)
 }
