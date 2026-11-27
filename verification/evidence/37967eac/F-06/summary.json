@@ -1,0 +1,15 @@
+{
+  "commit": "c34ec49973f00a54ab72e2f62b72ee2c0b5ac1a7",
+  "endedAt": "2026-11-26T19:13:22Z",
+  "error": "",
+  "failed": 0,
+  "feature": "F-06",
+  "lane": "headless",
+  "ok": true,
+  "passed": 1,
+  "run": "37967eac",
+  "scenario": "F-06",
+  "skippedSteps": 2,
+  "startedAt": "2026-11-26T19:13:20Z",
+  "steps": 10
+}

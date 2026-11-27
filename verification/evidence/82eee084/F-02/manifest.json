@@ -1,0 +1,25 @@
+{
+  "createdAt": "2026-11-27T05:01:39Z",
+  "files": [
+    {
+      "bytes": 2,
+      "path": "assertions.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "bytes": 77493,
+      "path": "nav-fleet.png",
+      "sha256": "9d57d64c9507083c096276cf2923335dd00c8b53cccd31b094ce9fb88b88edba"
+    },
+    {
+      "bytes": 62591,
+      "path": "nav-trajectory.png",
+      "sha256": "27af6cf5ccfe8bc715398eb97a4ba8f4b85cf0c3cc9f7f890f29db56e7b51b70"
+    },
+    {
+      "bytes": 6323,
+      "path": "result.json",
+      "sha256": "7af11aad029b88282c68dfd195a0341083190d9bed8be65a0242f48326f8c422"
+    }
+  ]
+}

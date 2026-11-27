@@ -1,0 +1,26 @@
+{
+  "_graph": "graph:allow-large-file: raw daemon response kept as evidence; generated data, not source",
+  "body": {
+    "configured": true,
+    "effectiveRevision": 0,
+    "enabledModelCount": 1,
+    "mode": "execute",
+    "modelCount": 1,
+    "source": {
+      "branch": "c-evidence-cleanup",
+      "commit": "9b6025bef5dbed2d9bebfe0045225a4f59b428e8",
+      "dirty": true,
+      "root": "/Users/macmini/workspace/13-Graph/.worktrees/c-evidence-cleanup"
+    }
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/startup",
+    "expectStatus": 200,
+    "expect": {
+      "mode": "execute"
+    },
+    "id": "conversation.instance"
+  },
+  "status": 200
+}

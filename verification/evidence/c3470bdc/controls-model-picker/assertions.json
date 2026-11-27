@@ -1,9 +1,0 @@
-[
-  {
-    "id": "controls-model-picker.thread",
-    "ok": true,
-    "expected": "status 200",
-    "actual": "status 200",
-    "evidence": "/Users/macmini/workspace/13-Graph/verification/evidence/c3470bdc/controls-model-picker/prepare-01.json"
-  }
-]

@@ -1,0 +1,302 @@
+{
+  "_graph": "graph:allow-large-file: generated journey evidence kept verbatim; generated data, not source",
+  "frames": [
+    "/Users/macmini/workspace/13-Graph/verification/evidence/59c08125/F-02/nav-trajectory.png",
+    "/Users/macmini/workspace/13-Graph/verification/evidence/59c08125/F-02/nav-fleet.png",
+    "/Users/macmini/workspace/13-Graph/verification/evidence/59c08125/F-02/nav-trajectory.png",
+    "/Users/macmini/workspace/13-Graph/verification/evidence/59c08125/F-02/nav-trajectory.png"
+  ],
+  "ok": true,
+  "steps": [
+    {
+      "detail": "visible: 白板标题",
+      "index": 1,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 2,
+      "ok": true,
+      "verb": "clickIf"
+    },
+    {
+      "index": 3,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "index": 4,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "index": 5,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "index": 6,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "index": 7,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "index": 8,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "index": 9,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "index": 10,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 上下文统计窗口",
+      "index": 11,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 12,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/59c08125/F-02/nav-trajectory.png",
+      "index": 13,
+      "ok": true,
+      "verb": "screenshot"
+    },
+    {
+      "index": 14,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 标签页 供应商",
+      "index": 15,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 16,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 标签页 资源库",
+      "index": 17,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 18,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 标签页 能力装配",
+      "index": 19,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 20,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 标签页 运行设置",
+      "index": 21,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 22,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 编队总览窗口",
+      "index": 23,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/59c08125/F-02/nav-fleet.png",
+      "index": 24,
+      "ok": true,
+      "verb": "screenshot"
+    },
+    {
+      "index": 25,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/59c08125/F-02/nav-trajectory.png",
+      "index": 26,
+      "ok": true,
+      "verb": "screenshot"
+    },
+    {
+      "detail": "visible: 标签页 轨迹量化",
+      "index": 27,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 28,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "index": 29,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/59c08125/F-02/nav-trajectory.png",
+      "index": 30,
+      "ok": true,
+      "verb": "screenshot"
+    },
+    {
+      "index": 31,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 标签页 运行设置",
+      "index": 32,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 33,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 上下文统计窗口",
+      "index": 34,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 35,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 编队总览窗口",
+      "index": 36,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 37,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 标签页 供应商",
+      "index": 38,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 39,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 标签页 资源库",
+      "index": 40,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 41,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 标签页 能力装配",
+      "index": 42,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 43,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 标签页 运行设置",
+      "index": 44,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 45,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 白板标题",
+      "index": 46,
+      "ok": true,
+      "verb": "waitText"
+    }
+  ],
+  "texts": [
+    "轨迹",
+    "编队",
+    "供应商",
+    "资源",
+    "装配",
+    "设置",
+    "会话列表标题",
+    "对话标题",
+    "白板标题",
+    "标签页 白板",
+    "白板",
+    "标签页 轨迹量化",
+    "轨迹量化",
+    "标签页 供应商",
+    "供应商",
+    "标签页 资源库",
+    "资源库",
+    "标签页 能力装配",
+    "能力装配",
+    "标签页 运行设置",
+    "运行设置",
+    "标签页 编队",
+    "编队",
+    "主区域卡片",
+    "main agent 会话",
+    "章鱼",
+    "main agent 名称",
+    "Main Agent",
+    "还没有项目会话。",
+    "从左侧选择一个项目",
+    "当前上下文窗口",
+    "先打开一个会话",
+    "调整分区",
+    "Agent 网络窗口",
+    "先打开一个对话，这里会显示它所在的编队。",
+    "调整分区",
+    "跨 Agent 协作窗口",
+    "还没有跨 Agent 协作事件。"
+  ]
+}

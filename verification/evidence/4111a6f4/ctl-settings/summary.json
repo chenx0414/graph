@@ -1,0 +1,15 @@
+{
+  "commit": "9b6025bef5dbed2d9bebfe0045225a4f59b428e8",
+  "endedAt": "2026-11-27T05:06:31Z",
+  "error": "",
+  "failed": 0,
+  "feature": "ctl-settings",
+  "lane": "headless",
+  "ok": true,
+  "passed": 2,
+  "run": "4111a6f4",
+  "scenario": "ctl-settings",
+  "skippedSteps": 0,
+  "startedAt": "2026-11-27T05:06:28Z",
+  "steps": 11
+}

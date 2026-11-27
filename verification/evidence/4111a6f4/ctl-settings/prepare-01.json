@@ -1,0 +1,20 @@
+{
+  "_graph": "graph:allow-large-file: raw daemon response kept as evidence; generated data, not source",
+  "body": {
+    "conversationId": "7092c1ad-0fbc-4994-8cf7-cb37cc075a88",
+    "projectId": "verify",
+    "role": "project",
+    "taskId": "77b23da2-92fa-4941-b5fe-4d3336052fbf"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/projects/verify/thread",
+    "body": {
+      "requestId": "ctl-settings-thread",
+      "text": "ctl settings：建立项目会话"
+    },
+    "expectStatus": 200,
+    "id": "ctl-settings.thread"
+  },
+  "status": 200
+}

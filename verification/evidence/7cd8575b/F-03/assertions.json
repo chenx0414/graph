@@ -1,9 +1,0 @@
-[
-  {
-    "id": "check.conversations-empty",
-    "ok": true,
-    "expected": "status 200",
-    "actual": "status 200",
-    "evidence": "/Users/macmini/workspace/13-Graph/verification/evidence/7cd8575b/F-03/check-01.json"
-  }
-]

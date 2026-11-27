@@ -1,9 +1,0 @@
-[
-  {
-    "id": "trajectory.insights",
-    "ok": true,
-    "expected": "status 200",
-    "actual": "status 200",
-    "evidence": "/Users/macmini/workspace/13-Graph/verification/evidence/7cd8575b/F-08/check-01.json"
-  }
-]

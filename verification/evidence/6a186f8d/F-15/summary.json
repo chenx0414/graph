@@ -1,0 +1,15 @@
+{
+  "commit": "9b6025bef5dbed2d9bebfe0045225a4f59b428e8",
+  "endedAt": "2026-11-27T05:05:52Z",
+  "error": "",
+  "failed": 0,
+  "feature": "F-15",
+  "lane": "surface",
+  "ok": true,
+  "passed": 1,
+  "run": "6a186f8d",
+  "scenario": "controls-tray",
+  "skippedSteps": 0,
+  "startedAt": "2026-11-27T05:05:32Z",
+  "steps": 6
+}

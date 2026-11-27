@@ -1,0 +1,30 @@
+{
+  "createdAt": "2026-11-26T19:13:17Z",
+  "files": [
+    {
+      "bytes": 446,
+      "path": "assertions.json",
+      "sha256": "666afdb52f33e7f438eee4aac851b7b0de7b9eac7b98d576b02ec803324af6a9"
+    },
+    {
+      "bytes": 1708,
+      "path": "check-01.json",
+      "sha256": "c522a9a6eac7503f7c7894985369c95f482d5b88dec8cf386a7c86254deada2b"
+    },
+    {
+      "bytes": 86985,
+      "path": "ctl-board.png",
+      "sha256": "5900b127dcfba91332730f8ca3122b5942723eff676c3dcdd7161ba0ec7a5b00"
+    },
+    {
+      "bytes": 530,
+      "path": "prepare-01.json",
+      "sha256": "3414a32d14b039c14d609dc436871dc467b5921cd2bf2ee9bd44bba97c15565f"
+    },
+    {
+      "bytes": 3566,
+      "path": "result.json",
+      "sha256": "8cc39b3c55ff4a3c5048bff11fc6abce0035f2010de2d07b7bb8891b90bce6ff"
+    }
+  ]
+}

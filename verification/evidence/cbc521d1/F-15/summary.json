@@ -1,0 +1,15 @@
+{
+  "commit": "c34ec49973f00a54ab72e2f62b72ee2c0b5ac1a7",
+  "endedAt": "2026-11-26T19:15:31Z",
+  "error": "cannot open the run's window for its shell surface: the isolated window never became visible: PERM_DENIED: Accessibility surface read failed for AXFrontmost",
+  "failed": 0,
+  "feature": "F-15",
+  "lane": "surface",
+  "ok": false,
+  "passed": 1,
+  "run": "cbc521d1",
+  "scenario": "controls-tray",
+  "skippedSteps": 0,
+  "startedAt": "2026-11-26T19:13:30Z",
+  "steps": 0
+}
