@@ -121,7 +121,10 @@ func EnsureIdentity() (Identity, error) {
 		return Identity{}, err
 	}
 	if _, err := run("openssl", "pkcs12", "-export", "-inkey", key, "-in", certificate, "-out", bundle,
-		"-passout", "pass:"+password, "-name", SigningIdentity); err != nil {
+		"-passout", "pass:"+password, "-name", SigningIdentity,
+		// macOS reads only the legacy PBE ciphers; OpenSSL 3 defaults to AES and
+		// security import rejects that bundle.
+		"-keypbe", "PBE-SHA1-3DES", "-certpbe", "PBE-SHA1-3DES", "-macalg", "SHA1"); err != nil {
 		return Identity{}, err
 	}
 	for _, step := range [][]string{
