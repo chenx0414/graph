@@ -25,7 +25,7 @@ func (a daemonActivity) HasActiveOperation() bool {
 		// forever.
 		return false
 	}
-	payload, err := a.client(address, a.token()).get("/api/activity")
+	payload, err := a.client(address, a.token()).get("/api/app/activity")
 	if err != nil {
 		return false
 	}

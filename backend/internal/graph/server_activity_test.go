@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -52,7 +53,7 @@ func TestActivityIsIdleWhenNoCounterIsDeclared(t *testing.T) {
 
 func readActivity(t *testing.T, app *GraphApp) appActivity {
 	t.Helper()
-	request := httptest.NewRequest(http.MethodGet, "/api/activity", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/app/activity", nil)
 	recorder := httptest.NewRecorder()
 	app.serveActivity(recorder, request)
 	if recorder.Code != http.StatusOK {
@@ -63,4 +64,14 @@ func readActivity(t *testing.T, app *GraphApp) appActivity {
 		t.Fatalf("activity body: %v", err)
 	}
 	return body
+}
+
+// The caller is the app process, which holds the app bridge token and no console
+// session. The route therefore has to live under /api/app/, where guard accepts
+// that token; anywhere else the app's own reload gate gets a 401 and can never
+// learn whether work is running.
+func TestActivityRouteIsReachableWithTheAppBridgeToken(t *testing.T) {
+	if !strings.HasPrefix(activityRoute, "/api/app/") {
+		t.Fatalf("the activity route must sit under /api/app/ so the app can read it, got %s", activityRoute)
+	}
 }

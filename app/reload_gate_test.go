@@ -134,7 +134,7 @@ func TestTheGateAlsoHoldsADaemonRestart(t *testing.T) {
 func TestActivitySourceReadsTheDaemonsCount(t *testing.T) {
 	for _, active := range []int{0, 1, 3} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/api/activity" {
+			if r.URL.Path != "/api/app/activity" {
 				http.NotFound(w, r)
 				return
 			}
