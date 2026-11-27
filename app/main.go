@@ -71,7 +71,8 @@ func (s *shell) ensureDaemon() string {
 			// decides. When work is in flight the restart is held back and the
 			// old daemon keeps serving; the next call takes the new one.
 			restarted := false
-			s.reloadGate().run(func() error {
+			// One daemon restart is one replacement; the key keeps it to that.
+			s.reloadGate().run("daemon-restart", func() error {
 				if ok, _ := s.daemon.restart(result.reload); !ok {
 					return errDaemonRestartRefused
 				}
@@ -89,7 +90,7 @@ func (s *shell) ensureDaemon() string {
 	}
 	// start() runs the same bootout/bootstrap plan, so the gate decides here too.
 	started := false
-	s.reloadGate().run(func() error {
+	s.reloadGate().run("daemon-start", func() error {
 		if err := s.daemon.start(); err != nil {
 			log.Printf("[app] cannot start %s: %v", stableDaemonPath(s.paths), err)
 			return err

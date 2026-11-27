@@ -42,7 +42,7 @@ func TestAStaleDaemonIsNotReplacedWhileAnOperationRuns(t *testing.T) {
 	daemon := &countingDaemon{next: daemonRefresh{restart: true, reload: true}}
 	gate := newReloadGate(busy, func(string) error { return nil })
 
-	replaced := gate.run(func() error {
+	replaced := gate.run("test-restart", func() error {
 		daemon.restart(true)
 		return nil
 	})
@@ -64,12 +64,12 @@ func TestAHeldBackDaemonRestartRunsOnceAfterSettling(t *testing.T) {
 	daemon := &countingDaemon{}
 	gate := newReloadGate(busy, func(string) error { return nil })
 
-	gate.run(func() error { daemon.restart(true); return nil })
+	gate.run("test-restart", func() error { daemon.restart(true); return nil })
 	busy.active.Store(false)
-	if !gate.run(func() error { daemon.restart(true); return nil }) {
+	if !gate.run("test-restart", func() error { daemon.restart(true); return nil }) {
 		t.Fatal("the deferred restart must run once the work settled")
 	}
-	gate.run(func() error { daemon.restart(true); return nil })
+	gate.run("test-restart", func() error { daemon.restart(true); return nil })
 	if got := daemon.restarts.Load(); got != 1 {
 		t.Fatalf("the daemon must be restarted exactly once, got %d", got)
 	}
@@ -82,7 +82,7 @@ func TestAStaleDaemonIsReplacedWhenNothingRuns(t *testing.T) {
 	daemon := &countingDaemon{}
 	gate := newReloadGate(busy, func(string) error { return nil })
 
-	if !gate.run(func() error { daemon.restart(true); return nil }) {
+	if !gate.run("test-restart", func() error { daemon.restart(true); return nil }) {
 		t.Fatal("an idle shell must replace a stale daemon")
 	}
 	if got := daemon.restarts.Load(); got != 1 {

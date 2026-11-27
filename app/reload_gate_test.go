@@ -116,12 +116,12 @@ func TestTheGateAlsoHoldsADaemonRestart(t *testing.T) {
 	relaunch := &fakeRelaunch{}
 	gate := newReloadGate(busy, relaunch.exec)
 
-	ran := gate.run(func() error { return relaunch.exec("/tmp/graphd") })
+	ran := gate.run("test-restart", func() error { return relaunch.exec("/tmp/graphd") })
 	if ran {
 		t.Fatal("a daemon restart must wait while an operation runs")
 	}
 	busy.active.Store(false)
-	if !gate.run(func() error { return relaunch.exec("/tmp/graphd") }) {
+	if !gate.run("test-restart", func() error { return relaunch.exec("/tmp/graphd") }) {
 		t.Fatal("the deferred daemon restart must run once the operation settled")
 	}
 	if got := relaunch.execs.Load(); got != 1 {
@@ -194,5 +194,60 @@ func TestTheWatcherKeepsSeeingABuildItIsHoldingBack(t *testing.T) {
 	}
 	if got := relaunch.execs.Load(); got != 1 {
 		t.Fatalf("the held-back build must run once, got %d", got)
+	}
+}
+
+// One gate answers for every replacing path, so a daemon restart on start-up must
+// not use up the reload a later build needs. The settled flag is per held action,
+// not permanent: after ensureDaemon replaced a stale daemon at launch, the watcher
+// still has to take the next build — and the probe measured exactly that, with the
+// app mtime at 15:58 and the process from 15:55 still running forty seconds after
+// the operation settled.
+func TestASuccessfulRestartDoesNotCloseTheGateForLaterBuilds(t *testing.T) {
+	busy := &fakeBusy{}
+	relaunch := &fakeRelaunch{}
+	gate := newReloadGate(busy, relaunch.exec)
+
+	// The launch path replaces a stale daemon while nothing runs.
+	if !gate.run("test-restart", func() error { return relaunch.exec("/tmp/graphd") }) {
+		t.Fatal("an idle shell must replace the stale daemon at launch")
+	}
+
+	// A build lands later, with work running: it must be held, not swallowed.
+	busy.active.Store(true)
+	if gate.consider("/tmp/Graph", fileStamp{Size: 1}, fileStamp{Size: 2}) {
+		t.Fatal("the build must wait while work runs")
+	}
+	if !gate.pending() {
+		t.Fatal("the build must be remembered, or the new binary never runs")
+	}
+
+	// Work settles: the next poll takes the build.
+	busy.active.Store(false)
+	if !gate.consider("/tmp/Graph", fileStamp{Size: 1}, fileStamp{Size: 2}) {
+		t.Fatal("the held build must run once the work settled")
+	}
+	if got := relaunch.execs.Load(); got != 2 {
+		t.Fatalf("one daemon restart and one build reload, got %d", got)
+	}
+}
+
+// A build is replaced once. The watcher keeps polling the same file, so without
+// this the gate would hand the same replacement over and over.
+func TestAFinishedBuildIsNotReplacedTwice(t *testing.T) {
+	busy := &fakeBusy{}
+	relaunch := &fakeRelaunch{}
+	gate := newReloadGate(busy, relaunch.exec)
+
+	before := fileStamp{Size: 1, Inode: 1}
+	after := fileStamp{Size: 2, Inode: 2}
+	if !gate.consider("/tmp/Graph", before, after) {
+		t.Fatal("the first poll must take the build")
+	}
+	if gate.consider("/tmp/Graph", before, after) {
+		t.Fatal("the same build must not be replaced twice")
+	}
+	if got := relaunch.execs.Load(); got != 1 {
+		t.Fatalf("the build was replaced %d time(s)", got)
 	}
 }

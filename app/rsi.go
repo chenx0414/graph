@@ -113,7 +113,7 @@ func (s *shell) pollRsi() {
 	s.restarting.Store(true)
 	// The gate holds the restart until no operation is running.
 	applied := false
-	s.reloadGate().run(func() error {
+	s.reloadGate().run("rsi-"+id, func() error {
 		restarted, _ := s.daemon.restart(true)
 		if !restarted {
 			return errDaemonRestartRefused
