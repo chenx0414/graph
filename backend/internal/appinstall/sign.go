@@ -75,7 +75,6 @@ func run(command string, args ...string) (string, error) {
 	return string(output), nil
 }
 
-// IdentityPresent asks for a usable identity, not a *valid* one.
 func IdentityPresent() bool {
 	if _, err := os.Stat(KeychainPath()); err != nil {
 		return false
@@ -122,8 +121,6 @@ func EnsureIdentity() (Identity, error) {
 	}
 	if _, err := run("openssl", "pkcs12", "-export", "-inkey", key, "-in", certificate, "-out", bundle,
 		"-passout", "pass:"+password, "-name", SigningIdentity,
-		// macOS reads only the legacy PBE ciphers; OpenSSL 3 defaults to AES and
-		// security import rejects that bundle.
 		"-keypbe", "PBE-SHA1-3DES", "-certpbe", "PBE-SHA1-3DES", "-macalg", "SHA1"); err != nil {
 		return Identity{}, err
 	}
@@ -167,9 +164,35 @@ type SignOptions struct {
 	Deep       bool
 }
 
+// ensureSearchList appends the keychain: codesign finds identities there.
+func ensureSearchList(keychain string) error {
+	output, err := run("security", "list-keychains", "-d", "user")
+	if err != nil {
+		return err
+	}
+	current := []string{}
+	for _, line := range strings.Split(output, "\n") {
+		value := strings.Trim(strings.TrimSpace(line), `"`)
+		if value != "" {
+			current = append(current, value)
+		}
+	}
+	for _, existing := range current {
+		if existing == keychain {
+			return nil
+		}
+	}
+	args := append([]string{"list-keychains", "-d", "user", "-s", keychain}, current...)
+	_, err = run("security", args...)
+	return err
+}
+
 func SignCode(target string, options SignOptions) error {
 	identity, err := EnsureIdentity()
 	if err != nil {
+		return err
+	}
+	if err := ensureSearchList(identity.Keychain); err != nil {
 		return err
 	}
 	password, err := keychainPassword(false)
