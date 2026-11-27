@@ -8,6 +8,7 @@ import (
 func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", app.serveHome)
 	mux.HandleFunc("GET /api/health", app.serveHealth)
+	mux.HandleFunc("GET /api/activity", app.serveActivity)
 	mux.HandleFunc("GET /api/startup", app.serveStartup)
 	mux.HandleFunc("GET /api/agent-context", app.serveAgentContext)
 	mux.HandleFunc("PUT /api/agent-context/prompts", app.serveAgentContextPrompt)
@@ -162,6 +163,23 @@ func (app *GraphApp) serveHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, appHealth{OK: true})
+}
+
+// appActivity is what the app's reload gate reads. A build must not replace the
+// process while an operation is in flight, and the UI cannot tell: it can look
+// idle while work is dispatched.
+type appActivity struct {
+	Active int `json:"active"`
+}
+
+func (activity appActivity) Busy() bool { return activity.Active > 0 }
+
+func (app *GraphApp) serveActivity(w http.ResponseWriter, r *http.Request) {
+	count := 0
+	if app.options.ActiveOperations != nil {
+		count = app.options.ActiveOperations()
+	}
+	writeJSON(w, http.StatusOK, appActivity{Active: count})
 }
 
 func (app *GraphApp) serveStartup(w http.ResponseWriter, r *http.Request) {

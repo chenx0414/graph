@@ -48,6 +48,9 @@ type AppOptions struct {
 	Usage        UsageService
 	AgentContext *AgentContextLibrary
 	Ready        func() bool
+	// ActiveOperations answers how much work is in flight. The app's reload gate
+	// asks it before replacing a process, so a build cannot end a live turn.
+	ActiveOperations func() int
 }
 
 type GraphServerOptions struct {
@@ -123,6 +126,9 @@ func OpenGraphServer(options GraphServerOptions) *GraphHost {
 		ConfigStore: options.ConfigStore, ConfigEnv: options.ConfigEnv, ConfigTest: options.ConfigTest,
 		AppServices: options.AppServices, Usage: options.Usage, AgentContext: agentContext,
 		Ready: options.Ready,
+		// The app's reload gate reads this: a build must not replace a process
+		// while an operation is in flight.
+		ActiveOperations: runtime.ActiveOperationCount,
 	})
 	requested := 0
 	if options.Port != nil {

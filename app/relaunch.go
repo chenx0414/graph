@@ -45,20 +45,30 @@ func (s *shell) recordRelaunch(path string, before, after fileStamp) {
 	_ = file.Close()
 }
 
+// execSelf replaces this process with the binary at path.
+func execSelf(path string) error {
+	return syscall.Exec(path, os.Args, os.Environ())
+}
+
 func (s *shell) watchBuild(path string) {
 	stamp, ok := executableStamp(path)
 	if !ok || path == "" {
 		return
 	}
-	for range time.Tick(5 * time.Second) {
+	gate := s.reloadGate()
+	for range time.Tick(reloadPollInterval) {
 		next, ok := executableStamp(path)
-		if ok && executableReplaced(stamp, next) {
-			log.Printf("[app] %s was replaced by a new build; replacing this process", path)
+		if !ok {
+			continue
+		}
+		if gate.consider(path, stamp, next) {
+			log.Printf("[app] %s was replaced by a new build; this process took it", path)
 			s.recordRelaunch(path, stamp, next)
-			if err := syscall.Exec(path, os.Args, os.Environ()); err != nil {
-				log.Printf("[app] replacing this process failed: %v", err)
-			}
 			return
+		}
+		if gate.pending() {
+			log.Printf("[app] %s changed but work is in flight; reload is deferred", path)
+			stamp = next
 		}
 	}
 }

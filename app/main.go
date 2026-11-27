@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -29,6 +30,8 @@ type shell struct {
 	console    string
 	rsiTried   string
 	restarting atomic.Bool
+	gateOnce   sync.Once
+	gate       *reloadGate
 }
 
 func (s *shell) watchTasks() {
