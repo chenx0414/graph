@@ -1,0 +1,35 @@
+{
+  "createdAt": "2026-11-28T07:37:16Z",
+  "files": [
+    {
+      "bytes": 217,
+      "path": "assertions.json",
+      "sha256": "d9b31f9d57e803a4abcb6dfa43f82eb3d282e18bb1f26f3195dca6a1e729310e"
+    },
+    {
+      "bytes": 33159,
+      "path": "check-01.json",
+      "sha256": "b41fd7d9c047d444881ee9b928d4c4dada4802cd64628eeb9bfaaca7a7c630b4"
+    },
+    {
+      "bytes": 89638,
+      "path": "context-empty.png",
+      "sha256": "e829a632df22f7ca7a9a4c1bbf36a725aa679bb2bde349c394ea3ac7f3df13a1"
+    },
+    {
+      "bytes": 93326,
+      "path": "context-system-prompt.png",
+      "sha256": "d937cd7b1cffa2531a042f44784a5bacf3a5ce4bb390ca2389c30a0205dd2d2c"
+    },
+    {
+      "bytes": 93334,
+      "path": "context-tools.png",
+      "sha256": "ce795931cb1da2281602ac6e1ff1039790a7b0e334c073a7c7acd37415b936f6"
+    },
+    {
+      "bytes": 3170,
+      "path": "result.json",
+      "sha256": "1a8f26be74e76c26db141c552c0e1aa5b10e249cdfcb6a40f7417c9caf101756"
+    }
+  ]
+}

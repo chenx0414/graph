@@ -1,0 +1,15 @@
+{
+  "commit": "861e5f95df3432699e7e3d57a5e2c33adcb86722",
+  "endedAt": "2026-11-28T07:38:07Z",
+  "error": "",
+  "failed": 0,
+  "feature": "ctl-resources",
+  "lane": "headless",
+  "ok": true,
+  "passed": 1,
+  "run": "c83cb586",
+  "scenario": "ctl-resources",
+  "skippedSteps": 0,
+  "startedAt": "2026-11-28T07:37:06Z",
+  "steps": 23
+}

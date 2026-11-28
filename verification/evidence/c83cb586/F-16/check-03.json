@@ -1,0 +1,97 @@
+{
+  "_graph": "graph:allow-large-file: raw daemon response kept as evidence; generated data, not source",
+  "body": {
+    "agents": [
+      {
+        "activity": "",
+        "conversationId": "038294d9-2fcd-4ee9-b326-2065e2e611bc",
+        "cost": 0,
+        "createdAt": 1795851434103,
+        "currentOperationId": "",
+        "id": "038294d9-2fcd-4ee9-b326-2065e2e611bc",
+        "kind": "global",
+        "messages": 0,
+        "model": "",
+        "name": "Main",
+        "nodeId": "",
+        "parentId": "",
+        "projectId": "",
+        "requests": 0,
+        "role": "global",
+        "status": "idle",
+        "taskId": "01360222-8656-4f29-8a8e-29213b40bfe4",
+        "tokens": 0,
+        "updatedAt": 0
+      },
+      {
+        "activity": "",
+        "conversationId": "12311fd4-8262-435a-85fc-e1ec610367e0",
+        "cost": 0,
+        "createdAt": 1795851434104,
+        "currentOperationId": "",
+        "id": "12311fd4-8262-435a-85fc-e1ec610367e0",
+        "kind": "project",
+        "messages": 0,
+        "model": "",
+        "name": "verify",
+        "nodeId": "",
+        "parentId": "038294d9-2fcd-4ee9-b326-2065e2e611bc",
+        "projectId": "verify",
+        "requests": 0,
+        "role": "project",
+        "status": "idle",
+        "taskId": "a20d1a4e-0ecd-4f11-8fb1-f036a629f605",
+        "tokens": 0,
+        "updatedAt": 0
+      }
+    ],
+    "artifacts": [],
+    "events": [
+      {
+        "agentId": "12311fd4-8262-435a-85fc-e1ec610367e0",
+        "at": 1795851434104,
+        "id": "2",
+        "senderAgentId": "",
+        "targetAgentId": "",
+        "taskId": "a20d1a4e-0ecd-4f11-8fb1-f036a629f605",
+        "text": "",
+        "type": "conversation.created"
+      },
+      {
+        "agentId": "038294d9-2fcd-4ee9-b326-2065e2e611bc",
+        "at": 1795851434103,
+        "id": "1",
+        "senderAgentId": "",
+        "targetAgentId": "",
+        "taskId": "01360222-8656-4f29-8a8e-29213b40bfe4",
+        "text": "",
+        "type": "conversation.created"
+      }
+    ],
+    "links": [
+      {
+        "from": "038294d9-2fcd-4ee9-b326-2065e2e611bc",
+        "kind": "parent",
+        "to": "12311fd4-8262-435a-85fc-e1ec610367e0"
+      }
+    ],
+    "rootId": "038294d9-2fcd-4ee9-b326-2065e2e611bc",
+    "stats": {
+      "agents": 2,
+      "cost": 0,
+      "messages": 0,
+      "running": 0,
+      "tasks": 0,
+      "tokens": 0
+    },
+    "tasks": [],
+    "truncated": false
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/fleet",
+    "expectStatus": 200,
+    "id": "check.fleet-empty"
+  },
+  "status": 200
+}

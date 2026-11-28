@@ -1,0 +1,16 @@
+[
+  {
+    "id": "controls-context-tabs.thread",
+    "ok": true,
+    "expected": "status 200",
+    "actual": "status 200",
+    "evidence": "/Users/macmini/workspace/13-Graph/verification/evidence/1e3cc448/controls-context-tabs/prepare-01.json"
+  },
+  {
+    "id": "seed.conversation",
+    "ok": true,
+    "expected": "one project conversation whose assistant turn completed with tokens: 请用一句话说明你已就绪。",
+    "actual": "conversation=7c7bddf5-5591-44c8-803c-2c8ecc43ee33 messages=7 turns=4 tokens=120/30 elapsed=1ms assistant=\"已就绪。这条回答来自验证用的替身模型，不消耗真实额度。\"",
+    "evidence": "/Users/macmini/workspace/13-Graph/verification/evidence/1e3cc448/controls-context-tabs/seed.json"
+  }
+]

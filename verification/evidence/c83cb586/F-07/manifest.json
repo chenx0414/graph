@@ -1,0 +1,30 @@
+{
+  "createdAt": "2026-11-28T07:37:18Z",
+  "files": [
+    {
+      "bytes": 215,
+      "path": "assertions.json",
+      "sha256": "dbfad386819007a1d1291d6eba31075cb97c3d44b5a89b1a40a22992cc6d2d9d"
+    },
+    {
+      "bytes": 91318,
+      "path": "board-default-tab.png",
+      "sha256": "8a02919bf54c3b043135f13c63e7011e58cfd43913719ecd200cc3e0bc5f1d80"
+    },
+    {
+      "bytes": 104409,
+      "path": "board-trajectory-tab.png",
+      "sha256": "3aed90946a510489042af29155f587f5293cc41f371b0ccc5f065b7ac1770460"
+    },
+    {
+      "bytes": 1704,
+      "path": "check-01.json",
+      "sha256": "6c45b341d043dd188475a5af14095de55cbc92fb1b3476ed7d7b129f7d28012a"
+    },
+    {
+      "bytes": 2694,
+      "path": "result.json",
+      "sha256": "655e79b98c175574b944c03c00810c25ef3fa70913d7d155a6d13ec957bddf70"
+    }
+  ]
+}

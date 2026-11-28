@@ -1,0 +1,142 @@
+{
+  "_graph": "graph:allow-large-file: generated journey evidence kept verbatim; generated data, not source",
+  "access": [
+    {
+      "name": "当前上下文窗口",
+      "role": "any"
+    }
+  ],
+  "frames": [
+    "/Users/macmini/workspace/13-Graph/verification/evidence/c83cb586/F-06/context-empty.png",
+    "/Users/macmini/workspace/13-Graph/verification/evidence/c83cb586/F-06/context-system-prompt.png",
+    "/Users/macmini/workspace/13-Graph/verification/evidence/c83cb586/F-06/context-tools.png"
+  ],
+  "ok": true,
+  "steps": [
+    {
+      "detail": "visible: 当前上下文窗口",
+      "index": 1,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "detail": "exposed as any",
+      "index": 2,
+      "ok": true,
+      "verb": "assertAccess"
+    },
+    {
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/c83cb586/F-06/context-empty.png",
+      "index": 3,
+      "ok": true,
+      "verb": "screenshot"
+    },
+    {
+      "index": 4,
+      "ok": true,
+      "verb": "clickIf"
+    },
+    {
+      "index": 5,
+      "ok": true,
+      "verb": "frame"
+    },
+    {
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/c83cb586/F-06/context-system-prompt.png",
+      "index": 6,
+      "ok": true,
+      "verb": "screenshot"
+    },
+    {
+      "index": 7,
+      "ok": true,
+      "verb": "clickIf"
+    },
+    {
+      "index": 8,
+      "ok": true,
+      "verb": "frame"
+    },
+    {
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/c83cb586/F-06/context-tools.png",
+      "index": 9,
+      "ok": true,
+      "verb": "screenshot"
+    },
+    {
+      "detail": "visible: 当前上下文窗口",
+      "index": 10,
+      "ok": true,
+      "verb": "waitText"
+    }
+  ],
+  "texts": [
+    "轨迹",
+    "编队",
+    "供应商",
+    "资源",
+    "装配",
+    "设置",
+    "会话列表标题",
+    "对话标题",
+    "对话标题名",
+    "白板标题",
+    "标签页 白板",
+    "白板",
+    "主区域卡片",
+    "main agent 会话",
+    "章鱼",
+    "main agent 名称",
+    "Main Agent",
+    "verify",
+    "verify",
+    "还没有对话",
+    "在下面输入第一条消息",
+    "这个会话还没有可显示的对话。",
+    "消息",
+    "附件",
+    "模型",
+    "模型",
+    "语音",
+    "发送",
+    "当前上下文窗口",
+    "当前上下文",
+    "Main",
+    "上下文",
+    "上下文",
+    "System Prompt",
+    "System Prompt",
+    "工具声明",
+    "工具声明",
+    "读不到这次的发送记录：/api/tasks/01360222-8656-4f29-8a8e-29213b40bfe4/nodes/master/prompt 返回 400",
+    "调整分区",
+    "Agent 网络窗口",
+    "编队 · Main 中心 · Thread 环",
+    "无限画布",
+    "编队 Agent Main",
+    "M",
+    "Main",
+    "全局主管",
+    "当前 · —",
+    "0 tokens",
+    "$0",
+    "空闲",
+    "0 步 · 0ms · 占比 0.0%",
+    "编队 Agent verify",
+    "V",
+    "verify",
+    "0 个图",
+    "120%",
+    "居中",
+    "居中",
+    "+",
+    "+",
+    "−",
+    "−",
+    "调整分区",
+    "跨 Agent 协作窗口",
+    "跨 Agent 协作",
+    "0 条协作 · 0 条泳道",
+    "没有匹配的协作事件。"
+  ]
+}

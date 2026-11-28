@@ -1,0 +1,231 @@
+{
+  "_graph": "graph:allow-large-file: generated journey evidence kept verbatim; generated data, not source",
+  "access": [
+    {
+      "focusable": true,
+      "name": "打开资源库文件夹",
+      "role": "button"
+    },
+    {
+      "focusable": true,
+      "name": "刷新资源库",
+      "role": "button"
+    },
+    {
+      "focusable": true,
+      "name": "分类 全部",
+      "role": "button"
+    },
+    {
+      "focusable": true,
+      "name": "分类 技能",
+      "role": "button"
+    },
+    {
+      "focusable": true,
+      "name": "分类 指令",
+      "role": "button"
+    },
+    {
+      "focusable": true,
+      "name": "分类 MCP 服务器",
+      "role": "button"
+    },
+    {
+      "focusable": true,
+      "name": "分类 Pi 扩展",
+      "role": "button"
+    }
+  ],
+  "frames": [
+    "/Users/macmini/workspace/13-Graph/verification/evidence/c83cb586/ctl-resources/ctl-resources.png"
+  ],
+  "ok": true,
+  "steps": [
+    {
+      "detail": "visible: 白板标题",
+      "index": 1,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 2,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 资源库",
+      "index": 3,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "detail": "exposed as button",
+      "index": 4,
+      "ok": true,
+      "verb": "assertAccess"
+    },
+    {
+      "detail": "exposed as button",
+      "index": 5,
+      "ok": true,
+      "verb": "assertAccess"
+    },
+    {
+      "detail": "exposed as button",
+      "index": 6,
+      "ok": true,
+      "verb": "assertAccess"
+    },
+    {
+      "detail": "exposed as button",
+      "index": 7,
+      "ok": true,
+      "verb": "assertAccess"
+    },
+    {
+      "detail": "exposed as button",
+      "index": 8,
+      "ok": true,
+      "verb": "assertAccess"
+    },
+    {
+      "detail": "exposed as button",
+      "index": 9,
+      "ok": true,
+      "verb": "assertAccess"
+    },
+    {
+      "detail": "exposed as button",
+      "index": 10,
+      "ok": true,
+      "verb": "assertAccess"
+    },
+    {
+      "index": 11,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 资源库",
+      "index": 12,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 13,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 资源库 · 0 个",
+      "index": 14,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 15,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 资源库 · 0 个",
+      "index": 16,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 17,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 资源库 · 0 个",
+      "index": 18,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 19,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 资源库 · 0 个",
+      "index": 20,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 21,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 资源库 · 0 个",
+      "index": 22,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/c83cb586/ctl-resources/ctl-resources.png",
+      "index": 23,
+      "ok": true,
+      "verb": "screenshot"
+    }
+  ],
+  "texts": [
+    "轨迹",
+    "编队",
+    "供应商",
+    "资源",
+    "装配",
+    "设置",
+    "会话列表标题",
+    "对话标题",
+    "对话标题名",
+    "白板标题",
+    "标签页 白板",
+    "白板",
+    "标签页 资源库",
+    "资源库",
+    "关闭 资源库",
+    "主区域卡片",
+    "main agent 会话",
+    "章鱼",
+    "main agent 名称",
+    "Main Agent",
+    "verify",
+    "verify",
+    "还没有对话",
+    "在下面输入第一条消息",
+    "这个会话还没有可显示的对话。",
+    "消息",
+    "附件",
+    "模型",
+    "模型",
+    "语音",
+    "发送",
+    "使用",
+    "/",
+    "资源库",
+    "/",
+    "全部",
+    "打开资源库文件夹",
+    "打开资源库文件夹",
+    "刷新资源库",
+    "查找资源",
+    "分类 全部",
+    "全部",
+    "分类 技能",
+    "技能 · 0",
+    "分类 指令",
+    "指令 · 0",
+    "分类 MCP 服务器",
+    "MCP 服务器 · 0",
+    "分类 Pi 扩展",
+    "Pi 扩展 · 0",
+    "发现",
+    "资源库 · 0 个"
+  ]
+}

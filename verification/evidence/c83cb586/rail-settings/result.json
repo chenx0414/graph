@@ -1,0 +1,100 @@
+{
+  "_graph": "graph:allow-large-file: generated journey evidence kept verbatim; generated data, not source",
+  "frames": [
+    "/Users/macmini/workspace/13-Graph/verification/evidence/c83cb586/rail-settings/settings.png"
+  ],
+  "ok": true,
+  "steps": [
+    {
+      "detail": "visible: 设置",
+      "index": 1,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 2,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 运行模式",
+      "index": 3,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 4,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "index": 5,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/c83cb586/rail-settings/settings.png",
+      "index": 6,
+      "ok": true,
+      "verb": "screenshot"
+    }
+  ],
+  "texts": [
+    "轨迹",
+    "编队",
+    "供应商",
+    "资源",
+    "装配",
+    "设置",
+    "会话列表标题",
+    "对话标题",
+    "对话标题名",
+    "白板标题",
+    "标签页 白板",
+    "白板",
+    "标签页 运行设置",
+    "运行设置",
+    "关闭 运行设置",
+    "主区域卡片",
+    "main agent 会话",
+    "章鱼",
+    "main agent 名称",
+    "Main Agent",
+    "verify",
+    "verify",
+    "还没有对话",
+    "在下面输入第一条消息",
+    "这个会话还没有可显示的对话。",
+    "消息",
+    "附件",
+    "模型",
+    "模型",
+    "语音",
+    "发送",
+    "运行设置",
+    "运行",
+    "运行模式",
+    "这个 daemon 负责的事",
+    "view",
+    "配置版本",
+    "生效中的配置 revision",
+    "0",
+    "源码",
+    "正在运行的构建",
+    "main@861e5f95",
+    "可用模型",
+    "已启用的模型数量",
+    "0 个",
+    "扩展自动更新",
+    "Pi 扩展有新版本时自动更新",
+    "打开 扩展自动更新",
+    "开启",
+    "项目",
+    "verify",
+    "未准备",
+    "归档 verify",
+    "归档 verify",
+    "归档的项目不再出现在会话列表里",
+    "凭据在「供应商」页管理 · 与 magpie 同一套"
+  ]
+}

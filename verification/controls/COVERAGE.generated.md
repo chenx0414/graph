@@ -4,28 +4,7 @@
 - controls: **70/85 covered**, 12 not-applicable, 3 blocked
 - journeys cited: **17**
 - lanes proven: headless, surface
-- audit: /Users/macmini/workspace/13-Graph-bugs/verification/controls/inventory.json / /Users/macmini/workspace/13-Graph-bugs/verification/controls/ledger.json
-
-## Problems (18)
-
-- `stale-evidence` : page "F-07": its evidence was recorded 2026-11-27T10:30:35Z, but app/board_panels.go changed 19h10m38s later; rerun the journey that covers it
-- `stale-evidence` : page "F-08": its evidence was recorded 2026-11-27T10:30:37Z, but app/trajectory_context_overview.go changed 20h5m37s later; rerun the journey that covers it
-- `stale-evidence` : page "F-10": its evidence was recorded 2026-11-27T10:32:20Z, but app/fleet_page.go changed 19h8m53s later; rerun the journey that covers it
-- `stale-evidence` : page "F-11": its evidence was recorded 2026-11-27T10:30:41Z, but app/providers_page.go changed 20h20m25s later; rerun the journey that covers it
-- `stale-evidence` : page "F-12": its evidence was recorded 2026-11-27T10:31:26Z, but app/resources_page.go changed 19h9m47s later; rerun the journey that covers it
-- `stale-evidence` : page "F-13": its evidence was recorded 2026-11-27T10:30:44Z, but app/assemblies_resources.go changed 19h10m29s later; rerun the journey that covers it
-- `stale-evidence` : page "F-14": its evidence was recorded 2026-11-27T10:31:27Z, but app/settings.go changed 20h16m29s later; rerun the journey that covers it
-- `stale-evidence` : page "F-16": its evidence was recorded 2026-11-27T10:31:05Z, but app/skeleton_pages.go changed 19h10m8s later; rerun the journey that covers it
-- `stale-evidence` : page "board": its evidence was recorded 2026-11-27T10:31:24Z, but app/board_width.go changed 19h9m49s later; rerun the journey that covers it
-- `stale-evidence` : page "composer": its evidence was recorded 2026-11-27T10:32:26Z, but app/conversations.go changed 19h59m20s later; rerun the journey that covers it
-- `stale-evidence` : page "context": its evidence was recorded 2026-11-27T10:32:31Z, but app/node_context_card.go changed 20h3m43s later; rerun the journey that covers it
-- `stale-evidence` : page "rail": its evidence was recorded 2026-11-27T10:30:29Z, but app/shell_view.go changed 19h10m44s later; rerun the journey that covers it
-- `stale-evidence` : page "rail-fleet": its evidence was recorded 2026-11-27T10:31:32Z, but app/fleet_page.go changed 19h9m41s later; rerun the journey that covers it
-- `stale-evidence` : page "rail-settings": its evidence was recorded 2026-11-27T10:31:35Z, but app/settings.go changed 20h16m21s later; rerun the journey that covers it
-- `stale-evidence` : page "shell": its evidence was recorded 2026-11-27T10:30:29Z, but app/shell.go changed 19h57m32s later; rerun the journey that covers it
-- `stale-evidence` : page "shell-workspace": its evidence was recorded 2026-11-27T10:31:37Z, but app/shell_view.go changed 19h9m36s later; rerun the journey that covers it
-- `stale-evidence` : page "tabbar": its evidence was recorded 2026-11-27T10:30:29Z, but app/board.go changed 19h10m44s later; rerun the journey that covers it
-- `stale-evidence` : page "tray": its evidence was recorded 2026-11-27T10:31:23Z, but app/tasks.go changed 19h9m50s later; rerun the journey that covers it
+- audit: /Users/macmini/workspace/13-Graph/verification/controls/inventory.json / /Users/macmini/workspace/13-Graph/verification/controls/ledger.json
 
 ## Controls
 
