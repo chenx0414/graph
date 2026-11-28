@@ -140,6 +140,55 @@ func (c *chatState) pickerDuplicate(model modelChoice) bool {
 	return false
 }
 
+// pickerRowLabel names a model in the picker. When more than one provider serves
+// the same short name the provider is part of the name: without it seven rows
+// read "deepseek-v4.1-flash" and no reader can tell which one runs. When one
+// provider serves the same short name under several ids, the id is the only thing
+// that separates them.
+func (c *chatState) pickerRowLabel(model modelChoice) string {
+	name := shortModel(model.id)
+	if !c.pickerDuplicate(model) {
+		return name
+	}
+	provider := c.modelProviderOf(model)
+	if provider == "" {
+		return name
+	}
+	label := name + " · " + provider
+	for _, other := range c.pickerModels() {
+		if other.id != model.id && other.id != shortModel(other.id) &&
+			c.modelProviderOf(other) == provider && shortModel(other.id) == name {
+			return label + " · " + model.id
+		}
+	}
+	return label
+}
+
+// modelChipLabel names the model in use, with the provider whenever the model
+// list holds more than one entry carrying that short name.
+func (c *chatState) modelChipLabel() string {
+	if c.currentModel == "" {
+		return ""
+	}
+	chosen := modelChoice{id: c.currentModel}
+	for _, model := range c.models {
+		if model.id == c.currentModel {
+			chosen = model
+			break
+		}
+	}
+	name := shortModel(c.currentModel)
+	if c.pickerDuplicate(chosen) {
+		if provider := c.modelProviderOf(chosen); provider != "" {
+			name += " · " + provider
+		}
+	}
+	if thinking := c.currentThinking; thinking != "" {
+		name = strings.TrimSpace(name + " " + thinking)
+	}
+	return strings.TrimSpace(name)
+}
+
 func providerMark(ctx *ui.Context, id string, size float32, t gwtheme.Tokens) {
 	if icon := providerBrandIcon(id); icon != nil {
 		ui.Icon(ctx, icon).Size(size, size).TextColor(t.Foreground)
@@ -153,7 +202,7 @@ func providerMark(ctx *ui.Context, id string, size float32, t gwtheme.Tokens) {
 
 func (c *chatState) pickerRow(ctx *ui.Context, model modelChoice, index int, t gwtheme.Tokens) {
 	row := ui.Row(ctx).FillWidth().Height(34).PaddingX(12).Gap(8).AlignItems(ui.Center).Role(ui.RoleOption).
-		Label(shortModel(model.id)).AccessSelected(model.id == c.pendingModel().id)
+		Label(c.pickerRowLabel(model)).AccessSelected(model.id == c.pendingModel().id)
 	active := model.id == c.pickerActiveModel().id
 	if active {
 		row.Background(t.Hover)
@@ -165,7 +214,7 @@ func (c *chatState) pickerRow(ctx *ui.Context, model modelChoice, index int, t g
 		label.Children(func() {
 			kit.Text(ctx, shortModel(model.id), t.Text.Xs).FontWeight(500).TextColor(t.Foreground).SingleLine().Ellipsis("…")
 			if c.pickerDuplicate(model) {
-				kit.Text(ctx, c.modelProviderOf(model), t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
+				kit.Text(ctx, "· "+c.modelProviderOf(model), t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
 			}
 		})
 		if model.id == c.pendingModel().id {
