@@ -354,6 +354,7 @@ func (s *shellState) loadConversationChat(id string) {
 	loaded.window = s.window
 	loaded.providerOn = s.providersEnabled
 	loaded.openProviders = func() { s.openModule("providers") }
+	loaded.contextReset = func() { s.refreshTrajectoryAfterReset() }
 	loaded.open(id)
 	s.chatMu.Lock()
 	if s.activeID != id || s.chat != current {

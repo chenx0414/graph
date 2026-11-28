@@ -35,6 +35,7 @@ func (s *shellState) beginConversationSwitch(id string) *chatState {
 	state := newChatState(s.api.address, s.api.token)
 	state.window = s.window
 	state.providerOn = s.providersEnabled
+	state.contextReset = func() { s.refreshTrajectoryAfterReset() }
 	state.source = newConversationChatSource(s.api, id)
 	state.active = id
 	state.loading = true

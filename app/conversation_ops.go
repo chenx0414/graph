@@ -214,6 +214,9 @@ func (c *chatState) newAgentContext() {
 	}
 	c.status = "已开启新的 Agent 上下文"
 	c.frame()
+	if c.contextReset != nil {
+		c.contextReset()
+	}
 }
 
 // modelChoices answers from what is already loaded. A caller that needs the list
