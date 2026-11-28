@@ -1,0 +1,89 @@
+{
+  "_graph": "graph:allow-large-file: generated journey evidence kept verbatim; generated data, not source",
+  "frames": [
+    "/Users/macmini/workspace/13-Graph/verification/evidence/12cf5465/F-08/trajectory.png"
+  ],
+  "ok": true,
+  "steps": [
+    {
+      "detail": "visible: 轨迹",
+      "index": 1,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 2,
+      "ok": true,
+      "verb": "click"
+    },
+    {
+      "detail": "visible: 标签页 轨迹量化",
+      "index": 3,
+      "ok": true,
+      "verb": "waitText"
+    },
+    {
+      "index": 4,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "index": 5,
+      "ok": true,
+      "verb": "assertText"
+    },
+    {
+      "detail": "/Users/macmini/workspace/13-Graph/verification/evidence/12cf5465/F-08/trajectory.png",
+      "index": 6,
+      "ok": true,
+      "verb": "screenshot"
+    }
+  ],
+  "texts": [
+    "轨迹",
+    "编队",
+    "供应商",
+    "资源",
+    "装配",
+    "设置",
+    "会话列表标题",
+    "对话标题",
+    "白板标题",
+    "标签页 白板",
+    "白板",
+    "标签页 轨迹量化",
+    "轨迹量化",
+    "关闭 轨迹量化",
+    "主区域卡片",
+    "main agent 会话",
+    "章鱼",
+    "main agent 名称",
+    "Main Agent",
+    "还没有项目会话。",
+    "从左侧选择一个项目",
+    "上下文统计窗口",
+    "先打开一个会话",
+    "Token 统计窗口",
+    "先打开一个会话",
+    "当前上下文窗口",
+    "先打开一个会话",
+    "耗时统计窗口",
+    "先打开一个会话",
+    "上下文趋势窗口",
+    "先打开一个会话",
+    "上下文事件窗口",
+    "先打开一个会话",
+    "命令执行窗口",
+    "先打开一个会话",
+    "文件活动窗口",
+    "先打开一个会话",
+    "Token 组成窗口",
+    "先打开一个会话",
+    "请求浏览窗口",
+    "先打开一个会话",
+    "Agent 网络窗口",
+    "先打开一个会话",
+    "请求详情窗口",
+    "先打开一个会话"
+  ]
+}

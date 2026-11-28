@@ -6,6 +6,10 @@
 - lanes proven: headless, surface
 - audit: /Users/macmini/workspace/13-Graph/verification/controls/inventory.json / /Users/macmini/workspace/13-Graph/verification/controls/ledger.json
 
+## Problems (1)
+
+- `stale-evidence` : page "F-08": its evidence was recorded 2026-11-28T07:38:21Z, but app/trajectory.go changed 5m0s later; rerun the journey that covers it
+
 ## Controls
 
 | page | role | name | status | witness / reason |

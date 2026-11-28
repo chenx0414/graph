@@ -1131,5 +1131,10 @@
       "reason": "macOS 原生窗口按钮；最小化后截图与真实窗口断言都不可见"
     }
   ],
-  "problems": []
+  "problems": [
+    {
+      "code": "stale-evidence",
+      "detail": "page \"F-08\": its evidence was recorded 2026-11-28T07:38:21Z, but app/trajectory.go changed 5m0s later; rerun the journey that covers it"
+    }
+  ]
 }
