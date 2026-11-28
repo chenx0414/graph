@@ -229,10 +229,35 @@ func ListMessages(store *TaskStore, conversationId string, query MessageQuery) [
 		rows = conversationReverseRows(rows)
 	}
 	messages := make([]ConversationMessage, 0, len(rows))
+	durations := messageDurations(store, conversationId)
 	for _, row := range rows {
-		messages = append(messages, PublicMessage(conversationMessageFromRow(row)))
+		message := PublicMessage(conversationMessageFromRow(row))
+		if operationId, ok := row["operation_id"].(string); ok {
+			message.DurationMs = durations[operationId]
+		}
+		messages = append(messages, message)
 	}
 	return messages
+}
+
+// messageDurations maps each operation to the span from the first dispatch to the
+// last settlement of the invocations it ran. That span is the round's real
+// working time, so an answer keeps a measured duration instead of counting calls
+// or reading a wall clock.
+func messageDurations(store *TaskStore, conversationId string) map[string]int64 {
+	durations := map[string]int64{}
+	for _, row := range kernelRows(store.Db, `SELECT m.operation_id AS operationId,
+        MAX(i.settled_at) - MIN(i.dispatched_at) AS durationMs
+    FROM messages m JOIN invocations i ON i.operation_id = m.operation_id
+    WHERE m.conversation_id=? AND i.settled_at > i.dispatched_at
+    GROUP BY m.operation_id`, conversationId) {
+		operationId := kernelString(row["operationId"])
+		duration := kernelInt(row["durationMs"])
+		if operationId != "" && duration > 0 {
+			durations[operationId] = duration
+		}
+	}
+	return durations
 }
 
 func ConversationDigest(store *TaskStore, conversationId string) string {

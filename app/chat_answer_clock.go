@@ -52,6 +52,12 @@ func (c *chatState) answerClock(message transcriptMessage, now time.Time) (time.
 	if recorded, ok := c.answerClocks[key]; ok && recorded > 0 {
 		return time.Duration(recorded) * time.Millisecond, true
 	}
+	if message.DurationMs > 0 {
+		span := time.Duration(message.DurationMs) * time.Millisecond
+		if span <= answerClockWindow {
+			return span, true
+		}
+	}
 	return 0, false
 }
 

@@ -32,6 +32,11 @@ func runElapsed(run transcriptRun, now time.Time) (time.Duration, bool) {
 		}
 	} else {
 		last := run.messages[len(run.messages)-1].CreatedAt
+		for _, message := range run.messages {
+			if message.UpdatedAt > last {
+				last = message.UpdatedAt
+			}
+		}
 		if last <= start {
 			return 0, false
 		}

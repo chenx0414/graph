@@ -103,6 +103,8 @@ type transcriptMessage struct {
 	State       string                `json:"state"`
 	OperationID string                `json:"operationId"`
 	CreatedAt   int64                 `json:"createdAt"`
+	UpdatedAt   int64                 `json:"updatedAt"`
+	DurationMs  int64                 `json:"durationMs"`
 	Data        transcriptMessageData `json:"data"`
 }
 
