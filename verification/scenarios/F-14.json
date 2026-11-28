@@ -22,10 +22,6 @@
       "text": "运行设置"
     },
     {
-      "verb": "click",
-      "name": "管理供应商"
-    },
-    {
       "verb": "waitText",
       "text": "供应商",
       "timeoutMs": 15000

@@ -85,8 +85,6 @@ func (s *shellState) fleetGraphCanvas(ctx *ui.Context, data *fleetTopologyData) 
 		}
 		return false
 	}
-	t := gwtheme.Of(ctx)
-	kit.Text(ctx, "拖拽平移 · 滚轮缩放", t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
 	s.infiniteView(ctx, view, data.Width, data.Height, edges, hit, func(ctx *ui.Context, view *infiniteCanvas) {
 		for index := range data.Nodes {
 			node := data.Nodes[index]

@@ -6,10 +6,7 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// The card sits inside the board panel, which pads its body by the same amount
-// on every side. The card added its own end padding on top of that, so its
-// content sat 12 from the left edge and 24 from the right: the block was not
-// centred in the panel and its right corner was pushed against a rounded one.
+// The card added end padding on top of the panel's, so it sat 12 from the left and 24 from the right.
 func TestTheContextCardSitsEvenlyInsideItsPanel(t *testing.T) {
 	shell := contextOverviewShell(t, contextOverviewSettings)
 	shell.openModule("trajectory")
@@ -29,8 +26,7 @@ func TestTheContextCardSitsEvenlyInsideItsPanel(t *testing.T) {
 	}
 }
 
-// A node session draws the same card in the same column. The extra end padding
-// pushed its content 12 further from the right edge than from the left.
+// The node card carried the same end padding.
 func TestTheNodeContextCardSitsEvenlyInItsColumn(t *testing.T) {
 	tester := frames(newTester(func(ctx *ui.Context) {
 		ui.Box(ctx).FillWidth().Height(320).Padding(12).Children(func() {

@@ -5,9 +5,7 @@ import (
 	"time"
 )
 
-// A round can hold exactly one tool call, and the record already says when that
-// call ended. The run must read that instead of falling back to a call count,
-// which is what made the duration appear and disappear between rounds.
+// A one-call run must read its measured end, not fall back to a call count.
 func TestASingleToolCallShowsItsMeasuredDuration(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
 	tester := newTester(state.view, 760, 620)
@@ -25,9 +23,7 @@ func TestASingleToolCallShowsItsMeasuredDuration(t *testing.T) {
 	}
 }
 
-// The console reports how long the answer's operation really ran, measured from
-// the first dispatch to the last settlement. A reload must read that number, not
-// lose the reading the window never watched.
+// A reload must read the operation span the console reports.
 func TestASettledAnswerKeepsItsMeasuredDurationAfterAReload(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
 	now := newTester(state.view, 760, 620).Now()
@@ -43,8 +39,7 @@ func TestASettledAnswerKeepsItsMeasuredDurationAfterAReload(t *testing.T) {
 	}
 }
 
-// The duration of a run is the whole time its calls took, end of the last call
-// included - not the gap between the first and the last start.
+// A run spans from the first start to the last end, not between starts.
 func TestAToolRunCountsTheTimeItsLastCallTook(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
 	tester := newTester(state.view, 760, 620)

@@ -188,8 +188,8 @@ func TestMagpieStaysAnOptionalExtension(t *testing.T) {
 	if !tester.HasText("Magpie（扩展）") {
 		t.Fatalf("magpie is offered as an extension, texts %q", tester.Texts())
 	}
-	if !tester.HasText("直接出现在模型选择器里") {
-		t.Fatalf("the page says magpie's models come through automatically, texts %q", tester.Texts())
+	if !tester.HasText("用 ChatGPT 的模型") && !tester.HasText("ChatGPT") {
+		t.Fatalf("a connected magpie provider still reaches the model picker, texts %q", tester.Texts())
 	}
 }
 

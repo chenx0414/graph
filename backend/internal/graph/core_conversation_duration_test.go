@@ -6,10 +6,6 @@ import (
 	"testing"
 )
 
-// seedAnsweredRound writes one settled answer plus the invocations the agent ran
-// while producing it: the model call, a slow tool-bound stretch, and the final
-// call. The round's own duration is the span from the first dispatch to the last
-// settlement, which is what the chat shows above the answer.
 func seedAnsweredRound(t *testing.T, store *TaskStore, conversationId, operationId string) {
 	t.Helper()
 	kernelExec(store.DB, "INSERT INTO tasks(id,project_id,conversation_id,request,requirement_version,latest_proposal,created_seq,phase) VALUES(?,?,?,?,1,0,?,?)",

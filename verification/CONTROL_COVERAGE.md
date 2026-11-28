@@ -102,8 +102,8 @@ Controls that used to be on this list are now covered by real journeys: `打开 
    ```
    For a text field, type and read the value back:
    ```json
-   { "verb": "type", "name": "查找供应商", "text": "magpie" },
-   { "verb": "assertAccess", "name": "查找供应商", "value": "magpie" }
+   { "verb": "type", "name": "搜索模型", "text": "deepseek" },
+   { "verb": "assertAccess", "name": "搜索模型", "value": "deepseek" }
    ```
 3. Run the journey for real; keep the evidence:
    ```sh

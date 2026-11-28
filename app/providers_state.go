@@ -88,14 +88,11 @@ func providersPhaseOf(loading, attempted bool, failed string, total int) provide
 	return providersEmptyPhase
 }
 
-func (phase providersPhase) Message(query string) string {
+func (phase providersPhase) Message() string {
 	switch phase {
 	case providersIdlePhase, providersLoadingPhase:
 		return "正在读取供应商…"
 	case providersEmptyPhase:
-		if query != "" {
-			return "没有匹配的供应商。"
-		}
 		return "还没有供应商。"
 	}
 	return ""

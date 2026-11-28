@@ -32,7 +32,7 @@ func TestTheWhiteboardNetworkShowsThreadsForMain(t *testing.T) {
 	state, tester := nodeChatShell(t, mock)
 	state.selectConversation("g1")
 	tester = frames(frames(tester))
-	if !tester.HasText("编队 · Main 中心 · Thread 环 · 拖拽平移 · 滚轮缩放") {
+	if !tester.HasText("编队 · Main 中心 · Thread 环") {
 		t.Fatalf("the network panel is the fleet network around Main, texts %q", tester.Texts())
 	}
 	if !tester.HasText("编队 Agent 项目 A") || !tester.HasText("编队 Agent 项目 B") {
@@ -50,7 +50,7 @@ func TestTheWhiteboardNetworkShowsGraphsForAThread(t *testing.T) {
 	state, tester := nodeChatShell(t, mock)
 	state.selectConversation("p1")
 	tester = frames(frames(tester))
-	if !tester.HasText("线程 · Graph 环 · 拖拽平移 · 滚轮缩放") {
+	if !tester.HasText("线程 · Graph 环") {
 		t.Fatalf("the network panel shows the thread's graphs, texts %q", tester.Texts())
 	}
 	if !tester.HasText("目标：验证编队网络") {
@@ -75,7 +75,7 @@ func TestTheWhiteboardNetworkShowsTheGraphForAGraphAgent(t *testing.T) {
 	if !tester.HasText("图节点 planner") {
 		t.Fatalf("the network panel renders the graph of the open graph agent, texts %q", tester.Texts())
 	}
-	if !tester.HasText("Graph · 1 节点 · 拖拽平移 · 滚轮缩放") {
+	if !tester.HasText("Graph · 1 节点") {
 		t.Fatalf("the network panel captions the graph, texts %q", tester.Texts())
 	}
 }
@@ -181,7 +181,7 @@ func TestTheNetworkPanelFullScreenShowsTheSameNetwork(t *testing.T) {
 	if page := state.boardPage(); page == nil || page.Kind != "agent-network" {
 		t.Fatalf("the full screen page is the network, page %+v", page)
 	}
-	if !tester.HasText("编队 · Main 中心 · Thread 环 · 拖拽平移 · 滚轮缩放") || !tester.HasText("居中") {
+	if !tester.HasText("编队 · Main 中心 · Thread 环") || !tester.HasText("居中") {
 		t.Fatalf("the full screen keeps the same network canvas, texts %q", tester.Texts())
 	}
 }

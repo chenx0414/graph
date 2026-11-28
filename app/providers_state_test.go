@@ -187,13 +187,10 @@ func TestProvidersPhaseReadsLoadingFailureAndEmptiness(t *testing.T) {
 			t.Errorf("%s reads %q, want %q", want.name, got, want.want)
 		}
 	}
-	if got := providersIdlePhase.Message(""); got != providersLoadingPhase.Message("") {
+	if got := providersIdlePhase.Message(); got != providersLoadingPhase.Message() {
 		t.Fatalf("an unread library looks like a read in progress, got %q", got)
 	}
-	if got := providersEmptyPhase.Message("zzz"); got != "没有匹配的供应商。" {
-		t.Fatalf("an unmatched search says %q", got)
-	}
-	if got := providersEmptyPhase.Message(""); got != "还没有供应商。" {
+	if got := providersEmptyPhase.Message(); got != "还没有供应商。" {
 		t.Fatalf("an empty library says %q", got)
 	}
 }

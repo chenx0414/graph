@@ -4,9 +4,7 @@ import (
 	"testing"
 )
 
-// Every call in a run must own a line that names what it touched. A tool the
-// activity list has no special case for used to render as a bare "read已完成",
-// which loses the file it read and makes two different calls look identical.
+// Every call must name what it touched; it used to render as "read已完成".
 func TestAToolOutsideTheKnownFamiliesStillNamesItsTarget(t *testing.T) {
 	run := transcriptRun{tools: true, messages: []transcriptMessage{
 		activityTool("read", "read: /tmp/notes.md", "done"),
@@ -24,9 +22,7 @@ func TestAToolOutsideTheKnownFamiliesStillNamesItsTarget(t *testing.T) {
 	}
 }
 
-// A codemode call carries its program in the args, not in its text. The line must
-// show which program ran, or the reader cannot tell one codemode step from the
-// next across a ninety-call round.
+// A codemode call carries its program in args, so the line must read args.
 func TestACodemodeCallShowsTheProgramItRan(t *testing.T) {
 	call := activityTool("codemode", "codemode: const hits = await searchTools(\"work\");", "done")
 	call.Data.Args = `{"code":"const hits = await searchTools(\"work\", { limit: 20 });\nconsole.log(hits);\n"}`
@@ -42,8 +38,7 @@ func TestACodemodeCallShowsTheProgramItRan(t *testing.T) {
 	}
 }
 
-// A failed call must say so on its own line: a fold that reports success for a
-// call that errored is worse than a fold that omits it.
+// A failed call must not read as done.
 func TestAFailedToolCallIsNotReportedAsDone(t *testing.T) {
 	call := activityTool("read", "read: /tmp/missing.md", "failed")
 	call.Data.Error = true

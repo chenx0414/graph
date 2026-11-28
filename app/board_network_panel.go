@@ -181,7 +181,7 @@ func (s *shellState) networkCaption(ctx *ui.Context, scene netScene, scope strin
 	case "graph":
 		label = "Graph · " + strconv.Itoa(len(scene.topology.Nodes)) + " 节点"
 	}
-	kit.Text(ctx, label+" · 拖拽平移 · 滚轮缩放", t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
+	kit.Text(ctx, label, t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
 }
 
 func (s *shellState) networkCards(ctx *ui.Context, scene netScene, view *infiniteCanvas) {

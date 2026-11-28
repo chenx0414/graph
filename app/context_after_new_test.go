@@ -8,10 +8,7 @@ import (
 	"time"
 )
 
-// /new discards the model's context and writes no message, so the whiteboard
-// card kept showing the context it just discarded until the next prompt happened
-// to change the transcript. Opening a new context must re-read the card by
-// itself.
+// /new writes no message, so it must re-read the card by itself.
 func TestOpeningANewContextRefreshesTheContextCardWithoutAPrompt(t *testing.T) {
 	var reads atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

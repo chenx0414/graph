@@ -5,11 +5,7 @@ import (
 	"testing"
 )
 
-// The composition under the context card describes what the model's context
-// holds now. After /new that is the reset context, not the transcript: the card
-// used to keep adding up every message the conversation ever carried, so the
-// legend described history the model could no longer see and only corrected
-// itself once a new prompt arrived.
+// After /new the card describes the reset context, not every message ever carried.
 func TestANewContextResetsTheCompositionTheCardShows(t *testing.T) {
 	store, _, _, _ := answersFixture(t)
 	long := ""

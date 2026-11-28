@@ -221,9 +221,7 @@ func (s *shellState) refreshTrajectory() {
 	s.startTrajectory(path, true)
 }
 
-// refreshTrajectoryAfterReset re-reads the card even when nothing else moved.
-// A reset discards the model context without writing a message, so the payload
-// the card describes changed while the transcript it was keyed to did not.
+
 func (s *shellState) refreshTrajectoryAfterReset() {
 	state := &s.trajectory
 	path, key := trajectoryEndpoint(s.chatScope())

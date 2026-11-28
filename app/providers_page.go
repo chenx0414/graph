@@ -28,7 +28,6 @@ type providersPageState struct {
 	attempted       bool
 	failed          string
 	entries         []providerEntry
-	search          string
 	packageAccounts bool
 	enabled         map[string]bool
 	source          magpieProvidersPayload
@@ -224,19 +223,13 @@ func (s *shellState) providerRowsCard(ctx *ui.Context, pal magpiePalette, entrie
 		Border(gwtheme.Stroke, pal.Line).Clip()
 	card.Children(func() {
 		if len(entries) == 0 {
-			kit.Text(ctx, providersEmptyPhase.Message(strings.TrimSpace(s.providers.search)), 13).TextColor(pal.Muted).Padding(18, 2)
+			kit.Text(ctx, providersEmptyPhase.Message(), 13).TextColor(pal.Muted).Padding(18, 2)
 			return
 		}
 		for index, entry := range entries {
 			s.providerRow(ctx, entry, pal, index == len(entries)-1)
 		}
 	})
-}
-
-func (s *shellState) providerSearch(ctx *ui.Context, pal magpiePalette) {
-	field := ui.TextInputBase(ctx, &s.providers.search)
-	field.Width(220).Height(26).PaddingX(9).Radius(7).Border(gwtheme.Stroke, pal.Line).
-		Background(pal.Card).FontSize(12).Placeholder("查找供应商").Label("查找供应商").FocusRing(false)
 }
 
 func (s *shellState) panelProviders(ctx *ui.Context) {
@@ -251,13 +244,9 @@ func (s *shellState) panelProviders(ctx *ui.Context) {
 			kit.Text(ctx, "/", 12).TextColor(pal.Muted).SingleLine()
 			kit.Text(ctx, "供应商", 12).TextColor(pal.Foreground2).SingleLine()
 			ui.Spacer(ctx)
-			s.providerSearch(ctx, pal)
 			if kit.IconButton(ctx, iconRefresh, "刷新供应商", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
 				s.refreshProviders()
 			}
-		})
-		ui.Row(ctx).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-			kit.Text(ctx, "本机供应商写进 graph.config.json · Magpie 是可选的扩展", 11).TextColor(pal.Faint).Grow(1).SingleLine().Ellipsis("…")
 		})
 		ui.Box(ctx).Height(10)
 		if s.providers.addOpen || s.providers.editing != "" {
@@ -285,9 +274,7 @@ func (s *shellState) panelProviders(ctx *ui.Context) {
 		})
 		switch {
 		case len(s.providers.entries) > 0:
-			kit.Text(ctx, "Magpie 里已连接的供应商会直接出现在模型选择器里，不需要导入。供应商与账号都由 Magpie 管理 · 开关在 Magpie 里。",
-				11).TextColor(pal.Faint)
-			s.providerRowsCard(ctx, pal, providersMatching(s.providers.entries, strings.ToLower(strings.TrimSpace(s.providers.search))))
+			s.providerRowsCard(ctx, pal, s.providers.entries)
 		case s.providers.failed != "":
 			ui.Row(ctx).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 				kit.Text(ctx, "读不到 magpie："+s.providers.failed, 11.5).TextColor(pal.Amber).Grow(1).SingleLine().Ellipsis("…")

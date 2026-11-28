@@ -79,7 +79,6 @@ func TestAStableIdentitySignsWithACertificateRequirement(t *testing.T) {
 	}
 }
 
-// A second install reuses the identity.
 func TestTwoInstallsReuseTheSameIdentity(t *testing.T) {
 	requireTooling(t)
 	signingFixture(t)
@@ -190,11 +189,7 @@ func TestAPackagedBundleCarriesTheStableSignature(t *testing.T) {
 	}
 }
 
-// A rebuild replaces every byte of the bundle. macOS keys the Accessibility and
-// Screen Recording grants on the requirement, not the bytes, so two builds of the
-// same source must name the same requirement - even though signing changes the
-// CDHash. A rebuild that rotated the identity would break this and ask the user
-// for both permissions again.
+// A rebuild must keep the requirement macOS keys the grant on, though the CDHash moves.
 func TestARebuildKeepsTheRequirementMacOSKeysTheGrantOn(t *testing.T) {
 	requireTooling(t)
 	signingFixture(t)

@@ -240,10 +240,7 @@ func ListMessages(store *TaskStore, conversationId string, query MessageQuery) [
 	return messages
 }
 
-// messageDurations maps each operation to the span from the first dispatch to the
-// last settlement of the invocations it ran. That span is the round's real
-// working time, so an answer keeps a measured duration instead of counting calls
-// or reading a wall clock.
+
 func messageDurations(store *TaskStore, conversationId string) map[string]int64 {
 	durations := map[string]int64{}
 	for _, row := range kernelRows(store.Db, `SELECT m.operation_id AS operationId,

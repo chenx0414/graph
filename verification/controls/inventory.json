@@ -298,12 +298,6 @@
       "feature": "F-11"
     },
     {
-      "name": "查找供应商",
-      "role": "textfield",
-      "page": "F-11",
-      "feature": "F-11"
-    },
-    {
       "name": "verify",
       "role": "button",
       "page": "F-12",
@@ -408,12 +402,6 @@
     },
     {
       "name": "打开 扩展自动更新",
-      "role": "button",
-      "page": "F-14",
-      "feature": "F-14"
-    },
-    {
-      "name": "管理供应商",
       "role": "button",
       "page": "F-14",
       "feature": "F-14"
@@ -582,12 +570,6 @@
     },
     {
       "name": "打开 扩展自动更新",
-      "role": "button",
-      "page": "rail-settings",
-      "feature": "rail-settings"
-    },
-    {
-      "name": "管理供应商",
       "role": "button",
       "page": "rail-settings",
       "feature": "rail-settings"

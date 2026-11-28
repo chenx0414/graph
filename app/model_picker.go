@@ -140,11 +140,7 @@ func (c *chatState) pickerDuplicate(model modelChoice) bool {
 	return false
 }
 
-// pickerRowLabel names a model in the picker. When more than one provider serves
-// the same short name the provider is part of the name: without it seven rows
-// read "deepseek-v4.1-flash" and no reader can tell which one runs. When one
-// provider serves the same short name under several ids, the id is the only thing
-// that separates them.
+// pickerRowLabel adds the provider, then the id, when a short name is shared.
 func (c *chatState) pickerRowLabel(model modelChoice) string {
 	name := shortModel(model.id)
 	if !c.pickerDuplicate(model) {
@@ -164,8 +160,7 @@ func (c *chatState) pickerRowLabel(model modelChoice) string {
 	return label
 }
 
-// modelChipLabel names the model in use, with the provider whenever the model
-// list holds more than one entry carrying that short name.
+// modelChipLabel names the model in use, with its provider when ambiguous.
 func (c *chatState) modelChipLabel() string {
 	if c.currentModel == "" {
 		return ""

@@ -21,9 +21,7 @@ func modelsInUseFixture(t *testing.T, phase, nodeStatus string) (*TaskStore, str
 	return store, "grok:grok-4.7"
 }
 
-// A model is in use while work that will use it can still run. A task whose
-// every node already succeeded will not run that model again, so holding it is
-// what made "remove grok:grok-4.7" impossible with no run in flight.
+// A task whose nodes all succeeded will not run the model again.
 func TestAModelIsNotInUseOnceEveryNodeThatBindsItSucceeded(t *testing.T) {
 	store, model := modelsInUseFixture(t, "idle", "succeeded")
 	runtime := &TaskRuntime{store: store, kernel: NewKernelStore(store)}
@@ -34,7 +32,6 @@ func TestAModelIsNotInUseOnceEveryNodeThatBindsItSucceeded(t *testing.T) {
 	}
 }
 
-// A node that has not finished still holds its model.
 func TestAModelIsInUseWhileANodeThatBindsItHasNotFinished(t *testing.T) {
 	store, model := modelsInUseFixture(t, "idle", "running")
 	runtime := &TaskRuntime{store: store, kernel: NewKernelStore(store)}

@@ -210,7 +210,7 @@ func (s *settingsState) view(ctx *ui.Context) {
 			if s.status != "" {
 				kit.Text(ctx, s.status, t.Text.Sm).TextColor(t.Muted)
 			}
-			s.pageHeading(ctx, "运行设置", "运行状态、源码版本与项目归档")
+			s.pageHeading(ctx, "运行设置")
 			rows := []func(){
 				func() {
 					s.settingRow(ctx, "运行模式", "这个 daemon 负责的事", func() { s.settingValue(ctx, s.rows.mode) })
@@ -268,18 +268,12 @@ func (s *settingsState) view(ctx *ui.Context) {
 	})
 }
 
-func (s *settingsState) pageHeading(ctx *ui.Context, title, sub string) {
+func (s *settingsState) pageHeading(ctx *ui.Context, title string) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	ui.Row(ctx).FillWidth().Gap(th.Space(4)).AlignItems(ui.End).Children(func() {
 		ui.Column(ctx).Grow(1).Shrink(1).Gap(6).Children(func() {
 			kit.Text(ctx, title, t.Text.Display).FontWeight(600)
-			if sub != "" {
-				kit.Text(ctx, sub, t.Text.Body).TextColor(t.Muted)
-			}
 		})
-		if kit.Button(ctx, "管理供应商", kit.ButtonOpts{Variant: kit.Outline, Size: kit.SizeSm}).Clicked() {
-			s.openProviders()
-		}
 	})
 }
 

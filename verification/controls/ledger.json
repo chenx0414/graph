@@ -212,7 +212,7 @@
       "page": "F-11",
       "action": "click",
       "journey": "F-11",
-      "step": 7,
+      "step": 5,
       "lanes": [
         "headless"
       ],
@@ -224,7 +224,7 @@
       "page": "F-11",
       "action": "click",
       "journey": "F-11",
-      "step": 9,
+      "step": 7,
       "lanes": [
         "headless"
       ],
@@ -237,18 +237,6 @@
       "action": "click",
       "journey": "F-04-conversation",
       "step": 2,
-      "lanes": [
-        "headless"
-      ],
-      "note": "derived from a green journey; kept by cover derive"
-    },
-    {
-      "name": "查找供应商",
-      "role": "textfield",
-      "page": "F-11",
-      "action": "type",
-      "journey": "F-11",
-      "step": 5,
       "lanes": [
         "headless"
       ],
@@ -440,19 +428,7 @@
       "page": "F-14",
       "action": "click",
       "journey": "F-14",
-      "step": 9,
-      "lanes": [
-        "headless"
-      ],
-      "note": "derived from a green journey; kept by cover derive"
-    },
-    {
-      "name": "管理供应商",
-      "role": "button",
-      "page": "F-14",
-      "action": "click",
-      "journey": "F-14",
-      "step": 5,
+      "step": 8,
       "lanes": [
         "headless"
       ],
@@ -711,18 +687,6 @@
       "action": "click",
       "journey": "ctl-settings",
       "step": 6,
-      "lanes": [
-        "headless"
-      ],
-      "note": "derived from a green journey; kept by cover derive"
-    },
-    {
-      "name": "管理供应商",
-      "role": "button",
-      "page": "rail-settings",
-      "action": "click",
-      "journey": "F-14",
-      "step": 5,
       "lanes": [
         "headless"
       ],

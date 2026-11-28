@@ -79,9 +79,7 @@ func roundPhaseOf(paused bool, master string, messages []transcriptMessage) roun
 	case "blocked":
 		return roundBlocked
 	case "succeeded", "done", "completed", "idle", "failed", "stopped", "cancelled", "retired":
-		// The master of this round has settled. A tool row that still says pending
-		// is the record catching up, not work in flight: counting it kept the
-		// composer on 暂停 with nothing left to pause.
+		// A settled master ends the round; a pending tool row is the record catching up.
 		return roundIdle
 	}
 	phase := roundIdle

@@ -4,11 +4,7 @@ import (
 	"testing"
 )
 
-// A task that has stopped or completed cannot run another turn, whatever its
-// master node last reported. This install has exactly that shape in the running
-// session: the task is stopped, the master is idle, and one tool message is still
-// marked pending - so the round read as running forever and the composer kept
-// offering 暂停 with nothing left to pause.
+// A stopped task with an idle master and a pending tool row is this install's shape.
 func TestAStoppedTaskDoesNotKeepThePauseAction(t *testing.T) {
 	state := &chatState{
 		roundMaster: "idle",
@@ -25,7 +21,6 @@ func TestAStoppedTaskDoesNotKeepThePauseAction(t *testing.T) {
 	}
 }
 
-// A master that is actually running still owns the pause action.
 func TestARunningMasterKeepsThePauseAction(t *testing.T) {
 	state := &chatState{
 		roundMaster: "running",
@@ -39,8 +34,7 @@ func TestARunningMasterKeepsThePauseAction(t *testing.T) {
 	}
 }
 
-// A master that already settled must not be counted as work to pause, even while
-// a tool row still says pending.
+// A settled master is not work to pause.
 func TestASucceededMasterDoesNotKeepThePauseAction(t *testing.T) {
 	state := &chatState{
 		roundMaster: "succeeded",

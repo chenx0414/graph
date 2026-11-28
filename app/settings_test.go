@@ -65,7 +65,7 @@ func TestSettingsPaneRendersAndArchivesAProject(t *testing.T) {
 	for frame := 0; frame < 3; frame++ {
 		render(tester)
 	}
-	for _, wanted := range []string{"运行设置", "运行状态、源码版本与项目归档", "管理供应商", "运行",
+	for _, wanted := range []string{"运行设置", "运行",
 		"运行模式", "execute", "配置版本", "42", "源码", "main@79a38ef0", "可用模型", "7 个", "默认模型", "deepseek",
 		"项目", "13-Graph", "ready", "归档的项目不再出现在会话列表里",
 		"凭据在「供应商」页管理 · 与 magpie 同一套"} {

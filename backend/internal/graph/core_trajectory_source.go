@@ -256,9 +256,6 @@ func trajectoryComposition(store *TaskStore, conversationId, taskId string) Traj
 		composition.SystemPrompt = estimateTrajectoryTokens(kernelString(operation["system_prompt"]))
 		composition.ToolDefinitions = estimateTrajectoryTokens(kernelString(operation["tool_declarations"]))
 	}
-	// /new discards the model's context. Everything before that reset is history
-	// the model can no longer see, so the composition starts from the newest reset
-	// instead of adding up the whole transcript.
 	rows := kernelRows(store.Db, `SELECT role,kind,text FROM messages WHERE conversation_id=? AND created_at > COALESCE((
         SELECT MAX(e.timestamp) FROM events e JOIN tasks t ON t.id=e.task_id
         WHERE t.conversation_id=? AND e.type='conversation.context_reset'),0)`, conversationId, conversationId)

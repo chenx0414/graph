@@ -107,8 +107,8 @@ func TestTheProviderSwitchIsReadOnlyBecauseMagpieOwnsIt(t *testing.T) {
 	shell.openModule("providers")
 	tester := frames(newTester(shell.view, 1440, 900))
 	providersFrameUntil(t, tester, func() bool { return len(shell.providers.entries) > 0 })
-	if !tester.HasText("开关在 Magpie 里") {
-		t.Fatalf("the page says where the switch lives, texts %q", tester.Texts())
+	if !tester.HasText("在 Magpie 里开关 ChatGPT") {
+		t.Fatalf("the row says where the switch lives, texts %q", tester.Texts())
 	}
 	if !tester.HasText("Magpie 开") {
 		t.Fatalf("a connected provider shows magpie's open state, texts %q", tester.Texts())
@@ -201,8 +201,8 @@ func TestTheProvidersPageDoesNotOfferFakeWriteActions(t *testing.T) {
 	if tester.HasText("账号打包") {
 		t.Fatalf("the magpie section stays read-only, texts %q", tester.Texts())
 	}
-	if !tester.HasText("供应商与账号都由 Magpie 管理") {
-		t.Fatalf("the page says who owns the magpie rows, texts %q", tester.Texts())
+	if !tester.HasText("在 Magpie 里开关 ChatGPT") {
+		t.Fatalf("the row says who owns it, texts %q", tester.Texts())
 	}
 }
 
