@@ -96,7 +96,7 @@ func KernelModelsInUse(kernel *KernelStore) []string {
     FROM kernel_nodes n JOIN tasks t ON t.id=n.task_id
     LEFT JOIN kernel_node_bindings b ON b.task_id=n.task_id AND b.node_id=n.node_id
     LEFT JOIN kernel_executions e ON e.rowid=(SELECT MAX(x.rowid) FROM kernel_executions x WHERE x.task_id=n.task_id AND x.node_id=n.node_id)
-    WHERE n.status!='retired' AND `+taskPhaseNotIn("t.phase", taskPhaseFinishedList()...))
+    WHERE n.status!='retired' AND n.status NOT IN ('succeeded','skipped') AND `+taskPhaseNotIn("t.phase", taskPhaseFinishedList()...))
 	for _, row := range rows {
 		configured := asMap(parseJSON(kernelString(row["spec"])))
 		if mapHas(configured, "model") && configured["model"] != nil {
