@@ -148,14 +148,21 @@ func codexActivities(run transcriptRun) []codexActivity {
 			if label == "" {
 				label = "tool"
 			}
-			text := label + "已完成"
+			line := label
+			if payload != "" {
+				line = label + " " + payload
+			}
+			text := "已调用 " + line
 			if running {
-				text = label + "运行中"
+				text = "正在调用 " + line
 			}
 			if cancelled {
-				text = label + "已取消"
+				text = "已取消调用 " + line
 			}
-			activities = append(activities, codexActivity{kind: "tool", text: text, label: codexActivityLabel(name), args: message.Data.Args, output: message.Data.Output, failure: message.Data.ErrorText, failed: message.Data.Error, cancelled: cancelled, key: message.Data.ToolCallID})
+			if message.Data.Error {
+				text = "调用失败 " + line
+			}
+			activities = append(activities, codexActivity{kind: "tool", text: text, label: codexActivityLabel(name), command: payload, args: message.Data.Args, output: message.Data.Output, failure: message.Data.ErrorText, failed: message.Data.Error, cancelled: cancelled, key: message.Data.ToolCallID})
 		}
 	}
 	flushCommands()
@@ -183,7 +190,7 @@ func commandFromArgs(args string) string {
 	if err := json.Unmarshal([]byte(trimmed), &values); err != nil {
 		return ""
 	}
-	for _, key := range []string{"command", "cmd", "path", "query", "url", "pattern"} {
+	for _, key := range []string{"command", "cmd", "path", "query", "url", "pattern", "code"} {
 		if value, ok := values[key].(string); ok && strings.TrimSpace(value) != "" {
 			return value
 		}

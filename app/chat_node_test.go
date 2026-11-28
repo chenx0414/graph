@@ -357,7 +357,7 @@ func TestNodeChatLoadsPastAToolOnlyTailUntilItFindsAMessage(t *testing.T) {
 	runs := state.chat.runs()
 	state.chat.expanded[runKey(runs[len(runs)-1])] = true
 	tester = frames(tester)
-	if !tester.HasText("tool运行中") {
+	if !tester.HasText("正在调用 tool tool tail") {
 		t.Fatalf("opening the run shows its running tool, texts %q", tester.Texts())
 	}
 }

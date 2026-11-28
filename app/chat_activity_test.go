@@ -20,7 +20,7 @@ func TestCodexActivitiesSummarizeAToolRun(t *testing.T) {
 		activityTool("graph_inspect", "graph_inspect: graph_inspect", "done"),
 	}}
 	activities := codexActivities(run)
-	want := []string{"已运行 echo hi; go test ./...", "已查看 1 张图像", "已编辑 app/main.go", "graph_inspect已完成"}
+	want := []string{"已运行 echo hi; go test ./...", "已查看 1 张图像", "已编辑 app/main.go", "已调用 graph_inspect graph_inspect"}
 	if len(activities) != len(want) {
 		t.Fatalf("activities %+v", activities)
 	}
@@ -135,7 +135,7 @@ func TestAToolRowShowsItsArgumentsAndReturnValue(t *testing.T) {
 		t.Fatalf("open the activity: %v", err)
 	}
 	tester = frames(tester)
-	if err := tester.Click("graph_inspect已完成"); err != nil {
+	if err := tester.Click("已调用 graph_inspect SELECT 1"); err != nil {
 		t.Fatalf("open the tool row: %v", err)
 	}
 	tester = frames(tester)
