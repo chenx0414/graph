@@ -39,7 +39,6 @@ func TestEveryPickerRowIsDistinctWhenProvidersShareAModelName(t *testing.T) {
 	}
 }
 
-
 func TestAnUnambiguousPickerRowStaysShort(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
 	state.models = []modelChoice{

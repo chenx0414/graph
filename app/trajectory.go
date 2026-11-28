@@ -221,7 +221,6 @@ func (s *shellState) refreshTrajectory() {
 	s.startTrajectory(path, true)
 }
 
-
 func (s *shellState) refreshTrajectoryAfterReset() {
 	state := &s.trajectory
 	path, key := trajectoryEndpoint(s.chatScope())

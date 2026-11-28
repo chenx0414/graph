@@ -240,7 +240,6 @@ func ListMessages(store *TaskStore, conversationId string, query MessageQuery) [
 	return messages
 }
 
-
 func messageDurations(store *TaskStore, conversationId string) map[string]int64 {
 	durations := map[string]int64{}
 	for _, row := range kernelRows(store.Db, `SELECT m.operation_id AS operationId,

@@ -4,8 +4,6 @@ import (
 	"testing"
 )
 
-
-
 func TestTheProvidersPageDropsTheSearchBoxAndTheExplainerLines(t *testing.T) {
 	server := magpieProvidersServer(t)
 	shell := newShellState(server.URL, "")
