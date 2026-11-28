@@ -189,3 +189,51 @@ func TestAPackagedBundleCarriesTheStableSignature(t *testing.T) {
 		t.Fatalf("the packaged bundle must verify: %v: %s", err, out)
 	}
 }
+
+// A rebuild replaces every byte of the bundle. macOS keys the Accessibility and
+// Screen Recording grants on the requirement, not the bytes, so two builds of the
+// same source must name the same requirement - even though signing changes the
+// CDHash. A rebuild that rotated the identity would break this and ask the user
+// for both permissions again.
+func TestARebuildKeepsTheRequirementMacOSKeysTheGrantOn(t *testing.T) {
+	requireTooling(t)
+	signingFixture(t)
+	rebuild := func() (string, string) {
+		scratch := t.TempDir()
+		bundle := filepath.Join(scratch, "Graph.app")
+		if err := os.MkdirAll(filepath.Join(bundle, "Contents", "MacOS"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		executable := filepath.Join(bundle, "Contents", "MacOS", "Graph")
+		machoBinary(t, executable)
+		requirement, err := SignPackagedApp(bundle)
+		if err != nil {
+			t.Fatalf("sign the rebuilt bundle: %v", err)
+		}
+		output, err := exec.Command("codesign", "-d", "--verbose=4", bundle).CombinedOutput()
+		if err != nil {
+			t.Fatalf("read the CDHash: %v: %s", err, output)
+		}
+		hash := ""
+		for _, line := range strings.Split(string(output), "\n") {
+			if strings.HasPrefix(line, "CDHash=") {
+				hash = strings.TrimPrefix(line, "CDHash=")
+			}
+		}
+		if hash == "" {
+			t.Fatalf("the bundle carries no CDHash: %s", output)
+		}
+		return requirement, hash
+	}
+	firstRequirement, firstHash := rebuild()
+	secondRequirement, secondHash := rebuild()
+	if firstHash == secondHash {
+		t.Fatalf("the two builds signed the same bytes (%s); this test cannot tell a rotating identity from a stable one", firstHash)
+	}
+	if firstRequirement != secondRequirement {
+		t.Fatalf("a rebuild changed the requirement macOS keys the grant on: %q, then %q", firstRequirement, secondRequirement)
+	}
+	if !SignatureIsStable(secondRequirement) {
+		t.Fatalf("the rebuilt bundle must name the certificate, got %q", secondRequirement)
+	}
+}
