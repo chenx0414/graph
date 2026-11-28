@@ -173,7 +173,7 @@ func (s *shellState) panelContextOverview(ctx *ui.Context) {
 	if known {
 		window = meta.contextWindow
 	}
-	card := ui.Column(ctx).FillWidth().PaddingEnd(th.Space(3)).Gap(th.Space(1.5))
+	card := ui.Column(ctx).FillWidth().Gap(th.Space(1.5))
 	card.Children(func() {
 		title := ui.Row(ctx).FillWidth().Gap(th.Space(2)).AlignItems(ui.Center)
 		title.Children(func() {

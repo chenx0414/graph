@@ -58,7 +58,7 @@ func nodeContextCardSubtitle(view nodeContextCardView) string {
 // state and invents nothing.
 func renderNodeContextCard(ctx *ui.Context, view nodeContextCardView) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
-	card := ui.Column(ctx).FillWidth().PaddingEnd(th.Space(3)).Gap(th.Space(1.5)).Label("节点上下文")
+	card := ui.Column(ctx).FillWidth().Gap(th.Space(1.5)).Label("节点上下文")
 	card.Children(func() {
 		title := ui.Row(ctx).FillWidth().Gap(th.Space(2)).AlignItems(ui.Center)
 		title.Children(func() {
